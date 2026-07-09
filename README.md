@@ -30,6 +30,8 @@ uv run oat-notes --no-file           # console only, skip the transcript file
 uv run oat-notes --wav clip.m4a      # transcribe a file (any format PyAV decodes)
 uv run oat-notes --debug             # show per-chunk transcription latency
 uv run oat-notes --model small.en    # swap whisper models
+uv run oat-notes --backend openvino  # offload to the Intel NPU (see below)
+uv run oat-notes --backend openvino --ov-device GPU   # or the Arc GPU
 ```
 
 Output, one line per speech chunk:
@@ -55,6 +57,25 @@ pipeline.py   capture → chunker thread → transcription worker → sink, via 
 ```
 
 Chunks carry a channel tag (`MIC`/`LOOPBACK`) and segments carry a `speaker` field from day one, so the dual-stream and attribution phases slot in without restructuring.
+
+## OpenVINO backend (NPU/GPU offload)
+
+Install the optional extra, then pick a device:
+
+```
+uv sync --extra openvino
+uv run oat-notes --backend openvino               # NPU (default)
+uv run oat-notes --backend openvino --ov-device GPU
+```
+
+Uses a pre-converted `OpenVINO/whisper-small.en-int8-ov` from HuggingFace (no torch/conversion toolchain), stored under `%LOCALAPPDATA%\oat-notes\models`. If the device rejects the model it falls back to OpenVINO-on-CPU. Benchmarks on a Core Ultra (11 s clip, distil-small.en vs whisper-small.en int8):
+
+| Backend | Load | Speed |
+|---|---|---|
+| faster-whisper CPU int8 | 1.4 s | 9× realtime |
+| OpenVINO **NPU** | 3.6 s | 21× realtime, CPU stays free |
+| OpenVINO GPU (Arc) | 18 s | 38× realtime |
+| OpenVINO CPU | 1.3 s | 18× realtime |
 
 ## Tests
 

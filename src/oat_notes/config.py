@@ -15,7 +15,9 @@ class Config:
     model_name: str = "distil-small.en"
     compute_type: str = "int8"
     language: str = "en"
-    backend: str = "faster_whisper"  # "openvino" reserved for the Phase 4 NPU port
+    backend: str = "faster_whisper"
+    openvino_model: str = "OpenVINO/whisper-small.en-int8-ov"
+    openvino_device: str = "NPU"
     debug: bool = False
 
     @property
