@@ -19,7 +19,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from .attribution import Attributor
@@ -32,6 +32,13 @@ from .vad import SileroVad
 
 Sink = Callable[[TranscriptSegment, float], None]
 """Receives each segment plus its latency (seconds behind live) at delivery."""
+
+
+@dataclass(frozen=True)
+class _Split:
+    """Control message: force a chunk boundary on one channel."""
+
+    channel: Channel
 
 
 class Pipeline:
@@ -73,6 +80,16 @@ class Pipeline:
         self._chunker_thread.join()
         self._worker_thread.join()
 
+    def split_channel(self, channel: Channel) -> None:
+        """Cut the in-flight chunk on ``channel`` right now (hotkey press).
+
+        Called from the hotkey listener thread; must never block it.
+        """
+        try:
+            self.frame_queue.put_nowait(_Split(channel))
+        except queue.Full:
+            pass
+
     def _run_chunker(self) -> None:
         while True:
             block = self.frame_queue.get()
@@ -83,6 +100,11 @@ class Pipeline:
                         self._chunk_queue.put(final_chunk)
                 self._chunk_queue.put(None)
                 return
+            if isinstance(block, _Split):
+                forced = self._chunkers[block.channel].split()
+                if forced is not None:
+                    self._chunk_queue.put(forced)
+                continue
             channel, timestamp, samples = block
             for chunk in self._chunkers[channel].push(timestamp, samples):
                 self._chunk_queue.put(chunk)

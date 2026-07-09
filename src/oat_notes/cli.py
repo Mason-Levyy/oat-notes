@@ -201,6 +201,9 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
 
             def on_switch(index: int) -> None:
                 switch_log.record(clock.now(), index)
+                # The press is a speaker boundary: cut the in-flight mic chunk
+                # so it transcribes now under the previous speaker.
+                pipeline.split_channel(Channel.MIC)
                 print(f"  → active speaker: {speakers[index]}", flush=True)
 
             hotkeys = HotkeyListener(len(speakers), on_switch)

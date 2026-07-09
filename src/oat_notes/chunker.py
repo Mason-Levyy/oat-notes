@@ -78,6 +78,17 @@ class VadChunker:
             return None
         return self._finalize()
 
+    def split(self) -> AudioChunk | None:
+        """Force a chunk boundary now — e.g. a speaker-switch hotkey.
+
+        The in-flight chunk is emitted immediately (it belongs to the
+        previous speaker) and a fresh chunk continues from the same instant,
+        so no 0.5 s pause is needed between speakers.
+        """
+        if not self._in_speech or not self._chunk_windows:
+            return None
+        return self._finalize(continue_speech=True)
+
     def _process_window(
         self, window_time: float, window: np.ndarray
     ) -> AudioChunk | None:
