@@ -23,6 +23,8 @@ uv run oat-notes --list-devices      # enumerate input devices (loopback endpoin
 uv run oat-notes --device-index 5    # pick a specific mic
 uv run oat-notes --loopback-index 10 # pick a specific loopback endpoint
 uv run oat-notes --seconds 30        # auto-stop (handy for testing)
+uv run oat-notes --out-dir D:\notes  # transcript folder (default: ./transcripts)
+uv run oat-notes --no-file           # console only, skip the transcript file
 uv run oat-notes --wav clip.m4a      # transcribe a file (any format PyAV decodes)
 uv run oat-notes --debug             # show per-chunk transcription latency
 uv run oat-notes --model small.en    # swap whisper models
@@ -34,6 +36,8 @@ Output, one line per speech chunk:
 [00:03:12] Me: Let's walk through the model assumptions.
 [00:03:28] Remote: The churn number looks high to me.
 ```
+
+On exit the session is also written to `transcripts/meeting_YYYY-MM-DD_HHMM.txt`, merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
 ## Architecture
 
