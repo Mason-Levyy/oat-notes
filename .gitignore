@@ -11,3 +11,6 @@ wheels/
 
 # Meeting transcripts (Phase 2 output)
 transcripts/
+
+# PyInstaller
+*.spec

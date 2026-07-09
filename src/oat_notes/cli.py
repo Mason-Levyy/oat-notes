@@ -10,13 +10,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .attribution import Attributor, SwitchLog
-from .capture import AudioCapture, find_default_loopback, list_input_devices
+from .capture import list_input_devices
 from .clock import SessionClock
 from .config import Config
-from .hotkeys import HotkeyListener
-from .output import MeetingLog, line_for
+from .output import MeetingLog, format_timestamp, line_for
 from .pipeline import Pipeline
+from .session import Session, SessionEvents, SessionOptions
 from .transcriber import create_transcriber
 from .types import AudioChunk, Channel, TranscriptSegment
 
@@ -101,6 +100,17 @@ def main() -> None:
     parser.add_argument(
         "--debug", action="store_true", help="show per-chunk transcription latency"
     )
+    parser.add_argument(
+        "--ui", action="store_true", help="launch the web UI instead of the console"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8737, help="web UI port (default: 8737)"
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="with --ui: don't open the browser automatically",
+    )
     args = parser.parse_args()
 
     if args.list_devices:
@@ -118,6 +128,12 @@ def main() -> None:
         config_overrides["openvino_model"] = args.ov_model
     config = Config(**config_overrides)
 
+    if args.ui:
+        from .server import serve
+
+        serve(config, args, open_browser=not args.no_browser)
+        return
+
     if config.backend == "openvino":
         print(
             f"Loading {config.openvino_model} on {config.openvino_device} (OpenVINO)",
@@ -134,22 +150,6 @@ def main() -> None:
         _run_live(args, config, transcriber)
 
 
-def _make_sink(
-    config: Config,
-    log: MeetingLog,
-    show_latency: bool = True,
-    label_channels: bool = False,
-):
-    def sink(segment: TranscriptSegment, latency: float) -> None:
-        log.add(segment)
-        line = line_for(segment, label_channels)
-        if config.debug and show_latency:
-            line += f"   (+{latency:.1f}s)"
-        print(line, flush=True)
-
-    return sink
-
-
 def _save_transcript(args: argparse.Namespace, log: MeetingLog, started_at: datetime) -> None:
     if args.no_file:
         return
@@ -160,10 +160,8 @@ def _save_transcript(args: argparse.Namespace, log: MeetingLog, started_at: date
     print(f"Transcript saved: {path}", flush=True)
 
 
-def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
-    import pyaudiowpatch as pyaudio
-
-    # Warm up so the first real chunk doesn't absorb lazy-init cost.
+def warm_up(config: Config, transcriber) -> None:
+    """One dummy transcription so the first real chunk isn't slowed by lazy init."""
     transcriber.transcribe(
         AudioChunk(
             samples=np.zeros(config.sample_rate // 2, dtype=np.float32),
@@ -173,103 +171,66 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         )
     )
 
-    started_at = datetime.now()
-    clock = SessionClock()
-    pa = pyaudio.PyAudio()
+
+def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
+    warm_up(config, transcriber)
+    speakers = tuple(
+        name.strip() for name in (args.speakers or "").split(",") if name.strip()
+    )
+
+    def print_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
+        prefix = f"{label}: " if label else ""
+        line = f"[{format_timestamp(segment.start)}] {prefix}{segment.text}"
+        if config.debug:
+            line += f"   (+{latency:.1f}s)"
+        print(line, flush=True)
+
+    def print_speaker(index: int) -> None:
+        print(f"  → active speaker: {speakers[index]}", flush=True)
+
+    session = Session(
+        config,
+        SessionOptions(
+            speakers=speakers,
+            remote_name=args.remote_name,
+            use_loopback=not args.no_loopback,
+            device_index=args.device_index,
+            loopback_index=args.loopback_index,
+            out_dir=args.out_dir,
+            save_file=not args.no_file,
+        ),
+        transcriber,
+        SessionEvents(on_segment=print_segment, on_speaker=print_speaker),
+    )
+    session.start()
+    for capture in session.captures:
+        role = "Me" if capture.channel is Channel.MIC else "Remote"
+        print(f"{role:>6}: {capture.device_name}", flush=True)
+    if len(speakers) > 1:
+        mapping = "  ".join(
+            f"[{number}] {name}" for number, name in enumerate(speakers, start=1)
+        )
+        print(f"Speakers: {mapping} — press the number key to switch", flush=True)
+        print(f"Active speaker: {speakers[0]}", flush=True)
+    print("Listening — Ctrl+C to stop\n", flush=True)
+
+    deadline = time.monotonic() + args.seconds if args.seconds else None
     try:
-        loopback_info = None
-        if not args.no_loopback:
-            if args.loopback_index is not None:
-                loopback_info = pa.get_device_info_by_index(args.loopback_index)
-            else:
-                loopback_info = find_default_loopback(pa)
-                if loopback_info is None:
-                    print(
-                        "warning: no loopback device found — capturing mic only",
-                        file=sys.stderr,
-                    )
-
-        channels = (
-            (Channel.MIC, Channel.LOOPBACK) if loopback_info else (Channel.MIC,)
+        while deadline is None or time.monotonic() < deadline:
+            time.sleep(0.2)
+    except KeyboardInterrupt:
+        pass
+    print("\nStopping…", flush=True)
+    saved = session.stop()
+    if saved is not None:
+        print(f"Transcript saved: {saved}", flush=True)
+    elif not args.no_file:
+        print("No speech detected — no transcript written.", flush=True)
+    if session.dropped_blocks:
+        print(
+            f"warning: dropped {session.dropped_blocks} audio blocks",
+            file=sys.stderr,
         )
-        speakers = (
-            [name.strip() for name in args.speakers.split(",") if name.strip()]
-            if args.speakers
-            else []
-        )
-        switch_log = SwitchLog()
-        attributor = None
-        if speakers or args.remote_name:
-            attributor = Attributor(speakers, switch_log, args.remote_name)
-
-        log = MeetingLog(label_channels=len(channels) > 1)
-        pipeline = Pipeline(
-            config,
-            clock,
-            transcriber,
-            _make_sink(config, log, label_channels=len(channels) > 1),
-            channels=channels,
-            attributor=attributor,
-        )
-
-        captures = [
-            AudioCapture(
-                pa, args.device_index, Channel.MIC, clock, config,
-                pipeline.frame_queue,
-            )
-        ]
-        if loopback_info is not None:
-            captures.append(
-                AudioCapture(
-                    pa, int(loopback_info["index"]), Channel.LOOPBACK, clock,
-                    config, pipeline.frame_queue,
-                )
-            )
-
-        hotkeys = None
-        if len(speakers) > 1:
-
-            def on_switch(index: int) -> None:
-                switch_log.record(clock.now(), index)
-                # The press is a speaker boundary: cut the in-flight mic chunk
-                # so it transcribes now under the previous speaker.
-                pipeline.split_channel(Channel.MIC)
-                print(f"  → active speaker: {speakers[index]}", flush=True)
-
-            hotkeys = HotkeyListener(len(speakers), on_switch)
-            hotkeys.start()
-
-        pipeline.start()
-        for capture in captures:
-            capture.start()
-            role = "Me" if capture.channel is Channel.MIC else "Remote"
-            print(f"{role:>6}: {capture.device_name}", flush=True)
-        if len(speakers) > 1:
-            mapping = "  ".join(
-                f"[{number}] {name}" for number, name in enumerate(speakers, start=1)
-            )
-            print(f"Speakers: {mapping} — press the number key to switch", flush=True)
-            print(f"Active speaker: {speakers[0]}", flush=True)
-        print("Listening — Ctrl+C to stop\n", flush=True)
-
-        deadline = time.monotonic() + args.seconds if args.seconds else None
-        try:
-            while deadline is None or time.monotonic() < deadline:
-                time.sleep(0.2)
-        except KeyboardInterrupt:
-            pass
-        print("\nStopping…", flush=True)
-        if hotkeys is not None:
-            hotkeys.stop()
-        for capture in captures:
-            capture.stop()
-        pipeline.finish()
-        _save_transcript(args, log, started_at)
-        dropped = sum(capture.dropped_blocks for capture in captures)
-        if dropped:
-            print(f"warning: dropped {dropped} audio blocks", file=sys.stderr)
-    finally:
-        pa.terminate()
 
 
 def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
@@ -283,9 +244,12 @@ def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
     started_at = datetime.now()
     clock = SessionClock()
     log = MeetingLog(label_channels=False)
-    pipeline = Pipeline(
-        config, clock, transcriber, _make_sink(config, log, show_latency=False)
-    )
+
+    def sink(segment: TranscriptSegment, latency: float) -> None:
+        log.add(segment)
+        print(line_for(segment, label_channels=False), flush=True)
+
+    pipeline = Pipeline(config, clock, transcriber, sink)
     pipeline.start()
     block_size = 4096
     for offset in range(0, samples.size, block_size):

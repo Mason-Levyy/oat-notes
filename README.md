@@ -2,7 +2,15 @@
 
 Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
-**Current state:** live mic + system-audio loopback → timestamped console transcript with `Me:` / `Remote:` labels. On a Zoom/Teams call, the remote side is captured from the loopback of your output device — no mic pickup needed. Wear headphones, or the mic will also hear the remote speaker and produce duplicate lines. Later phases add hotkey speaker attribution for in-person meetings, an end-of-meeting `.txt` writer, an OpenVINO/NPU backend, and a UI + packaging.
+Live mic + system-audio loopback → timestamped transcript with speaker labels, in the console or a local 8-bit web UI. On a Zoom/Teams call, the remote side is captured from the loopback of your output device — no mic pickup needed. Wear headphones, or the mic will also hear the remote speaker and produce duplicate lines.
+
+## Web UI
+
+```
+uv run oat-notes --ui
+```
+
+Opens `http://127.0.0.1:8737`: enter in-person speakers and a remote name, START MEETING, and the transcript streams onto the screen live. Speaker chips (P1/P2/…) switch the mic owner with a click — or the global 1..N hotkeys, which stay live and keep the UI in sync. END MEETING writes the `.txt` and shows the path. `--port` and `--no-browser` available.
 
 ## Setup
 
@@ -52,8 +60,12 @@ capture.py    WASAPI capture (pyaudiowpatch); callback only stamps + enqueues
 clock.py      one monotonic session clock — all timestamps stamped at capture
 vad.py        streaming Silero VAD (ONNX model bundled with faster-whisper)
 chunker.py    state machine: split at 0.5s silence, force-split at 15s, drop blips
-transcriber.py  Transcriber ABC + faster-whisper backend (OpenVINO slot reserved)
+transcriber.py  Transcriber ABC + faster-whisper and OpenVINO backends
 pipeline.py   capture → chunker thread → transcription worker → sink, via queues
+attribution.py  switch log + majority-overlap speaker attribution
+hotkeys.py    global 1..N listener (session-scoped)
+session.py    one meeting: capture + pipeline + attribution + transcript log
+server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
 ```
 
 Chunks carry a channel tag (`MIC`/`LOOPBACK`) and segments carry a `speaker` field from day one, so the dual-stream and attribution phases slot in without restructuring.
@@ -76,6 +88,14 @@ Uses a pre-converted `OpenVINO/whisper-small.en-int8-ov` from HuggingFace (no to
 | OpenVINO **NPU** | 3.6 s | 21× realtime, CPU stays free |
 | OpenVINO GPU (Arc) | 18 s | 38× realtime |
 | OpenVINO CPU | 1.3 s | 18× realtime |
+
+## Packaged exe
+
+```
+.\scripts\build_exe.ps1
+```
+
+Produces `dist\oat-notes.exe` (PyInstaller onefile, console app). Double-click → web UI opens; all CLI flags work too. Model weights download to the user cache on first run so the exe stays smaller. The OpenVINO backend is excluded from the exe — run from source for NPU transcription.
 
 ## Tests
 

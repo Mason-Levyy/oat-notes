@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oat-notes</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23F0A63C'/><rect x='4' y='4' width='8' height='8' fill='%231A1A1A'/></svg>">
+<style>
+@font-face {
+  font-family: "Pixel";
+  src: url("/pixel.woff2") format("woff2");
+  font-display: swap;
+}
+:root {
+  --paper: #EDE8DD;
+  --ink: #1A1A1A;
+  --oat: #F0A63C;
+  --oat-dark: #B87A1E;
+  --oat-light: #F7D08A;
+  --rec: #E5484D;
+  --sprout: #2E9E5B;
+  --screen: #0F380F;
+  --screen-dim: #55794A;
+  --screen-mid: #9BBC0F;
+  --screen-hi: #E0F8D0;
+  --px: 4px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 15px;
+  min-height: 100vh;
+  padding: 20px;
+}
+.pixel { font-family: "Pixel", Consolas, monospace; font-size: 10px; line-height: 1.6; }
+
+.console {
+  max-width: 1060px;
+  margin: 0 auto;
+  border: 3px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--ink);
+  background: var(--paper);
+}
+
+/* ---------- header ---------- */
+.header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 3px solid var(--ink);
+}
+.sprite {
+  width: var(--px); height: var(--px);
+  margin: calc(var(--px) * 1) calc(var(--px) * 5) calc(var(--px) * 8) calc(var(--px) * 1);
+  background: transparent;
+  box-shadow:
+    calc(var(--px)*2) 0 var(--oat),
+    calc(var(--px)*1) calc(var(--px)*1) var(--oat-light), calc(var(--px)*2) calc(var(--px)*1) var(--oat), calc(var(--px)*3) calc(var(--px)*1) var(--oat),
+    0 calc(var(--px)*2) var(--oat-light), calc(var(--px)*1) calc(var(--px)*2) var(--oat), calc(var(--px)*2) calc(var(--px)*2) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*2) var(--oat), calc(var(--px)*4) calc(var(--px)*2) var(--oat),
+    0 calc(var(--px)*3) var(--oat), calc(var(--px)*1) calc(var(--px)*3) var(--oat), calc(var(--px)*2) calc(var(--px)*3) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*3) var(--oat), calc(var(--px)*4) calc(var(--px)*3) var(--oat),
+    0 calc(var(--px)*4) var(--oat), calc(var(--px)*1) calc(var(--px)*4) var(--oat), calc(var(--px)*2) calc(var(--px)*4) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*4) var(--oat), calc(var(--px)*4) calc(var(--px)*4) var(--oat),
+    calc(var(--px)*1) calc(var(--px)*5) var(--oat), calc(var(--px)*2) calc(var(--px)*5) var(--oat), calc(var(--px)*3) calc(var(--px)*5) var(--oat),
+    calc(var(--px)*2) calc(var(--px)*6) var(--oat-dark);
+}
+.wordmark { font-size: 14px; letter-spacing: 1px; }
+.header .badges { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.badge {
+  border: 2px solid var(--ink);
+  padding: 4px 8px;
+  font-size: 8px;
+  background: #fff;
+}
+.badge.backend { background: var(--oat-light); }
+.power {
+  border: 2px solid var(--ink); background: #fff;
+  padding: 4px 8px; font-size: 8px; cursor: pointer;
+  font-family: "Pixel", Consolas, monospace;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+.power:active { transform: translate(2px, 2px); box-shadow: none; }
+
+/* ---------- layout ---------- */
+.body { display: flex; }
+.rail {
+  width: 300px; flex: none;
+  padding: 18px;
+  border-right: 3px solid var(--ink);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.stage { flex: 1; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* ---------- setup form ---------- */
+.field label { display: block; font-size: 8px; margin-bottom: 6px; }
+.field input[type="text"] {
+  width: 100%;
+  border: 3px solid var(--ink);
+  background: #fff;
+  font-family: Consolas, monospace;
+  font-size: 15px;
+  padding: 8px;
+}
+.field input[type="text"]:focus { outline: 3px solid var(--oat); outline-offset: 0; }
+.hint { font-size: 12px; color: #6b6558; margin-top: 5px; }
+.check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 8px; }
+.check input { position: absolute; opacity: 0; }
+.check .box {
+  width: 18px; height: 18px; flex: none;
+  border: 3px solid var(--ink); background: #fff;
+}
+.check input:checked + .box { background: var(--sprout); box-shadow: inset 0 0 0 3px #fff; }
+.check input:focus-visible + .box { outline: 3px solid var(--oat); }
+
+.btn {
+  font-family: "Pixel", Consolas, monospace;
+  font-size: 12px;
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 14px;
+  cursor: pointer;
+  width: 100%;
+  text-align: center;
+}
+.btn:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
+.btn:focus-visible { outline: 3px solid var(--oat); outline-offset: 2px; }
+.btn.start { background: var(--oat); }
+.btn.stop { background: var(--rec); color: #fff; display: none; }
+
+/* ---------- live session rail ---------- */
+.live { display: none; flex-direction: column; gap: 16px; }
+.counter { font-size: 20px; text-align: center; padding: 10px 0; }
+.rec-row { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 10px; }
+.rec-dot {
+  width: 12px; height: 12px; background: var(--rec);
+  animation: blink 1s steps(2, start) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.players { display: flex; flex-direction: column; gap: 8px; }
+.chip {
+  display: flex; align-items: center; gap: 10px;
+  border: 3px solid var(--ink);
+  background: #fff;
+  padding: 10px;
+  font-family: "Pixel", Consolas, monospace;
+  font-size: 9px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.chip:focus-visible { outline: 3px solid var(--oat); }
+.chip .slot { font-size: 8px; color: #6b6558; flex: none; }
+.chip .dot { width: 10px; height: 10px; margin-left: auto; flex: none; visibility: hidden; }
+.chip.active { background: var(--oat); box-shadow: 3px 3px 0 var(--ink); }
+.chip.active .slot { color: var(--ink); }
+.chip.active .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
+.chip.remote { cursor: default; }
+.chip.remote .slot { color: var(--sprout); }
+
+/* ---------- screen ---------- */
+.statusline { font-size: 8px; min-height: 14px; }
+.statusline .saved { color: var(--sprout); }
+.screen {
+  flex: 1;
+  background: var(--screen);
+  border: 3px solid var(--ink);
+  box-shadow: inset 0 0 0 4px #234323;
+  padding: 16px;
+  overflow-y: auto;
+  min-height: 420px;
+  max-height: 68vh;
+  color: var(--screen-mid);
+  line-height: 1.75;
+}
+.screen .empty {
+  height: 100%; min-height: 380px;
+  display: flex; flex-direction: column; gap: 18px;
+  align-items: center; justify-content: center;
+  color: var(--screen-dim);
+  font-size: 10px;
+  text-align: center;
+}
+.line { word-wrap: break-word; }
+.line .t { color: var(--screen-dim); }
+.line .who { color: var(--screen-hi); font-weight: bold; }
+.cursor {
+  display: inline-block; width: 9px; height: 16px;
+  background: var(--screen-mid); vertical-align: text-bottom;
+  animation: blink 1.1s steps(2, start) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rec-dot, .chip.active .dot, .cursor { animation: none; }
+}
+@media (max-width: 760px) {
+  body { padding: 8px; }
+  .body { flex-direction: column; }
+  .rail { width: 100%; border-right: none; border-bottom: 3px solid var(--ink); }
+  .screen { min-height: 300px; }
+}
+</style>
+</head>
+<body>
+<div class="console">
+  <header class="header">
+    <div class="sprite" aria-hidden="true"></div>
+    <div class="wordmark pixel">OAT-NOTES</div>
+    <div class="badges">
+      <span class="badge pixel backend" id="backend-badge">CPU</span>
+      <button class="power" id="quit-btn" title="Shut down oat-notes">OFF</button>
+    </div>
+  </header>
+
+  <div class="body">
+    <aside class="rail">
+      <form id="setup" autocomplete="off">
+        <div class="field" style="margin-bottom:16px">
+          <label class="pixel" for="speakers">IN-PERSON SPEAKERS</label>
+          <input type="text" id="speakers" placeholder="Mason, Sarah">
+          <div class="hint">Comma-separated. Keys 1–9 or a click switch who has the mic.</div>
+        </div>
+        <div class="field" style="margin-bottom:16px">
+          <label class="pixel" for="remote">REMOTE NAME</label>
+          <input type="text" id="remote" placeholder="Priya">
+          <div class="hint">Labels the Zoom / Teams side.</div>
+        </div>
+        <label class="check" style="margin-bottom:16px">
+          <input type="checkbox" id="loopback" checked>
+          <span class="box"></span>
+          CAPTURE SYSTEM AUDIO
+        </label>
+        <button type="submit" class="btn start" id="start-btn">&#9654; START MEETING</button>
+      </form>
+
+      <div class="live" id="live">
+        <div class="rec-row pixel"><span class="rec-dot"></span> REC</div>
+        <div class="counter pixel" id="counter">00:00:00</div>
+        <div class="players" id="players"></div>
+        <button class="btn stop" id="stop-btn" style="display:block">&#9632; END MEETING</button>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div class="statusline pixel" id="statusline"></div>
+      <div class="screen" id="screen" aria-live="polite">
+        <div class="empty pixel" id="empty">
+          <div id="empty-title">INSERT MEETING</div>
+          <div id="empty-sub">&#9654; PRESS START</div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let state = { recording: false, speakers: [], active_speaker: 0, elapsed: 0 };
+let sessionEpoch = null;
+let tick = null;
+
+function post(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  }).then((r) => r.json());
+}
+
+function fmt(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = String(Math.floor(s / 3600)).padStart(2, "0");
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const sec = String(s % 60).padStart(2, "0");
+  return `${h}:${m}:${sec}`;
+}
+
+function addLine(line) {
+  $("empty").style.display = "none";
+  const div = document.createElement("div");
+  div.className = "line";
+  const who = line.label ? `<span class="who">${escapeHtml(line.label)}:</span> ` : "";
+  div.innerHTML = `<span class="t">[${line.time}]</span> ${who}${escapeHtml(line.text)}`;
+  const screen = $("screen");
+  const cursor = $("live-cursor");
+  screen.insertBefore(div, cursor);
+  const nearBottom = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 120;
+  if (nearBottom) screen.scrollTop = screen.scrollHeight;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderPlayers() {
+  const players = $("players");
+  players.innerHTML = "";
+  state.speakers.forEach((name, index) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip" + (index === state.active_speaker ? " active" : "");
+    chip.innerHTML = `<span class="slot">P${index + 1}</span> ${escapeHtml(name.toUpperCase())} <span class="dot"></span>`;
+    chip.onclick = () => post("/api/switch", { index });
+    players.appendChild(chip);
+  });
+  if (state.channels && state.channels.includes("loopback")) {
+    const chip = document.createElement("div");
+    chip.className = "chip remote";
+    const remoteName = (state.remote_name || $("remote").value.trim() || "REMOTE").toUpperCase();
+    chip.innerHTML = `<span class="slot">&#9741;</span> ${escapeHtml(remoteName)}`;
+    players.appendChild(chip);
+  }
+}
+
+function setRecording(recording) {
+  state.recording = recording;
+  $("setup").style.display = recording ? "none" : "block";
+  $("live").style.display = recording ? "flex" : "none";
+  $("empty-title").textContent = recording ? "LISTENING" : "INSERT MEETING";
+  $("empty-sub").innerHTML = recording ? "&#9210; SPEAK AND LINES APPEAR" : "&#9654; PRESS START";
+  let cursor = $("live-cursor");
+  if (recording) {
+    if (!cursor) {
+      cursor = document.createElement("span");
+      cursor.id = "live-cursor";
+      cursor.className = "cursor";
+      $("screen").appendChild(cursor);
+    }
+    if (!tick) tick = setInterval(() => {
+      if (sessionEpoch !== null) $("counter").textContent = fmt((Date.now() - sessionEpoch) / 1000);
+    }, 500);
+  } else {
+    if (cursor) cursor.remove();
+    clearInterval(tick);
+    tick = null;
+    sessionEpoch = null;
+  }
+}
+
+function applyState(s) {
+  state = Object.assign(state, s);
+  $("backend-badge").textContent = (s.backend || "cpu").replace("faster_whisper", "CPU").replace("openvino", "NPU/OV").toUpperCase();
+  if (s.recording) {
+    sessionEpoch = Date.now() - (s.elapsed || 0) * 1000;
+    $("screen").querySelectorAll(".line").forEach((el) => el.remove());
+    (s.lines || []).forEach(addLine);
+  }
+  if (s.last_saved) {
+    $("statusline").innerHTML = `<span class="saved">SAVED &#9654; ${escapeHtml(s.last_saved)}</span>`;
+  }
+  setRecording(!!s.recording);
+  if (s.recording) renderPlayers();
+}
+
+$("setup").onsubmit = (event) => {
+  event.preventDefault();
+  const speakers = $("speakers").value.split(",").map((s) => s.trim()).filter(Boolean);
+  $("statusline").textContent = "";
+  post("/api/start", {
+    speakers,
+    remote_name: $("remote").value.trim(),
+    loopback: $("loopback").checked,
+  }).then(applyState);
+};
+
+$("stop-btn").onclick = () => post("/api/stop").then(applyState);
+
+$("quit-btn").onclick = () => {
+  post("/api/quit").catch(() => {});
+  document.body.innerHTML = '<div class="pixel" style="padding:60px;text-align:center">POWERED OFF</div>';
+};
+
+const events = new EventSource("/api/events");
+events.onmessage = (message) => {
+  const event = JSON.parse(message.data);
+  if (event.type === "line") addLine(event);
+  else if (event.type === "speaker") {
+    state.active_speaker = event.index;
+    renderPlayers();
+  } else if (event.type === "status") {
+    fetch("/api/state").then((r) => r.json()).then(applyState);
+  }
+};
+
+fetch("/api/state").then((r) => r.json()).then(applyState);
+</script>
+</body>
+</html>
