@@ -50,18 +50,21 @@ body {
   padding: 14px 18px;
   border-bottom: 3px solid var(--ink);
 }
+/* An oat groat at 45 degrees: slender spindle from bottom-left to top-right,
+   pointed tips, lengthwise groove (dark), sun side highlighted (light). */
 .sprite {
   width: var(--px); height: var(--px);
-  margin: calc(var(--px) * 1) calc(var(--px) * 5) calc(var(--px) * 8) calc(var(--px) * 1);
+  margin: 0 calc(var(--px) * 8) calc(var(--px) * 8) 0;
   background: transparent;
   box-shadow:
-    calc(var(--px)*2) 0 var(--oat),
-    calc(var(--px)*1) calc(var(--px)*1) var(--oat-light), calc(var(--px)*2) calc(var(--px)*1) var(--oat), calc(var(--px)*3) calc(var(--px)*1) var(--oat),
-    0 calc(var(--px)*2) var(--oat-light), calc(var(--px)*1) calc(var(--px)*2) var(--oat), calc(var(--px)*2) calc(var(--px)*2) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*2) var(--oat), calc(var(--px)*4) calc(var(--px)*2) var(--oat),
-    0 calc(var(--px)*3) var(--oat), calc(var(--px)*1) calc(var(--px)*3) var(--oat), calc(var(--px)*2) calc(var(--px)*3) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*3) var(--oat), calc(var(--px)*4) calc(var(--px)*3) var(--oat),
-    0 calc(var(--px)*4) var(--oat), calc(var(--px)*1) calc(var(--px)*4) var(--oat), calc(var(--px)*2) calc(var(--px)*4) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*4) var(--oat), calc(var(--px)*4) calc(var(--px)*4) var(--oat),
-    calc(var(--px)*1) calc(var(--px)*5) var(--oat), calc(var(--px)*2) calc(var(--px)*5) var(--oat), calc(var(--px)*3) calc(var(--px)*5) var(--oat),
-    calc(var(--px)*2) calc(var(--px)*6) var(--oat-dark);
+    calc(var(--px)*8) calc(var(--px)*1) var(--oat),
+    calc(var(--px)*7) calc(var(--px)*2) var(--oat), calc(var(--px)*5) calc(var(--px)*2) var(--oat-light),
+    calc(var(--px)*6) calc(var(--px)*3) var(--oat-dark), calc(var(--px)*4) calc(var(--px)*3) var(--oat-light),
+    calc(var(--px)*7) calc(var(--px)*4) var(--oat), calc(var(--px)*5) calc(var(--px)*4) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*4) var(--oat-light),
+    calc(var(--px)*6) calc(var(--px)*5) var(--oat), calc(var(--px)*4) calc(var(--px)*5) var(--oat-dark), calc(var(--px)*2) calc(var(--px)*5) var(--oat),
+    calc(var(--px)*5) calc(var(--px)*6) var(--oat), calc(var(--px)*3) calc(var(--px)*6) var(--oat-dark), calc(var(--px)*1) calc(var(--px)*6) var(--oat),
+    calc(var(--px)*4) calc(var(--px)*7) var(--oat), calc(var(--px)*2) calc(var(--px)*7) var(--oat-dark),
+    calc(var(--px)*3) calc(var(--px)*8) var(--oat), calc(var(--px)*1) calc(var(--px)*8) var(--oat);
 }
 .wordmark { font-size: 14px; letter-spacing: 1px; }
 .header .badges { margin-left: auto; display: flex; gap: 8px; align-items: center; }
@@ -154,8 +157,11 @@ body {
 .chip.active { background: var(--oat); box-shadow: 3px 3px 0 var(--ink); }
 .chip.active .slot { color: var(--ink); }
 .chip.active .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
-.chip.remote { cursor: default; }
 .chip.remote .slot { color: var(--sprout); }
+.chip.active-remote { background: var(--sprout); color: #fff; box-shadow: 3px 3px 0 var(--ink); }
+.chip.active-remote .slot { color: #fff; }
+.chip.active-remote .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
+.chip.fallback { cursor: default; }
 
 /* ---------- screen ---------- */
 .statusline { font-size: 8px; min-height: 14px; }
@@ -215,14 +221,14 @@ body {
     <aside class="rail">
       <form id="setup" autocomplete="off">
         <div class="field" style="margin-bottom:16px">
-          <label class="pixel" for="speakers">IN-PERSON SPEAKERS</label>
-          <input type="text" id="speakers" placeholder="Mason, Sarah">
-          <div class="hint">Comma-separated. Keys 1–9 or a click switch who has the mic.</div>
+          <label class="pixel" for="mname">MEETING NAME</label>
+          <input type="text" id="mname" placeholder="stand-up">
+          <div class="hint">Names the transcript file.</div>
         </div>
         <div class="field" style="margin-bottom:16px">
-          <label class="pixel" for="remote">REMOTE NAME</label>
-          <input type="text" id="remote" placeholder="Priya">
-          <div class="hint">Labels the Zoom / Teams side.</div>
+          <label class="pixel" for="speakers">SPEAKERS</label>
+          <input type="text" id="speakers" placeholder="Mason, Sarah, Priya*, Dev*">
+          <div class="hint">One row, comma-separated; <b>*</b> marks who's on the call. Keys 1–9 or a click switch the active speaker.</div>
         </div>
         <label class="check" style="margin-bottom:16px">
           <input type="checkbox" id="loopback" checked>
@@ -255,7 +261,7 @@ body {
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-let state = { recording: false, speakers: [], active_speaker: 0, elapsed: 0 };
+let state = { recording: false, speakers: [], actives: { mic: null, loopback: null }, elapsed: 0 };
 let sessionEpoch = null;
 let tick = null;
 
@@ -297,19 +303,27 @@ function escapeHtml(text) {
 function renderPlayers() {
   const players = $("players");
   players.innerHTML = "";
-  state.speakers.forEach((name, index) => {
+  state.speakers.forEach((speaker, index) => {
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className = "chip" + (index === state.active_speaker ? " active" : "");
-    chip.innerHTML = `<span class="slot">P${index + 1}</span> ${escapeHtml(name.toUpperCase())} <span class="dot"></span>`;
+    let cls = "chip";
+    if (speaker.remote) {
+      cls += " remote";
+      if (index === state.actives.loopback) cls += " active-remote";
+    } else if (index === state.actives.mic) {
+      cls += " active";
+    }
+    chip.className = cls;
+    const slot = speaker.remote ? "&#9741;" : `P${index + 1}`;
+    chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
     players.appendChild(chip);
   });
-  if (state.channels && state.channels.includes("loopback")) {
+  const hasRemoteSpeaker = state.speakers.some((speaker) => speaker.remote);
+  if (!hasRemoteSpeaker && state.channels && state.channels.includes("loopback")) {
     const chip = document.createElement("div");
-    chip.className = "chip remote";
-    const remoteName = (state.remote_name || $("remote").value.trim() || "REMOTE").toUpperCase();
-    chip.innerHTML = `<span class="slot">&#9741;</span> ${escapeHtml(remoteName)}`;
+    chip.className = "chip remote fallback";
+    chip.innerHTML = `<span class="slot">&#9741;</span> REMOTE`;
     players.appendChild(chip);
   }
 }
@@ -356,11 +370,18 @@ function applyState(s) {
 
 $("setup").onsubmit = (event) => {
   event.preventDefault();
-  const speakers = $("speakers").value.split(",").map((s) => s.trim()).filter(Boolean);
+  const speakers = $("speakers").value.split(",")
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map((raw) => ({
+      name: raw.replace(/\*+$/, "").trim(),
+      remote: raw.endsWith("*"),
+    }))
+    .filter((speaker) => speaker.name);
   $("statusline").textContent = "";
   post("/api/start", {
+    name: $("mname").value.trim(),
     speakers,
-    remote_name: $("remote").value.trim(),
     loopback: $("loopback").checked,
   }).then(applyState);
 };
@@ -377,7 +398,7 @@ events.onmessage = (message) => {
   const event = JSON.parse(message.data);
   if (event.type === "line") addLine(event);
   else if (event.type === "speaker") {
-    state.active_speaker = event.index;
+    state.actives[event.channel] = event.index;
     renderPlayers();
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);

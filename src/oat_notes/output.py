@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 
 from .types import Channel, TranscriptSegment
 
 CHANNEL_LABELS = {Channel.MIC: "Me", Channel.LOOPBACK: "Remote"}
+
+
+def slugify(name: str) -> str:
+    """Filesystem-safe file stem: ``"Stand-up Meeting!"`` → ``stand-up-meeting``."""
+    slug = re.sub(r"[^\w\-]+", "-", name.strip().lower()).strip("-")
+    return slug or "meeting"
 
 
 def format_timestamp(seconds: float) -> str:
@@ -48,9 +55,12 @@ class MeetingLog:
     def is_empty(self) -> bool:
         return not self._segments
 
-    def save(self, directory: Path, started_at: datetime) -> Path:
+    def save(
+        self, directory: Path, started_at: datetime, name: str = "meeting"
+    ) -> Path:
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / started_at.strftime("meeting_%Y-%m-%d_%H%M.txt")
+        stem = f"{slugify(name)}_{started_at:%Y-%m-%d_%H%M}"
+        path = directory / f"{stem}.txt"
         ordered = sorted(self._segments, key=lambda segment: segment.start)
         lines = [line_for(segment, self._label_channels) for segment in ordered]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")

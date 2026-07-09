@@ -10,7 +10,7 @@ Live mic + system-audio loopback → timestamped transcript with speaker labels,
 uv run oat-notes --ui
 ```
 
-Opens `http://127.0.0.1:8737`: enter in-person speakers and a remote name, START MEETING, and the transcript streams onto the screen live. Speaker chips (P1/P2/…) switch the mic owner with a click — or the global 1..N hotkeys, which stay live and keep the UI in sync. END MEETING writes the `.txt` and shows the path. `--port` and `--no-browser` available.
+Opens `http://127.0.0.1:8737`: name the meeting, list everyone in one row (`Mason, Sarah, Priya*, Dev*` — `*` marks who's on the call), START MEETING, and the transcript streams onto the screen live. Chips or the global 1..N hotkeys switch the active speaker; a press routes to the speaker's own channel, so in-person names attribute the mic and `*` names attribute the call audio, independently. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` available.
 
 ## Setup
 
@@ -31,8 +31,8 @@ uv run oat-notes --list-devices      # enumerate input devices (loopback endpoin
 uv run oat-notes --device-index 5    # pick a specific mic
 uv run oat-notes --loopback-index 10 # pick a specific loopback endpoint
 uv run oat-notes --seconds 30        # auto-stop (handy for testing)
-uv run oat-notes --speakers "Mason,Sarah"   # in-person speakers; press 1/2 to switch
-uv run oat-notes --remote-name Priya        # name the Zoom/Teams side
+uv run oat-notes --speakers "Mason,Sarah,Priya*"  # * = remote; keys 1..N switch
+uv run oat-notes --name "stand-up"          # names the transcript file
 uv run oat-notes --out-dir D:\notes  # transcript folder (default: ./transcripts)
 uv run oat-notes --no-file           # console only, skip the transcript file
 uv run oat-notes --wav clip.m4a      # transcribe a file (any format PyAV decodes)
@@ -49,9 +49,9 @@ Output, one line per speech chunk:
 [00:03:28] Remote: The churn number looks high to me.
 ```
 
-On exit the session is also written to `transcripts/meeting_YYYY-MM-DD_HHMM.txt`, merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
+On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--name "stand-up"` → `stand-up_…​.txt`), merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-With `--speakers "Mason,Sarah"`, number keys 1..N (any app focused — the hook is global) switch who owns the mic. A press also cuts the in-flight chunk on the spot: the previous speaker's words go straight to transcription and the new speaker starts a fresh chunk, so rapid handoffs with no pause between speakers still attribute cleanly. Where no key is pressed, a chunk goes to whoever held the majority of its span. The remote (loopback) side never needs a key. With a single name in `--speakers`, all mic audio is yours with no hotkeys involved.
+`--speakers` takes everyone in one list; a `*` suffix marks remote people on the call. Number keys 1..N (any app focused — the hook is global) switch the active speaker, and a press routes to that speaker's own channel: in-person names attribute mic audio, `*` names attribute call audio, each channel tracking its own active speaker. A press also cuts the in-flight chunk on the spot, so rapid handoffs with no pause still attribute cleanly; otherwise a chunk goes to whoever held the majority of its span. A channel with a single listed speaker never needs a key (one remote person = fully automatic, like before).
 
 ## Architecture
 

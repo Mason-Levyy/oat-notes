@@ -28,6 +28,24 @@ def test_line_labels():
     assert line_for(named, label_channels=True) == "[00:00:07] Sarah: agreed"
 
 
+def test_slugify():
+    from oat_notes.output import slugify
+
+    assert slugify("Stand-up Meeting!") == "stand-up-meeting"
+    assert slugify("  Q3 budget: review  ") == "q3-budget-review"
+    assert slugify("///") == "meeting"
+    assert slugify("") == "meeting"
+
+
+def test_meeting_log_named_file(tmp_path):
+    from datetime import datetime
+
+    log = MeetingLog(label_channels=False)
+    log.add(segment("hello", 1.0))
+    path = log.save(tmp_path, datetime(2026, 7, 9, 14, 30), "Stand-up Meeting")
+    assert path.name == "stand-up-meeting_2026-07-09_1430.txt"
+
+
 def test_meeting_log_sorts_and_writes(tmp_path):
     log = MeetingLog(label_channels=True)
     log.add(segment("second", 10.0, channel=Channel.LOOPBACK))
