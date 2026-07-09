@@ -9,8 +9,11 @@ import time
 
 
 class SessionClock:
+    """Uses perf_counter: monotonic, and sub-microsecond on Windows, where
+    time.monotonic() only ticks every ~15.6 ms (GetTickCount64)."""
+
     def __init__(self) -> None:
-        self._epoch = time.monotonic()
+        self._epoch = time.perf_counter()
 
     def now(self) -> float:
-        return time.monotonic() - self._epoch
+        return time.perf_counter() - self._epoch

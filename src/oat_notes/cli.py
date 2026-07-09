@@ -5,17 +5,18 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
 from .capture import AudioCapture, find_default_loopback, list_input_devices
 from .clock import SessionClock
 from .config import Config
+from .output import MeetingLog, line_for
 from .pipeline import Pipeline
 from .transcriber import create_transcriber
 from .types import AudioChunk, Channel, TranscriptSegment
-
-CHANNEL_LABELS = {Channel.MIC: "Me", Channel.LOOPBACK: "Remote"}
 
 
 def main() -> None:
@@ -46,6 +47,17 @@ def main() -> None:
         help="stop automatically after this many seconds (default: run until Ctrl+C)",
     )
     parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path("transcripts"),
+        help="folder for the end-of-meeting transcript (default: ./transcripts)",
+    )
+    parser.add_argument(
+        "--no-file",
+        action="store_true",
+        help="don't write a transcript file on exit",
+    )
+    parser.add_argument(
         "--model", default=None, help="whisper model name (default: distil-small.en)"
     )
     parser.add_argument(
@@ -73,20 +85,35 @@ def main() -> None:
     transcriber = create_transcriber(config)
 
     if args.wav:
-        _run_file(args.wav, config, transcriber)
+        _run_file(args, config, transcriber)
     else:
         _run_live(args, config, transcriber)
 
 
-def _make_sink(config: Config, show_latency: bool = True, label_channels: bool = False):
+def _make_sink(
+    config: Config,
+    log: MeetingLog,
+    show_latency: bool = True,
+    label_channels: bool = False,
+):
     def sink(segment: TranscriptSegment, latency: float) -> None:
-        label = f"{CHANNEL_LABELS[segment.channel]}: " if label_channels else ""
-        line = f"[{_format_timestamp(segment.start)}] {label}{segment.text}"
+        log.add(segment)
+        line = line_for(segment, label_channels)
         if config.debug and show_latency:
             line += f"   (+{latency:.1f}s)"
         print(line, flush=True)
 
     return sink
+
+
+def _save_transcript(args: argparse.Namespace, log: MeetingLog, started_at: datetime) -> None:
+    if args.no_file:
+        return
+    if log.is_empty:
+        print("No speech detected — no transcript written.", flush=True)
+        return
+    path = log.save(args.out_dir, started_at)
+    print(f"Transcript saved: {path}", flush=True)
 
 
 def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
@@ -102,6 +129,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         )
     )
 
+    started_at = datetime.now()
     clock = SessionClock()
     pa = pyaudio.PyAudio()
     try:
@@ -120,11 +148,12 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         channels = (
             (Channel.MIC, Channel.LOOPBACK) if loopback_info else (Channel.MIC,)
         )
+        log = MeetingLog(label_channels=len(channels) > 1)
         pipeline = Pipeline(
             config,
             clock,
             transcriber,
-            _make_sink(config, label_channels=len(channels) > 1),
+            _make_sink(config, log, label_channels=len(channels) > 1),
             channels=channels,
         )
 
@@ -145,7 +174,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         pipeline.start()
         for capture in captures:
             capture.start()
-            role = CHANNEL_LABELS[capture.channel]
+            role = "Me" if capture.channel is Channel.MIC else "Remote"
             print(f"{role:>6}: {capture.device_name}", flush=True)
         print("Listening — Ctrl+C to stop\n", flush=True)
 
@@ -159,6 +188,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         for capture in captures:
             capture.stop()
         pipeline.finish()
+        _save_transcript(args, log, started_at)
         dropped = sum(capture.dropped_blocks for capture in captures)
         if dropped:
             print(f"warning: dropped {dropped} audio blocks", file=sys.stderr)
@@ -166,17 +196,19 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         pa.terminate()
 
 
-def _run_file(path: str, config: Config, transcriber) -> None:
+def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
     from faster_whisper.audio import decode_audio
 
-    samples = decode_audio(path, sampling_rate=config.sample_rate)
+    samples = decode_audio(args.wav, sampling_rate=config.sample_rate)
     duration = samples.size / config.sample_rate
-    print(f"Transcribing {path} ({duration:.1f}s)\n", flush=True)
+    print(f"Transcribing {args.wav} ({duration:.1f}s)\n", flush=True)
 
     # File blocks are fed faster than realtime, so latency numbers are meaningless.
+    started_at = datetime.now()
     clock = SessionClock()
+    log = MeetingLog(label_channels=False)
     pipeline = Pipeline(
-        config, clock, transcriber, _make_sink(config, show_latency=False)
+        config, clock, transcriber, _make_sink(config, log, show_latency=False)
     )
     pipeline.start()
     block_size = 4096
@@ -184,6 +216,7 @@ def _run_file(path: str, config: Config, transcriber) -> None:
         block = samples[offset : offset + block_size]
         pipeline.frame_queue.put((Channel.MIC, offset / config.sample_rate, block))
     pipeline.finish()
+    _save_transcript(args, log, started_at)
 
 
 def _print_devices() -> None:
@@ -204,13 +237,6 @@ def _print_devices() -> None:
             )
     finally:
         pa.terminate()
-
-
-def _format_timestamp(seconds: float) -> str:
-    total = int(seconds)
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 if __name__ == "__main__":
