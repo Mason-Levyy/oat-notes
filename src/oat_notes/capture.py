@@ -20,7 +20,7 @@ from .clock import SessionClock
 from .config import Config
 from .types import Channel
 
-FrameBlock = tuple[float, np.ndarray]
+FrameBlock = tuple[Channel, float, np.ndarray]
 
 
 class AudioCapture:
@@ -34,7 +34,7 @@ class AudioCapture:
         frame_queue: queue.Queue[FrameBlock | None],
     ) -> None:
         self._pa = pa
-        self._channel = channel
+        self.channel = channel
         self._clock = clock
         self._config = config
         self._frame_queue = frame_queue
@@ -87,7 +87,7 @@ class AudioCapture:
         if self._capture_rate != self._config.sample_rate:
             samples = _resample(samples, self._capture_rate, self._config.sample_rate)
         try:
-            self._frame_queue.put_nowait((block_start, samples))
+            self._frame_queue.put_nowait((self.channel, block_start, samples))
         except queue.Full:
             self.dropped_blocks += 1
         return (None, pyaudio.paContinue)
@@ -97,6 +97,14 @@ def _resample(samples: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
     target_length = int(round(samples.size * to_rate / from_rate))
     positions = np.linspace(0, samples.size - 1, target_length)
     return np.interp(positions, np.arange(samples.size), samples).astype(np.float32)
+
+
+def find_default_loopback(pa: pyaudio.PyAudio) -> dict | None:
+    """Loopback endpoint of the default output device, if one exists."""
+    try:
+        return dict(pa.get_default_wasapi_loopback())
+    except (OSError, LookupError):
+        return None
 
 
 def list_input_devices(pa: pyaudio.PyAudio) -> list[dict]:
