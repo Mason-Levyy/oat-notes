@@ -19,8 +19,10 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from dataclasses import replace
 from typing import Callable
 
+from .attribution import Attributor
 from .chunker import Vad, VadChunker
 from .clock import SessionClock
 from .config import Config
@@ -41,11 +43,13 @@ class Pipeline:
         sink: Sink,
         channels: tuple[Channel, ...] = (Channel.MIC,),
         vad_factory: Callable[[], Vad] = SileroVad,
+        attributor: Attributor | None = None,
     ) -> None:
         self._config = config
         self._clock = clock
         self._transcriber = transcriber
         self._sink = sink
+        self._attributor = attributor
         self.frame_queue: queue.Queue = queue.Queue(maxsize=512)
         self._chunk_queue: queue.Queue = queue.Queue(maxsize=64)
         self._chunkers = {
@@ -93,6 +97,8 @@ class Pipeline:
             except Exception as error:
                 print(f"transcription error: {error}", file=sys.stderr)
                 continue
+            if self._attributor is not None:
+                segment = replace(segment, speaker=self._attributor.for_chunk(chunk))
             if segment.text:
                 latency = self._clock.now() - chunk.end
                 self._sink(segment, latency)

@@ -86,6 +86,39 @@ def test_finish_flushes_all_channels():
     }
 
 
+def test_worker_applies_attributor():
+    from oat_notes.attribution import Attributor, SwitchLog
+
+    log = SwitchLog()
+    log.record(1.2, 1)
+    received = []
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        FakeTranscriber(),
+        lambda segment, latency: received.append(segment),
+        channels=(Channel.MIC, Channel.LOOPBACK),
+        vad_factory=EnergyFakeVad,
+        attributor=Attributor(["Mason", "Sarah"], log, remote_name="Priya"),
+    )
+    pipeline.start()
+    # Mic chunk spans ~0..1.5s (incl. trailing silence); Sarah only from 1.2s
+    # => minority overlap, Mason wins.
+    pipeline.frame_queue.put((Channel.MIC, 0.0, speech(31)))
+    pipeline.frame_queue.put(
+        (Channel.MIC, 31 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
+    )
+    pipeline.frame_queue.put((Channel.LOOPBACK, 5.0, speech(31)))
+    pipeline.frame_queue.put(
+        (Channel.LOOPBACK, 5.0 + 31 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
+    )
+    pipeline.finish()
+
+    speakers = {segment.channel: segment.speaker for segment in received}
+    assert speakers[Channel.MIC] == "Mason"
+    assert speakers[Channel.LOOPBACK] == "Priya"
+
+
 def test_mic_only_pipeline_still_works():
     pipeline, received = make_pipeline((Channel.MIC,))
     pipeline.start()
