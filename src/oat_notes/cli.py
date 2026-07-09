@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .attribution import Speaker, parse_speakers
 from .capture import list_input_devices
 from .clock import SessionClock
 from .config import Config
@@ -62,13 +63,20 @@ def main() -> None:
         "--speakers",
         default=None,
         metavar="NAMES",
-        help="comma-separated in-person speaker names; keys 1..N switch between them",
+        help="comma-separated speakers, * marks remote: \"Mason,Sarah,Priya*\";"
+        " keys 1..N switch between them",
     )
     parser.add_argument(
         "--remote-name",
         default=None,
         metavar="NAME",
-        help="name for the remote (loopback) party instead of 'Remote'",
+        help="shorthand for adding one remote speaker to --speakers",
+    )
+    parser.add_argument(
+        "--name",
+        default="meeting",
+        metavar="TITLE",
+        help="meeting name used in the transcript filename (default: meeting)",
     )
     parser.add_argument(
         "--model", default=None, help="whisper model name (default: distil-small.en)"
@@ -156,7 +164,7 @@ def _save_transcript(args: argparse.Namespace, log: MeetingLog, started_at: date
     if log.is_empty:
         print("No speech detected — no transcript written.", flush=True)
         return
-    path = log.save(args.out_dir, started_at)
+    path = log.save(args.out_dir, started_at, args.name)
     print(f"Transcript saved: {path}", flush=True)
 
 
@@ -174,9 +182,9 @@ def warm_up(config: Config, transcriber) -> None:
 
 def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     warm_up(config, transcriber)
-    speakers = tuple(
-        name.strip() for name in (args.speakers or "").split(",") if name.strip()
-    )
+    roster = parse_speakers(args.speakers or "")
+    if args.remote_name:
+        roster = roster + (Speaker(args.remote_name.strip(), remote=True),)
 
     def print_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
         prefix = f"{label}: " if label else ""
@@ -186,13 +194,13 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         print(line, flush=True)
 
     def print_speaker(index: int) -> None:
-        print(f"  → active speaker: {speakers[index]}", flush=True)
+        print(f"  → active speaker: {roster[index].name}", flush=True)
 
     session = Session(
         config,
         SessionOptions(
-            speakers=speakers,
-            remote_name=args.remote_name,
+            speakers=roster,
+            meeting_name=args.name,
             use_loopback=not args.no_loopback,
             device_index=args.device_index,
             loopback_index=args.loopback_index,
@@ -206,12 +214,12 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     for capture in session.captures:
         role = "Me" if capture.channel is Channel.MIC else "Remote"
         print(f"{role:>6}: {capture.device_name}", flush=True)
-    if len(speakers) > 1:
+    if len(roster) > 1:
         mapping = "  ".join(
-            f"[{number}] {name}" for number, name in enumerate(speakers, start=1)
+            f"[{number}] {speaker.name}{'*' if speaker.remote else ''}"
+            for number, speaker in enumerate(roster, start=1)
         )
         print(f"Speakers: {mapping} — press the number key to switch", flush=True)
-        print(f"Active speaker: {speakers[0]}", flush=True)
     print("Listening — Ctrl+C to stop\n", flush=True)
 
     deadline = time.monotonic() + args.seconds if args.seconds else None

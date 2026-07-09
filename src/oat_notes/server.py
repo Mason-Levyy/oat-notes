@@ -17,10 +17,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
+from .attribution import Speaker
 from .config import Config
 from .output import format_timestamp
 from .session import Session, SessionEvents, SessionOptions
-from .types import TranscriptSegment
+from .types import Channel, TranscriptSegment
 
 
 class EventHub:
@@ -60,8 +61,8 @@ class AppState:
         self.hub = EventHub()
         self.lock = threading.Lock()
         self.session: Session | None = None
-        self.speakers: tuple[str, ...] = ()
-        self.remote_name: str | None = None
+        self.roster: tuple[Speaker, ...] = ()
+        self.meeting_name: str = "meeting"
         self.lines: list[dict] = []
         self.last_saved: str | None = None
         self.shutdown = threading.Event()
@@ -69,12 +70,22 @@ class AppState:
     def status(self) -> dict:
         with self.lock:
             recording = self.session is not None
+            actives = (
+                self.session.active
+                if recording
+                else {Channel.MIC: None, Channel.LOOPBACK: None}
+            )
             return {
                 "recording": recording,
-                "speakers": list(self.speakers),
-                "active_speaker": (
-                    self.session.active_speaker if recording else 0
-                ),
+                "speakers": [
+                    {"name": speaker.name, "remote": speaker.remote}
+                    for speaker in self.roster
+                ],
+                "actives": {
+                    "mic": actives[Channel.MIC],
+                    "loopback": actives[Channel.LOOPBACK],
+                },
+                "meeting_name": self.meeting_name,
                 "elapsed": self.session.elapsed() if recording else 0.0,
                 "channels": (
                     [channel.value for channel in self.session.channels]
@@ -82,7 +93,6 @@ class AppState:
                     else []
                 ),
                 "backend": self.config.backend,
-                "remote_name": self.remote_name,
                 "lines": self.lines,
                 "last_saved": self.last_saved,
             }
@@ -91,10 +101,15 @@ class AppState:
         with self.lock:
             if self.session is not None:
                 return {"error": "already recording"}
-            self.speakers = tuple(
-                str(name).strip() for name in body.get("speakers", []) if str(name).strip()
+            self.roster = tuple(
+                Speaker(
+                    name=str(entry.get("name", "")).strip(),
+                    remote=bool(entry.get("remote", False)),
+                )
+                for entry in body.get("speakers", [])
+                if str(entry.get("name", "")).strip()
             )
-            self.remote_name = (body.get("remote_name") or "").strip() or None
+            self.meeting_name = str(body.get("name") or "meeting").strip() or "meeting"
             self.lines = []
             self.last_saved = None
 
@@ -108,14 +123,22 @@ class AppState:
                 self.lines.append(line)
                 self.hub.publish({"type": "line", **line})
 
+            roster = self.roster
+
             def on_speaker(index: int) -> None:
-                self.hub.publish({"type": "speaker", "index": index})
+                self.hub.publish(
+                    {
+                        "type": "speaker",
+                        "index": index,
+                        "channel": "loopback" if roster[index].remote else "mic",
+                    }
+                )
 
             self.session = Session(
                 self.config,
                 SessionOptions(
-                    speakers=self.speakers,
-                    remote_name=self.remote_name,
+                    speakers=roster,
+                    meeting_name=self.meeting_name,
                     use_loopback=bool(body.get("loopback", True)),
                 ),
                 self.transcriber,

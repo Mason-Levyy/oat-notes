@@ -1,6 +1,6 @@
 import numpy as np
 
-from oat_notes.attribution import Attributor, SwitchLog
+from oat_notes.attribution import Attributor, Speaker, SwitchLog, parse_speakers
 from oat_notes.types import AudioChunk, Channel
 
 
@@ -10,16 +10,33 @@ def chunk(start, end, channel=Channel.MIC):
     )
 
 
-def test_speaker_zero_active_before_any_switch():
-    log = SwitchLog()
-    assert log.active_at(0.0) == 0
-    assert log.attribute(0.0, 10.0) == 0
+def make_attributor(roster, mic_log=None, loopback_log=None):
+    return Attributor(
+        roster,
+        mic_log=mic_log or SwitchLog(),
+        loopback_log=loopback_log or SwitchLog(),
+    )
 
 
-def test_switch_before_chunk():
-    log = SwitchLog()
-    log.record(5.0, 1)
-    assert log.attribute(6.0, 9.0) == 1
+def test_parse_speakers_star_marks_remote():
+    roster = parse_speakers("Mason, Sarah, Priya*, Dev *")
+    assert roster == (
+        Speaker("Mason"),
+        Speaker("Sarah"),
+        Speaker("Priya", remote=True),
+        Speaker("Dev", remote=True),
+    )
+
+
+def test_parse_speakers_empty():
+    assert parse_speakers("") == ()
+    assert parse_speakers(" , ,") == ()
+
+
+def test_initial_speaker_active_before_any_switch():
+    log = SwitchLog(initial=2)
+    assert log.active_at(0.0) == 2
+    assert log.attribute(0.0, 10.0) == 2
 
 
 def test_majority_overlap_mid_chunk_switch():
@@ -40,38 +57,53 @@ def test_multiple_switches_within_chunk():
     assert log.attribute(0.0, 10.0) == 0
 
 
-def test_switch_back_and_forth_respects_latest_before_chunk():
-    log = SwitchLog()
-    log.record(1.0, 1)
-    log.record(2.0, 0)
-    log.record(3.0, 1)
-    assert log.active_at(2.5) == 0
-    assert log.active_at(3.5) == 1
-
-
-def test_attributor_loopback_gets_remote_name():
-    attributor = Attributor(["Mason", "Sarah"], SwitchLog(), remote_name="Priya")
+def test_single_remote_speaker_auto_attributed():
+    roster = parse_speakers("Mason, Sarah, Priya*")
+    attributor = make_attributor(roster)
     assert attributor.for_chunk(chunk(0, 5, Channel.LOOPBACK)) == "Priya"
 
 
-def test_attributor_loopback_without_name_returns_none():
-    attributor = Attributor(["Mason", "Sarah"], SwitchLog())
-    assert attributor.for_chunk(chunk(0, 5, Channel.LOOPBACK)) is None
+def test_two_remote_speakers_switch_on_loopback_log():
+    roster = parse_speakers("Mason, Priya*, Dev*")
+    loopback_log = SwitchLog(initial=1)
+    attributor = make_attributor(roster, loopback_log=loopback_log)
+    assert attributor.for_chunk(chunk(0.0, 4.0, Channel.LOOPBACK)) == "Priya"
+    loopback_log.record(5.0, 2)
+    assert attributor.for_chunk(chunk(6.0, 9.0, Channel.LOOPBACK)) == "Dev"
+    # Mic attribution is untouched by remote switches.
+    assert attributor.for_chunk(chunk(6.0, 9.0)) == "Mason"
 
 
-def test_attributor_single_mic_speaker_needs_no_log():
-    attributor = Attributor(["Mason"], SwitchLog())
-    assert attributor.for_chunk(chunk(0, 5)) == "Mason"
-
-
-def test_attributor_multi_speaker_uses_switch_log():
-    log = SwitchLog()
-    attributor = Attributor(["Mason", "Sarah"], log)
+def test_two_mic_speakers_switch_on_mic_log():
+    roster = parse_speakers("Mason, Sarah, Priya*")
+    mic_log = SwitchLog(initial=0)
+    attributor = make_attributor(roster, mic_log=mic_log)
     assert attributor.for_chunk(chunk(0.0, 4.0)) == "Mason"
-    log.record(5.0, 1)
+    mic_log.record(5.0, 1)
     assert attributor.for_chunk(chunk(6.0, 9.0)) == "Sarah"
 
 
-def test_attributor_no_mic_speakers_returns_none():
-    attributor = Attributor([], SwitchLog(), remote_name="Priya")
+def test_no_remote_speakers_loopback_falls_back_to_none():
+    attributor = make_attributor(parse_speakers("Mason, Sarah"))
+    assert attributor.for_chunk(chunk(0, 5, Channel.LOOPBACK)) is None
+
+
+def test_no_mic_speakers_mic_falls_back_to_none():
+    attributor = make_attributor(parse_speakers("Priya*, Dev*"))
     assert attributor.for_chunk(chunk(0, 5)) is None
+
+
+def test_channel_routing_helpers():
+    roster = parse_speakers("Mason, Priya*")
+    attributor = make_attributor(roster)
+    assert attributor.channel_of(0) is Channel.MIC
+    assert attributor.channel_of(1) is Channel.LOOPBACK
+    assert attributor.first_member(Channel.MIC) == 0
+    assert attributor.first_member(Channel.LOOPBACK) == 1
+
+
+def test_out_of_group_log_index_falls_back_to_first_member():
+    roster = parse_speakers("Mason, Sarah, Priya*")
+    mic_log = SwitchLog(initial=2)  # wrongly initialized to a remote index
+    attributor = make_attributor(roster, mic_log=mic_log)
+    assert attributor.for_chunk(chunk(0.0, 4.0)) == "Mason"

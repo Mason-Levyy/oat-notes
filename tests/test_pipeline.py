@@ -87,7 +87,7 @@ def test_finish_flushes_all_channels():
 
 
 def test_worker_applies_attributor():
-    from oat_notes.attribution import Attributor, SwitchLog
+    from oat_notes.attribution import Attributor, SwitchLog, parse_speakers
 
     log = SwitchLog()
     log.record(1.2, 1)
@@ -99,7 +99,11 @@ def test_worker_applies_attributor():
         lambda segment, latency: received.append(segment),
         channels=(Channel.MIC, Channel.LOOPBACK),
         vad_factory=EnergyFakeVad,
-        attributor=Attributor(["Mason", "Sarah"], log, remote_name="Priya"),
+        attributor=Attributor(
+            parse_speakers("Mason, Sarah, Priya*"),
+            mic_log=log,
+            loopback_log=SwitchLog(initial=2),
+        ),
     )
     pipeline.start()
     # Mic chunk spans ~0..1.5s (incl. trailing silence); Sarah only from 1.2s
@@ -121,7 +125,7 @@ def test_worker_applies_attributor():
 
 def test_hotkey_split_attributes_back_to_back_speakers():
     """Two speakers with NO pause between them: the press must cut the chunk."""
-    from oat_notes.attribution import Attributor, SwitchLog
+    from oat_notes.attribution import Attributor, SwitchLog, parse_speakers
 
     log = SwitchLog()
     received = []
@@ -132,7 +136,9 @@ def test_hotkey_split_attributes_back_to_back_speakers():
         lambda segment, latency: received.append(segment),
         channels=(Channel.MIC,),
         vad_factory=EnergyFakeVad,
-        attributor=Attributor(["Alice", "Bob"], log),
+        attributor=Attributor(
+            parse_speakers("Alice, Bob"), mic_log=log, loopback_log=SwitchLog()
+        ),
     )
     pipeline.start()
 
