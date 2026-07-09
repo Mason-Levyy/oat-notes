@@ -104,6 +104,32 @@ def test_flush_returns_in_progress_chunk():
     assert chunker.flush() is None
 
 
+def test_split_mid_speech_emits_and_continues():
+    chunker = make_chunker([1.0] * 62 + [0.0] * SILENCE_WINDOWS)
+    assert chunker.push(0.0, windows(31)) == []
+
+    forced = chunker.split()
+    assert forced is not None
+    assert forced.samples.size == 31 * WINDOW
+
+    rest = chunker.push(31 * WINDOW_SECONDS, windows(31 + SILENCE_WINDOWS))
+    assert len(rest) == 1
+    assert rest[0].start == pytest.approx(forced.end)
+
+
+def test_split_when_idle_returns_none():
+    chunker = make_chunker([0.0] * 5)
+    chunker.push(0.0, windows(5))
+    assert chunker.split() is None
+
+
+def test_split_twice_returns_none_second_time():
+    chunker = make_chunker([1.0] * 31)
+    chunker.push(0.0, windows(31))
+    assert chunker.split() is not None
+    assert chunker.split() is None
+
+
 def test_flush_when_idle_returns_none():
     chunker = make_chunker([0.0] * 10)
     chunker.push(0.0, windows(10))

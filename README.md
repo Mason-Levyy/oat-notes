@@ -41,7 +41,7 @@ Output, one line per speech chunk:
 
 On exit the session is also written to `transcripts/meeting_YYYY-MM-DD_HHMM.txt`, merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-With `--speakers "Mason,Sarah"`, number keys 1..N (any app focused — the hook is global) switch who owns the mic; a chunk goes to whoever held the majority of its span, so switching during a natural pause attributes cleanly. The remote (loopback) side never needs a key. With a single name in `--speakers`, all mic audio is yours with no hotkeys involved.
+With `--speakers "Mason,Sarah"`, number keys 1..N (any app focused — the hook is global) switch who owns the mic. A press also cuts the in-flight chunk on the spot: the previous speaker's words go straight to transcription and the new speaker starts a fresh chunk, so rapid handoffs with no pause between speakers still attribute cleanly. Where no key is pressed, a chunk goes to whoever held the majority of its span. The remote (loopback) side never needs a key. With a single name in `--speakers`, all mic audio is yours with no hotkeys involved.
 
 ## Architecture
 

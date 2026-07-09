@@ -119,6 +119,38 @@ def test_worker_applies_attributor():
     assert speakers[Channel.LOOPBACK] == "Priya"
 
 
+def test_hotkey_split_attributes_back_to_back_speakers():
+    """Two speakers with NO pause between them: the press must cut the chunk."""
+    from oat_notes.attribution import Attributor, SwitchLog
+
+    log = SwitchLog()
+    received = []
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        FakeTranscriber(),
+        lambda segment, latency: received.append(segment),
+        channels=(Channel.MIC,),
+        vad_factory=EnergyFakeVad,
+        attributor=Attributor(["Alice", "Bob"], log),
+    )
+    pipeline.start()
+
+    alice_end = 31 * WINDOW / CONFIG.sample_rate  # ~0.992s
+    pipeline.frame_queue.put((Channel.MIC, 0.0, speech(31)))
+    log.record(alice_end, 1)  # hotkey pressed as Bob starts
+    pipeline.split_channel(Channel.MIC)
+    pipeline.frame_queue.put((Channel.MIC, alice_end, speech(31)))
+    pipeline.frame_queue.put(
+        (Channel.MIC, 2 * alice_end, silence(SILENCE_WINDOWS))
+    )
+    pipeline.finish()
+
+    assert [segment.speaker for segment in received] == ["Alice", "Bob"]
+    first, second = received
+    assert second.start == first.end  # no audio lost at the boundary
+
+
 def test_mic_only_pipeline_still_works():
     pipeline, received = make_pipeline((Channel.MIC,))
     pipeline.start()
