@@ -53,7 +53,7 @@ Output, one line per speech chunk:
 
 On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--name "stand-up"` → `stand-up_…​.txt`), merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-`--speakers` takes everyone in one list; a `*` suffix marks remote people on the call. Number keys 1..N (any app focused — the hook is global) switch the active speaker, and a press routes to that speaker's own channel: in-person names attribute mic audio, `*` names attribute call audio, each channel tracking its own active speaker. A press also cuts the in-flight chunk on the spot, so rapid handoffs with no pause still attribute cleanly; otherwise a chunk goes to whoever held the majority of its span. A channel with a single listed speaker never needs a key (one remote person = fully automatic, like before).
+`--speakers` takes everyone in one list; a `*` suffix marks remote people on the call. **Ctrl+Alt+1..9** (any app focused — the hook is global, and plain digits still type normally everywhere) switches the active speaker, and the press routes to that speaker's own channel: in-person names attribute mic audio, `*` names attribute call audio, each channel tracking its own active speaker. A chord for a number with no speaker yet auto-adds an in-person `Guest N` and switches to them — name them in the backfill panel afterwards; guests who never spoke are dropped silently. A press also cuts the in-flight chunk on the spot, so rapid handoffs with no pause still attribute cleanly; otherwise a chunk goes to whoever held the majority of its span. A channel with a single listed speaker never needs a key (one remote person = fully automatic).
 
 ## Architecture
 

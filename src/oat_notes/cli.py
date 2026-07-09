@@ -219,7 +219,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
             f"[{number}] {speaker.name}{'*' if speaker.remote else ''}"
             for number, speaker in enumerate(roster, start=1)
         )
-        print(f"Speakers: {mapping} — press the number key to switch", flush=True)
+        print(f"Speakers: {mapping} — Ctrl+Alt+number to switch", flush=True)
     print("Listening — Ctrl+C to stop\n", flush=True)
 
     deadline = time.monotonic() + args.seconds if args.seconds else None

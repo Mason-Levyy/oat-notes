@@ -51,6 +51,11 @@ class MeetingLog:
     def add(self, segment: TranscriptSegment) -> None:
         self._segments.append(segment)
 
+    def speakers_with_lines(self) -> set[str]:
+        return {
+            segment.speaker for segment in self._segments if segment.speaker
+        }
+
     def rename(self, renames: dict[str, str]) -> None:
         """Backfill speaker names, e.g. {"Guest 1": "Tom"}."""
         from dataclasses import replace

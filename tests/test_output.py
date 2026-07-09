@@ -79,6 +79,14 @@ def test_meeting_log_rename_backfills_guests(tmp_path):
     assert "Guest" not in content
 
 
+def test_speakers_with_lines():
+    log = MeetingLog(label_channels=False)
+    log.add(segment("hello", 1.0, speaker="Mason"))
+    log.add(segment("hi", 2.0, speaker="Guest 1"))
+    log.add(segment("unlabeled", 3.0))
+    assert log.speakers_with_lines() == {"Mason", "Guest 1"}
+
+
 def test_meeting_log_empty(tmp_path):
     log = MeetingLog(label_channels=False)
     assert log.is_empty

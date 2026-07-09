@@ -77,7 +77,7 @@ class AppState:
                 else {Channel.MIC: None, Channel.LOOPBACK: None}
             )
             pending_guests = (
-                [self.pending.roster[i].name for i in self.pending.guest_indices]
+                _guests_with_lines(self.pending)
                 if self.pending is not None
                 else None
             )
@@ -131,11 +131,14 @@ class AppState:
                 self.hub.publish({"type": "line", **line})
 
             def on_speaker(index: int) -> None:
-                # Read the live session roster (it grows when guests join);
-                # no state lock here — this fires inside switch calls.
+                # Reads the live session roster without the state lock —
+                # this fires from inside switch calls that may hold it.
                 session = self.session
                 if session is None or index >= len(session.roster):
                     return
+                if len(session.roster) != len(self.roster):
+                    self.roster = tuple(session.roster)
+                    self.hub.publish({"type": "status", "recording": True})
                 self.hub.publish(
                     {
                         "type": "speaker",
@@ -168,7 +171,7 @@ class AppState:
             session = self.session
             self.session = None
         session.stop()
-        needs_backfill = bool(session.guest_indices) and not session.log.is_empty
+        needs_backfill = bool(_guests_with_lines(session)) and not session.log.is_empty
         with self.lock:
             if needs_backfill:
                 self.pending = session
@@ -213,6 +216,15 @@ class AppState:
         if session is not None:
             session.switch_speaker(index)
         return self.status()
+
+
+def _guests_with_lines(session: Session) -> list[str]:
+    spoke = session.log.speakers_with_lines()
+    return [
+        session.roster[index].name
+        for index in session.guest_indices
+        if session.roster[index].name in spoke
+    ]
 
 
 def _load_asset(name: str) -> bytes:

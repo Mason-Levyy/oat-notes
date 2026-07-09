@@ -135,8 +135,8 @@ class Session:
             )
 
         self._hotkeys = None
-        if options.hotkeys and len(self.roster) > 1:
-            self._hotkeys = HotkeyListener(len(self.roster), self.switch_speaker)
+        if options.hotkeys:
+            self._hotkeys = HotkeyListener(self.switch_speaker)
 
     def start(self) -> None:
         if self._hotkeys is not None:
@@ -147,9 +147,15 @@ class Session:
 
     def switch_speaker(self, index: int) -> None:
         """Route a switch to the speaker's own channel and cut its in-flight
-        chunk, so the previous speaker's words transcribe immediately."""
-        if not 0 <= index < len(self.roster):
+        chunk, so the previous speaker's words transcribe immediately.
+
+        An index past the roster auto-creates in-person guests up to that
+        slot — the pressed key permanently becomes that guest's key.
+        """
+        if not 0 <= index < 9:
             return
+        while index >= len(self.roster):
+            self._create_guest(remote=False)
         channel = self._attributor.channel_of(index)
         self._attributor.log_for(index).record(self.clock.now(), index)
         self.active[channel] = index
@@ -162,13 +168,15 @@ class Session:
 
         The name is backfilled at save time via ``renames``.
         """
+        index = self._create_guest(remote)
+        self.switch_speaker(index)
+        return index
+
+    def _create_guest(self, remote: bool) -> int:
         guest = Speaker(f"Guest {len(self.guest_indices) + 1}", remote=remote)
         index = self._attributor.add(guest)
         self.roster.append(guest)
         self.guest_indices.append(index)
-        if self._hotkeys is not None:
-            self._hotkeys.set_count(len(self.roster))
-        self.switch_speaker(index)
         return index
 
     def elapsed(self) -> float:
