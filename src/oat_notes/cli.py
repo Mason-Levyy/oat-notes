@@ -75,6 +75,24 @@ def main() -> None:
         "--model", default=None, help="whisper model name (default: distil-small.en)"
     )
     parser.add_argument(
+        "--backend",
+        choices=["faster_whisper", "openvino"],
+        default=None,
+        help="transcription engine (default: faster_whisper on CPU)",
+    )
+    parser.add_argument(
+        "--ov-device",
+        default=None,
+        metavar="DEVICE",
+        help="OpenVINO device: NPU (default), GPU, or CPU",
+    )
+    parser.add_argument(
+        "--ov-model",
+        default=None,
+        metavar="DIR_OR_REPO",
+        help="OpenVINO model dir or HF repo (default: OpenVINO/whisper-small.en-int8-ov)",
+    )
+    parser.add_argument(
         "--wav",
         metavar="PATH",
         default=None,
@@ -92,9 +110,21 @@ def main() -> None:
     config_overrides = {"debug": args.debug}
     if args.model:
         config_overrides["model_name"] = args.model
+    if args.backend:
+        config_overrides["backend"] = args.backend
+    if args.ov_device:
+        config_overrides["openvino_device"] = args.ov_device
+    if args.ov_model:
+        config_overrides["openvino_model"] = args.ov_model
     config = Config(**config_overrides)
 
-    print(f"Loading {config.model_name} ({config.compute_type})", flush=True)
+    if config.backend == "openvino":
+        print(
+            f"Loading {config.openvino_model} on {config.openvino_device} (OpenVINO)",
+            flush=True,
+        )
+    else:
+        print(f"Loading {config.model_name} ({config.compute_type})", flush=True)
     print("(first run downloads the model to the HuggingFace cache)", flush=True)
     transcriber = create_transcriber(config)
 
