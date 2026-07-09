@@ -10,7 +10,9 @@ Live mic + system-audio loopback → timestamped transcript with speaker labels,
 uv run oat-notes --ui
 ```
 
-Opens `http://127.0.0.1:8737`: name the meeting, list everyone in one row (`Mason, Sarah, Priya*, Dev*` — `*` marks who's on the call), START MEETING, and the transcript streams onto the screen live. Chips or the global 1..N hotkeys switch the active speaker; a press routes to the speaker's own channel, so in-person names attribute the mic and `*` names attribute the call audio, independently. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` available.
+Opens `http://127.0.0.1:8737`: name the meeting, list everyone in one row (`Mason, Sarah, Priya*, Dev*` — `*` marks who's on the call), START MEETING, and the transcript streams onto the screen live. Chips or the global 1..N hotkeys switch the active speaker; a press routes to the speaker's own channel, so in-person names attribute the mic and `*` names attribute the call audio, independently.
+
+Someone unexpected joins? Click the dashed `+ WALK-IN` (in the room) or `+ CALL-IN` (on the call) chip — it creates `Guest 1`, switches to them instantly, and another empty slot appears for the next surprise. When you END MEETING with guests in the roster, a backfill panel asks who they were before writing the file; every line they own gets the real name. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` available.
 
 ## Setup
 

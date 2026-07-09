@@ -46,3 +46,18 @@ def test_switch_without_session_is_harmless():
     state = AppState(Config(), transcriber=None)
     status = state.switch_speaker(2)
     assert status["recording"] is False
+
+
+def test_add_guest_without_session_reports_error():
+    state = AppState(Config(), transcriber=None)
+    assert state.add_guest({"remote": False}) == {"error": "not recording"}
+
+
+def test_finalize_without_pending_reports_error():
+    state = AppState(Config(), transcriber=None)
+    assert state.finalize({"renames": {}}) == {"error": "nothing awaiting backfill"}
+
+
+def test_idle_status_has_no_pending_backfill():
+    state = AppState(Config(), transcriber=None)
+    assert state.status()["pending_backfill"] is None

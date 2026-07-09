@@ -62,6 +62,23 @@ def test_meeting_log_sorts_and_writes(tmp_path):
     )
 
 
+def test_meeting_log_rename_backfills_guests(tmp_path):
+    from datetime import datetime
+
+    log = MeetingLog(label_channels=False)
+    log.add(segment("hello", 1.0, speaker="Guest 1"))
+    log.add(segment("hi", 2.0, speaker="Mason"))
+    log.add(segment("more", 3.0, speaker="Guest 1"))
+    log.rename({"Guest 1": "Tom"})
+
+    path = log.save(tmp_path, datetime(2026, 7, 9, 14, 30))
+    content = path.read_text(encoding="utf-8")
+    assert "Tom: hello" in content
+    assert "Tom: more" in content
+    assert "Mason: hi" in content
+    assert "Guest" not in content
+
+
 def test_meeting_log_empty(tmp_path):
     log = MeetingLog(label_channels=False)
     assert log.is_empty

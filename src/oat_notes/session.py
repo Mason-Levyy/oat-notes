@@ -62,8 +62,10 @@ class Session:
         self._events = events
         self._started_at = datetime.now()
         self._stopped = False
+        self._saved = False
         self.clock = SessionClock()
-        self.roster = options.speakers
+        self.roster: list[Speaker] = list(options.speakers)
+        self.guest_indices: list[int] = []
 
         self._pa = pyaudio.PyAudio()
         loopback_info = None
@@ -89,22 +91,23 @@ class Session:
             Channel.MIC: None,
             Channel.LOOPBACK: None,
         }
-        if self.roster:
-            mic_first = next(
-                (i for i, s in enumerate(self.roster) if not s.remote), None
-            )
-            remote_first = next(
-                (i for i, s in enumerate(self.roster) if s.remote), None
-            )
-            self.active[Channel.MIC] = mic_first
-            self.active[Channel.LOOPBACK] = remote_first
-            self._attributor = Attributor(
-                self.roster,
-                mic_log=SwitchLog(initial=mic_first if mic_first is not None else 0),
-                loopback_log=SwitchLog(
-                    initial=remote_first if remote_first is not None else 0
-                ),
-            )
+        mic_first = next(
+            (i for i, s in enumerate(self.roster) if not s.remote), None
+        )
+        remote_first = next(
+            (i for i, s in enumerate(self.roster) if s.remote), None
+        )
+        self.active[Channel.MIC] = mic_first
+        self.active[Channel.LOOPBACK] = remote_first
+        # Always constructed (even for an empty roster) so guests can be
+        # added mid-session; channels with no members fall back to Me/Remote.
+        self._attributor = Attributor(
+            tuple(self.roster),
+            mic_log=SwitchLog(initial=mic_first if mic_first is not None else 0),
+            loopback_log=SwitchLog(
+                initial=remote_first if remote_first is not None else 0
+            ),
+        )
         attributor = self._attributor
 
         self.log = MeetingLog(label_channels=self._label_channels)
@@ -145,7 +148,7 @@ class Session:
     def switch_speaker(self, index: int) -> None:
         """Route a switch to the speaker's own channel and cut its in-flight
         chunk, so the previous speaker's words transcribe immediately."""
-        if self._attributor is None or not 0 <= index < len(self.roster):
+        if not 0 <= index < len(self.roster):
             return
         channel = self._attributor.channel_of(index)
         self._attributor.log_for(index).record(self.clock.now(), index)
@@ -154,6 +157,20 @@ class Session:
             self._pipeline.split_channel(channel)
         self._events.on_speaker(index)
 
+    def add_guest(self, remote: bool) -> int:
+        """Create a placeholder speaker mid-meeting and switch to them.
+
+        The name is backfilled at save time via ``renames``.
+        """
+        guest = Speaker(f"Guest {len(self.guest_indices) + 1}", remote=remote)
+        index = self._attributor.add(guest)
+        self.roster.append(guest)
+        self.guest_indices.append(index)
+        if self._hotkeys is not None:
+            self._hotkeys.set_count(len(self.roster))
+        self.switch_speaker(index)
+        return index
+
     def elapsed(self) -> float:
         return self.clock.now()
 
@@ -161,10 +178,11 @@ class Session:
     def dropped_blocks(self) -> int:
         return sum(capture.dropped_blocks for capture in self.captures)
 
-    def stop(self) -> Path | None:
-        """Stop capture, drain the pipeline, save and return the transcript."""
+    def stop(self) -> None:
+        """Stop capture and drain the pipeline. Call ``save`` afterwards —
+        it's separate so guest names can be backfilled first."""
         if self._stopped:
-            return None
+            return
         self._stopped = True
         if self._hotkeys is not None:
             self._hotkeys.stop()
@@ -172,8 +190,16 @@ class Session:
             capture.stop()
         self._pipeline.finish()
         self._pa.terminate()
-        if not self._options.save_file or self.log.is_empty:
+
+    def save(self, renames: dict[str, str] | None = None) -> Path | None:
+        """Apply guest-name backfills and write the transcript file."""
+        if self._saved or not self._options.save_file or self.log.is_empty:
             return None
+        if renames:
+            self.log.rename(
+                {old: new.strip() for old, new in renames.items() if new.strip()}
+            )
+        self._saved = True
         return self.log.save(
             self._options.out_dir, self._started_at, self._options.meeting_name
         )

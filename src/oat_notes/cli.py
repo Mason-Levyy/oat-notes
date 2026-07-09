@@ -229,7 +229,8 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     except KeyboardInterrupt:
         pass
     print("\nStopping…", flush=True)
-    saved = session.stop()
+    session.stop()
+    saved = session.save()
     if saved is not None:
         print(f"Transcript saved: {saved}", flush=True)
     elif not args.no_file:
