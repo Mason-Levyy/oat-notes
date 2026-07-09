@@ -2,7 +2,7 @@
 
 Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
-**Current state: Phase 1** — live mic → timestamped console transcript. Later phases add hotkey speaker attribution, a Zoom/Teams loopback channel with automatic remote-speaker attribution, an OpenVINO/NPU backend, and tray-app packaging.
+**Current state:** live mic + system-audio loopback → timestamped console transcript with `Me:` / `Remote:` labels. On a Zoom/Teams call, the remote side is captured from the loopback of your output device — no mic pickup needed. Wear headphones, or the mic will also hear the remote speaker and produce duplicate lines. Later phases add hotkey speaker attribution for in-person meetings, an end-of-meeting `.txt` writer, an OpenVINO/NPU backend, and a UI + packaging.
 
 ## Setup
 
@@ -17,9 +17,12 @@ The first run downloads `distil-small.en` (a few hundred MB) to the HuggingFace 
 ## Usage
 
 ```
-uv run oat-notes                     # transcribe the default mic live; Ctrl+C to stop
+uv run oat-notes                     # mic + system audio live; Ctrl+C to stop
+uv run oat-notes --no-loopback       # mic only
 uv run oat-notes --list-devices      # enumerate input devices (loopback endpoints marked)
 uv run oat-notes --device-index 5    # pick a specific mic
+uv run oat-notes --loopback-index 10 # pick a specific loopback endpoint
+uv run oat-notes --seconds 30        # auto-stop (handy for testing)
 uv run oat-notes --wav clip.m4a      # transcribe a file (any format PyAV decodes)
 uv run oat-notes --debug             # show per-chunk transcription latency
 uv run oat-notes --model small.en    # swap whisper models
@@ -28,7 +31,8 @@ uv run oat-notes --model small.en    # swap whisper models
 Output, one line per speech chunk:
 
 ```
-[00:03:12] Let's walk through the model assumptions.
+[00:03:12] Me: Let's walk through the model assumptions.
+[00:03:28] Remote: The churn number looks high to me.
 ```
 
 ## Architecture

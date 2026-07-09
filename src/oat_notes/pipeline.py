@@ -1,13 +1,17 @@
 """Wires capture → VAD chunking → transcription → sink across threads.
 
-Producer (audio callback or file reader) puts stamped frame blocks on
-``frame_queue``. A chunker thread turns them into AudioChunks; a single
+Producers (audio callbacks or a file reader) put channel-tagged, stamped
+frame blocks on ``frame_queue``. A chunker thread routes each block to that
+channel's VadChunker (each channel keeps its own VAD state); a single
 transcription worker turns chunks into TranscriptSegments and hands them to
 the sink. distil-small.en INT8 runs faster than realtime on CPU, so one
 worker keeps up and the transcript lags live audio by a few seconds at most.
 
+Streams are never mixed: mic and loopback frames stay separate through the
+whole pipeline, which is what makes remote-speaker attribution free.
+
 ``None`` on a queue is the end-of-stream sentinel; ``finish()`` drains
-everything (including a final VAD flush) before returning.
+everything (including a final VAD flush per channel) before returning.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import sys
 import threading
 from typing import Callable
 
-from .chunker import VadChunker
+from .chunker import Vad, VadChunker
 from .clock import SessionClock
 from .config import Config
 from .transcriber import Transcriber
@@ -35,15 +39,19 @@ class Pipeline:
         clock: SessionClock,
         transcriber: Transcriber,
         sink: Sink,
-        channel: Channel = Channel.MIC,
+        channels: tuple[Channel, ...] = (Channel.MIC,),
+        vad_factory: Callable[[], Vad] = SileroVad,
     ) -> None:
         self._config = config
         self._clock = clock
         self._transcriber = transcriber
         self._sink = sink
-        self.frame_queue: queue.Queue = queue.Queue(maxsize=256)
+        self.frame_queue: queue.Queue = queue.Queue(maxsize=512)
         self._chunk_queue: queue.Queue = queue.Queue(maxsize=64)
-        self._chunker = VadChunker(SileroVad(), config, channel)
+        self._chunkers = {
+            channel: VadChunker(vad_factory(), config, channel)
+            for channel in channels
+        }
         self._chunker_thread = threading.Thread(
             target=self._run_chunker, name="chunker", daemon=True
         )
@@ -65,13 +73,14 @@ class Pipeline:
         while True:
             block = self.frame_queue.get()
             if block is None:
-                final_chunk = self._chunker.flush()
-                if final_chunk is not None:
-                    self._chunk_queue.put(final_chunk)
+                for chunker in self._chunkers.values():
+                    final_chunk = chunker.flush()
+                    if final_chunk is not None:
+                        self._chunk_queue.put(final_chunk)
                 self._chunk_queue.put(None)
                 return
-            timestamp, samples = block
-            for chunk in self._chunker.push(timestamp, samples):
+            channel, timestamp, samples = block
+            for chunk in self._chunkers[channel].push(timestamp, samples):
                 self._chunk_queue.put(chunk)
 
     def _run_worker(self) -> None:
