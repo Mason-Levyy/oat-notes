@@ -23,6 +23,8 @@ uv run oat-notes --list-devices      # enumerate input devices (loopback endpoin
 uv run oat-notes --device-index 5    # pick a specific mic
 uv run oat-notes --loopback-index 10 # pick a specific loopback endpoint
 uv run oat-notes --seconds 30        # auto-stop (handy for testing)
+uv run oat-notes --speakers "Mason,Sarah"   # in-person speakers; press 1/2 to switch
+uv run oat-notes --remote-name Priya        # name the Zoom/Teams side
 uv run oat-notes --out-dir D:\notes  # transcript folder (default: ./transcripts)
 uv run oat-notes --no-file           # console only, skip the transcript file
 uv run oat-notes --wav clip.m4a      # transcribe a file (any format PyAV decodes)
@@ -38,6 +40,8 @@ Output, one line per speech chunk:
 ```
 
 On exit the session is also written to `transcripts/meeting_YYYY-MM-DD_HHMM.txt`, merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
+
+With `--speakers "Mason,Sarah"`, number keys 1..N (any app focused — the hook is global) switch who owns the mic; a chunk goes to whoever held the majority of its span, so switching during a natural pause attributes cleanly. The remote (loopback) side never needs a key. With a single name in `--speakers`, all mic audio is yours with no hotkeys involved.
 
 ## Architecture
 

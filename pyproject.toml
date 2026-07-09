@@ -11,6 +11,7 @@ dependencies = [
     "faster-whisper>=1.1",
     "pyaudiowpatch>=0.2.12",
     "numpy>=1.26",
+    "pynput>=1.8.2",
 ]
 
 [dependency-groups]

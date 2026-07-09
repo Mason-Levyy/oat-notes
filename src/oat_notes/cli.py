@@ -10,9 +10,11 @@ from pathlib import Path
 
 import numpy as np
 
+from .attribution import Attributor, SwitchLog
 from .capture import AudioCapture, find_default_loopback, list_input_devices
 from .clock import SessionClock
 from .config import Config
+from .hotkeys import HotkeyListener
 from .output import MeetingLog, line_for
 from .pipeline import Pipeline
 from .transcriber import create_transcriber
@@ -56,6 +58,18 @@ def main() -> None:
         "--no-file",
         action="store_true",
         help="don't write a transcript file on exit",
+    )
+    parser.add_argument(
+        "--speakers",
+        default=None,
+        metavar="NAMES",
+        help="comma-separated in-person speaker names; keys 1..N switch between them",
+    )
+    parser.add_argument(
+        "--remote-name",
+        default=None,
+        metavar="NAME",
+        help="name for the remote (loopback) party instead of 'Remote'",
     )
     parser.add_argument(
         "--model", default=None, help="whisper model name (default: distil-small.en)"
@@ -148,6 +162,16 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         channels = (
             (Channel.MIC, Channel.LOOPBACK) if loopback_info else (Channel.MIC,)
         )
+        speakers = (
+            [name.strip() for name in args.speakers.split(",") if name.strip()]
+            if args.speakers
+            else []
+        )
+        switch_log = SwitchLog()
+        attributor = None
+        if speakers or args.remote_name:
+            attributor = Attributor(speakers, switch_log, args.remote_name)
+
         log = MeetingLog(label_channels=len(channels) > 1)
         pipeline = Pipeline(
             config,
@@ -155,6 +179,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
             transcriber,
             _make_sink(config, log, label_channels=len(channels) > 1),
             channels=channels,
+            attributor=attributor,
         )
 
         captures = [
@@ -171,11 +196,27 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
                 )
             )
 
+        hotkeys = None
+        if len(speakers) > 1:
+
+            def on_switch(index: int) -> None:
+                switch_log.record(clock.now(), index)
+                print(f"  → active speaker: {speakers[index]}", flush=True)
+
+            hotkeys = HotkeyListener(len(speakers), on_switch)
+            hotkeys.start()
+
         pipeline.start()
         for capture in captures:
             capture.start()
             role = "Me" if capture.channel is Channel.MIC else "Remote"
             print(f"{role:>6}: {capture.device_name}", flush=True)
+        if len(speakers) > 1:
+            mapping = "  ".join(
+                f"[{number}] {name}" for number, name in enumerate(speakers, start=1)
+            )
+            print(f"Speakers: {mapping} — press the number key to switch", flush=True)
+            print(f"Active speaker: {speakers[0]}", flush=True)
         print("Listening — Ctrl+C to stop\n", flush=True)
 
         deadline = time.monotonic() + args.seconds if args.seconds else None
@@ -185,6 +226,8 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         except KeyboardInterrupt:
             pass
         print("\nStopping…", flush=True)
+        if hotkeys is not None:
+            hotkeys.stop()
         for capture in captures:
             capture.stop()
         pipeline.finish()
