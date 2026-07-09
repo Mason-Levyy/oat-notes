@@ -102,6 +102,24 @@ def test_channel_routing_helpers():
     assert attributor.first_member(Channel.LOOPBACK) == 1
 
 
+def test_add_guest_mid_session():
+    roster = parse_speakers("Mason, Priya*")
+    mic_log = SwitchLog()
+    loopback_log = SwitchLog(initial=1)
+    attributor = make_attributor(roster, mic_log=mic_log, loopback_log=loopback_log)
+
+    walk_in = attributor.add(Speaker("Guest 1"))
+    call_in = attributor.add(Speaker("Guest 2", remote=True))
+    assert (walk_in, call_in) == (2, 3)
+    assert attributor.channel_of(walk_in) is Channel.MIC
+    assert attributor.channel_of(call_in) is Channel.LOOPBACK
+
+    mic_log.record(5.0, walk_in)
+    loopback_log.record(5.0, call_in)
+    assert attributor.for_chunk(chunk(6.0, 9.0)) == "Guest 1"
+    assert attributor.for_chunk(chunk(6.0, 9.0, Channel.LOOPBACK)) == "Guest 2"
+
+
 def test_out_of_group_log_index_falls_back_to_first_member():
     roster = parse_speakers("Mason, Sarah, Priya*")
     mic_log = SwitchLog(initial=2)  # wrongly initialized to a remote index

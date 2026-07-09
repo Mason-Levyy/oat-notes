@@ -61,6 +61,7 @@ class AppState:
         self.hub = EventHub()
         self.lock = threading.Lock()
         self.session: Session | None = None
+        self.pending: Session | None = None  # stopped, awaiting guest backfill
         self.roster: tuple[Speaker, ...] = ()
         self.meeting_name: str = "meeting"
         self.lines: list[dict] = []
@@ -75,6 +76,11 @@ class AppState:
                 if recording
                 else {Channel.MIC: None, Channel.LOOPBACK: None}
             )
+            pending_guests = (
+                [self.pending.roster[i].name for i in self.pending.guest_indices]
+                if self.pending is not None
+                else None
+            )
             return {
                 "recording": recording,
                 "speakers": [
@@ -85,6 +91,7 @@ class AppState:
                     "mic": actives[Channel.MIC],
                     "loopback": actives[Channel.LOOPBACK],
                 },
+                "pending_backfill": pending_guests,
                 "meeting_name": self.meeting_name,
                 "elapsed": self.session.elapsed() if recording else 0.0,
                 "channels": (
@@ -123,21 +130,27 @@ class AppState:
                 self.lines.append(line)
                 self.hub.publish({"type": "line", **line})
 
-            roster = self.roster
-
             def on_speaker(index: int) -> None:
+                # Read the live session roster (it grows when guests join);
+                # no state lock here — this fires inside switch calls.
+                session = self.session
+                if session is None or index >= len(session.roster):
+                    return
                 self.hub.publish(
                     {
                         "type": "speaker",
                         "index": index,
-                        "channel": "loopback" if roster[index].remote else "mic",
+                        "channel": (
+                            "loopback" if session.roster[index].remote else "mic"
+                        ),
                     }
                 )
 
+            self.pending = None
             self.session = Session(
                 self.config,
                 SessionOptions(
-                    speakers=roster,
+                    speakers=self.roster,
                     meeting_name=self.meeting_name,
                     use_loopback=bool(body.get("loopback", True)),
                 ),
@@ -154,12 +167,44 @@ class AppState:
                 return {"error": "not recording"}
             session = self.session
             self.session = None
-        saved = session.stop()
+        session.stop()
+        needs_backfill = bool(session.guest_indices) and not session.log.is_empty
         with self.lock:
+            if needs_backfill:
+                self.pending = session
+            else:
+                saved = session.save()
+                self.last_saved = str(saved) if saved else None
+        self.hub.publish({"type": "status", "recording": False})
+        return self.status()
+
+    def finalize(self, body: dict) -> dict:
+        with self.lock:
+            if self.pending is None:
+                return {"error": "nothing awaiting backfill"}
+            session = self.pending
+            self.pending = None
+            renames = {
+                str(old): str(new)
+                for old, new in (body.get("renames") or {}).items()
+                if str(new).strip()
+            }
+            saved = session.save(renames)
             self.last_saved = str(saved) if saved else None
-        self.hub.publish(
-            {"type": "status", "recording": False, "saved": self.last_saved}
-        )
+            for line in self.lines:
+                if line["label"] in renames:
+                    line["label"] = renames[line["label"]]
+        self.hub.publish({"type": "status", "recording": False})
+        return self.status()
+
+    def add_guest(self, body: dict) -> dict:
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            session.add_guest(remote=bool(body.get("remote", False)))
+            self.roster = tuple(session.roster)
+        self.hub.publish({"type": "status", "recording": True})
         return self.status()
 
     def switch_speaker(self, index: int) -> dict:
@@ -217,6 +262,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.stop_session())
         elif self.path == "/api/switch":
             self._send_json(self.state.switch_speaker(int(body.get("index", 0))))
+        elif self.path == "/api/add_guest":
+            self._send_json(self.state.add_guest(body))
+        elif self.path == "/api/finalize":
+            self._send_json(self.state.finalize(body))
         elif self.path == "/api/quit":
             self._send_json({"ok": True})
             self.state.shutdown.set()

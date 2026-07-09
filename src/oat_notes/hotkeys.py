@@ -20,6 +20,10 @@ class HotkeyListener:
         self._on_switch = on_switch
         self._listener = None
 
+    def set_count(self, speaker_count: int) -> None:
+        """Widen the key range when a guest is added mid-session."""
+        self._count = speaker_count
+
     def start(self) -> None:
         from pynput import keyboard
 

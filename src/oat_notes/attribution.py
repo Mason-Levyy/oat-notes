@@ -94,7 +94,7 @@ class Attributor:
         mic_log: SwitchLog,
         loopback_log: SwitchLog,
     ) -> None:
-        self._roster = roster
+        self._roster = list(roster)
         self._logs = {Channel.MIC: mic_log, Channel.LOOPBACK: loopback_log}
         self._members = {
             Channel.MIC: [
@@ -104,6 +104,13 @@ class Attributor:
                 index for index, speaker in enumerate(roster) if speaker.remote
             ],
         }
+
+    def add(self, speaker: Speaker) -> int:
+        """Append a speaker mid-session (walk-in / call-in guest)."""
+        self._roster.append(speaker)
+        index = len(self._roster) - 1
+        self._members[self.channel_of(index)].append(index)
+        return index
 
     def channel_of(self, index: int) -> Channel:
         return Channel.LOOPBACK if self._roster[index].remote else Channel.MIC

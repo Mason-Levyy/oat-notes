@@ -162,6 +162,13 @@ body {
 .chip.active-remote .slot { color: #fff; }
 .chip.active-remote .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
 .chip.fallback { cursor: default; }
+.chip.ghost {
+  border-style: dashed;
+  background: transparent;
+  color: #6b6558;
+}
+.chip.ghost .slot { color: #6b6558; }
+.chip.ghost:hover { border-style: solid; background: #fff; color: var(--ink); }
 
 /* ---------- screen ---------- */
 .statusline { font-size: 8px; min-height: 14px; }
@@ -243,6 +250,12 @@ body {
         <div class="counter pixel" id="counter">00:00:00</div>
         <div class="players" id="players"></div>
         <button class="btn stop" id="stop-btn" style="display:block">&#9632; END MEETING</button>
+      </div>
+
+      <div class="live" id="backfill">
+        <div class="pixel" style="font-size:9px">NAME YOUR GUESTS</div>
+        <div id="guest-fields" style="display:flex;flex-direction:column;gap:12px"></div>
+        <button class="btn start" id="finalize-btn">&#9654; SAVE TRANSCRIPT</button>
       </div>
     </aside>
 
@@ -326,12 +339,37 @@ function renderPlayers() {
     chip.innerHTML = `<span class="slot">&#9741;</span> REMOTE`;
     players.appendChild(chip);
   }
+  addGhost(players, false, "+ WALK-IN");
+  if (state.channels && state.channels.includes("loopback")) {
+    addGhost(players, true, "+ CALL-IN");
+  }
+}
+
+function addGhost(players, remote, label) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "chip ghost" + (remote ? " remote" : "");
+  chip.title = "Unexpected speaker? Click to switch to them now; name them after the meeting.";
+  chip.innerHTML = `<span class="slot">${remote ? "&#9741;" : "P?"}</span> ${label}`;
+  chip.onclick = () => post("/api/add_guest", { remote });
+  players.appendChild(chip);
+}
+
+function renderBackfill(guests) {
+  const fields = $("guest-fields");
+  fields.innerHTML = "";
+  guests.forEach((guest) => {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const safe = escapeHtml(guest);
+    wrap.innerHTML = `<label class="pixel">${safe.toUpperCase()}</label>
+      <input type="text" data-guest="${safe}" placeholder="Who was this?">`;
+    fields.appendChild(wrap);
+  });
 }
 
 function setRecording(recording) {
   state.recording = recording;
-  $("setup").style.display = recording ? "none" : "block";
-  $("live").style.display = recording ? "flex" : "none";
   $("empty-title").textContent = recording ? "LISTENING" : "INSERT MEETING";
   $("empty-sub").innerHTML = recording ? "&#9210; SPEAK AND LINES APPEAR" : "&#9654; PRESS START";
   let cursor = $("live-cursor");
@@ -356,12 +394,20 @@ function setRecording(recording) {
 function applyState(s) {
   state = Object.assign(state, s);
   $("backend-badge").textContent = (s.backend || "cpu").replace("faster_whisper", "CPU").replace("openvino", "NPU/OV").toUpperCase();
-  if (s.recording) {
-    sessionEpoch = Date.now() - (s.elapsed || 0) * 1000;
-    $("screen").querySelectorAll(".line").forEach((el) => el.remove());
-    (s.lines || []).forEach(addLine);
-  }
-  if (s.last_saved) {
+  const pending = !s.recording && Array.isArray(s.pending_backfill);
+  $("setup").style.display = s.recording || pending ? "none" : "block";
+  $("live").style.display = s.recording ? "flex" : "none";
+  $("backfill").style.display = pending ? "flex" : "none";
+
+  if (s.recording) sessionEpoch = Date.now() - (s.elapsed || 0) * 1000;
+  $("screen").querySelectorAll(".line").forEach((el) => el.remove());
+  $("empty").style.display = "";
+  (s.lines || []).forEach(addLine);
+
+  if (pending) {
+    renderBackfill(s.pending_backfill);
+    $("statusline").innerHTML = "NAME YOUR GUESTS, THEN SAVE";
+  } else if (s.last_saved) {
     $("statusline").innerHTML = `<span class="saved">SAVED &#9654; ${escapeHtml(s.last_saved)}</span>`;
   }
   setRecording(!!s.recording);
@@ -387,6 +433,14 @@ $("setup").onsubmit = (event) => {
 };
 
 $("stop-btn").onclick = () => post("/api/stop").then(applyState);
+
+$("finalize-btn").onclick = () => {
+  const renames = {};
+  $("guest-fields").querySelectorAll("input[data-guest]").forEach((input) => {
+    if (input.value.trim()) renames[input.dataset.guest] = input.value.trim();
+  });
+  post("/api/finalize", { renames }).then(applyState);
+};
 
 $("quit-btn").onclick = () => {
   post("/api/quit").catch(() => {});
