@@ -1,18 +1,6 @@
-"""Wires capture → VAD chunking → transcription → sink across threads.
-
-Producers (audio callbacks or a file reader) put channel-tagged, stamped
-frame blocks on ``frame_queue``. A chunker thread routes each block to that
-channel's VadChunker (each channel keeps its own VAD state); a single
-transcription worker turns chunks into TranscriptSegments and hands them to
-the sink. distil-small.en INT8 runs faster than realtime on CPU, so one
-worker keeps up and the transcript lags live audio by a few seconds at most.
-
-Streams are never mixed: mic and loopback frames stay separate through the
-whole pipeline, which is what makes remote-speaker attribution free.
-
-``None`` on a queue is the end-of-stream sentinel; ``finish()`` drains
-everything (including a final VAD flush per channel) before returning.
-"""
+"""Threads and queues: frame blocks → per-channel VAD chunkers → one
+transcription worker → sink. Channels never mix; ``None`` is the
+end-of-stream sentinel on every queue."""
 
 from __future__ import annotations
 
@@ -31,13 +19,10 @@ from .types import AudioChunk, Channel, TranscriptSegment
 from .vad import SileroVad
 
 Sink = Callable[[TranscriptSegment, float], None]
-"""Receives each segment plus its latency (seconds behind live) at delivery."""
 
 
 @dataclass(frozen=True)
 class _Split:
-    """Control message: force a chunk boundary on one channel."""
-
     channel: Channel
 
 

@@ -1,9 +1,5 @@
-"""Transcription backends behind a common interface.
-
-Callers only ever see ``create_transcriber(config)``: faster-whisper on CPU
-by default, or OpenVINO GenAI (``--backend openvino``) to offload onto the
-Intel NPU/GPU and keep CPU cores free during meetings.
-"""
+"""Transcription backends behind ``create_transcriber``: faster-whisper on
+CPU, or OpenVINO GenAI offloading to the Intel NPU/GPU."""
 
 from __future__ import annotations
 
@@ -45,12 +41,8 @@ class FasterWhisperTranscriber(Transcriber):
 
 
 class OpenVinoTranscriber(Transcriber):
-    """OpenVINO GenAI WhisperPipeline — offloads inference to NPU or GPU.
-
-    The default model is a pre-converted int8 repo from the OpenVINO HF org,
-    so no torch/optimum conversion toolchain is needed. If the requested
-    device can't take the model, falls back to OpenVINO on CPU (plan B).
-    """
+    """WhisperPipeline on NPU/GPU using pre-converted int8 models (no torch
+    toolchain); a device that rejects the model falls back to CPU."""
 
     def __init__(self, config: Config) -> None:
         try:
@@ -80,12 +72,8 @@ class OpenVinoTranscriber(Transcriber):
 
     @staticmethod
     def _resolve_model(source: str) -> str:
-        """``source`` is a local directory or a HuggingFace repo id.
-
-        Repos download to %LOCALAPPDATA%/oat-notes/models as plain files:
-        the default HF cache layout needs symlinks, which Windows only
-        allows with Developer Mode enabled.
-        """
+        """Local directory or HF repo id; repos land as plain files under
+        %LOCALAPPDATA% because the HF cache's symlinks need Developer Mode."""
         if Path(source).is_dir():
             return source
         import os
