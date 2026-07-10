@@ -1,21 +1,10 @@
-"""VAD-driven chunking: turns a stream of stamped audio frames into AudioChunks.
+"""VAD-driven chunking state machine, pure logic with an injected VAD.
 
-Pure logic — the VAD is injected (anything with ``window_samples`` and
-``speech_probability(window) -> float``), so tests drive it with a fake.
-
-Splitting rules:
-- a chunk opens on the first speech window, prepended with a short pre-roll
-  so word onsets are not clipped;
-- it closes after ``silence_split_seconds`` of continuous non-speech, or is
-  force-split at ``max_chunk_seconds`` mid-speech;
-- chunks whose speech span is under ``min_speech_seconds`` are dropped as
-  blips.
-
-Timestamps: ``push`` receives the capture-time stamp of each block's first
-sample. Window times are derived by sample offset from the most recent block
-stamp, re-anchored whenever the internal buffer drains (continuously, in live
-capture), so times stay clock-anchored rather than drifting with sample
-counts.
+A chunk opens on speech (prepended with pre-roll so word onsets aren't
+clipped), closes after ``silence_split_seconds`` of quiet or force-splits at
+``max_chunk_seconds``; sub-``min_speech_seconds`` blips are dropped. Window
+times re-anchor to each block's capture-time stamp whenever the buffer
+drains, so they follow the session clock rather than sample counts.
 """
 
 from __future__ import annotations
@@ -79,12 +68,8 @@ class VadChunker:
         return self._finalize()
 
     def split(self) -> AudioChunk | None:
-        """Force a chunk boundary now — e.g. a speaker-switch hotkey.
-
-        The in-flight chunk is emitted immediately (it belongs to the
-        previous speaker) and a fresh chunk continues from the same instant,
-        so no 0.5 s pause is needed between speakers.
-        """
+        """Force a boundary now (speaker switch): emit the in-flight chunk
+        and continue a fresh one from the same instant."""
         if not self._in_speech or not self._chunk_windows:
             return None
         return self._finalize(continue_speech=True)
@@ -140,7 +125,6 @@ class VadChunker:
             )
 
         if continue_speech:
-            # Force-split mid-speech: the next chunk continues immediately.
             self._chunk_windows = []
             self._chunk_start = end
             self._first_speech_time = end

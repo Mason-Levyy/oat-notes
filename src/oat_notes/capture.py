@@ -1,13 +1,6 @@
-"""WASAPI audio capture via pyaudiowpatch.
-
-The PortAudio callback does nothing but stamp, convert, and enqueue — all
-real work happens downstream. The same class will serve the loopback stream
-in Phase 3 (different device index, Channel.LOOPBACK).
-
-Capture is attempted at the pipeline rate (16 kHz); if the device refuses,
-it falls back to the device's default rate and downsamples in the callback
-via linear interpolation, which is adequate for speech ASR.
-"""
+"""WASAPI capture (mic or loopback). The PortAudio callback only stamps,
+converts, and enqueues; devices that refuse 16 kHz are captured at their
+native rate and linearly resampled, which is adequate for speech ASR."""
 
 from __future__ import annotations
 
@@ -100,7 +93,6 @@ def _resample(samples: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
 
 
 def find_default_loopback(pa: pyaudio.PyAudio) -> dict | None:
-    """Loopback endpoint of the default output device, if one exists."""
     try:
         return dict(pa.get_default_wasapi_loopback())
     except (OSError, LookupError):
@@ -108,7 +100,6 @@ def find_default_loopback(pa: pyaudio.PyAudio) -> dict | None:
 
 
 def list_input_devices(pa: pyaudio.PyAudio) -> list[dict]:
-    """All input-capable devices, including WASAPI loopback endpoints."""
     devices = []
     try:
         default_index = int(pa.get_default_input_device_info()["index"])

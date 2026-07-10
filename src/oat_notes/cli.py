@@ -249,7 +249,6 @@ def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
     duration = samples.size / config.sample_rate
     print(f"Transcribing {args.wav} ({duration:.1f}s)\n", flush=True)
 
-    # File blocks are fed faster than realtime, so latency numbers are meaningless.
     started_at = datetime.now()
     clock = SessionClock()
     log = MeetingLog(label_channels=False)

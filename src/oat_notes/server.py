@@ -1,9 +1,5 @@
-"""Local web UI: stdlib HTTP server + Server-Sent Events, no web framework.
-
-Single-user, localhost-only by design. The transcriber loads once at server
-start; each meeting is a Session (session.py) driven through a small JSON
-API. Transcript lines stream to the page over SSE.
-"""
+"""Localhost-only web UI: stdlib HTTP + SSE, one meeting at a time. Each
+connected SSE client holds a handler thread."""
 
 from __future__ import annotations
 
@@ -25,7 +21,7 @@ from .types import Channel, TranscriptSegment
 
 
 class EventHub:
-    """Fan-out of JSON events to every connected SSE client."""
+    """Fans JSON events out to every connected SSE client."""
 
     def __init__(self) -> None:
         self._subscribers: list[queue.Queue] = []
@@ -61,7 +57,7 @@ class AppState:
         self.hub = EventHub()
         self.lock = threading.Lock()
         self.session: Session | None = None
-        self.pending: Session | None = None  # stopped, awaiting guest backfill
+        self.awaiting_backfill: Session | None = None
         self.roster: tuple[Speaker, ...] = ()
         self.meeting_name: str = "meeting"
         self.lines: list[dict] = []
@@ -77,8 +73,8 @@ class AppState:
                 else {Channel.MIC: None, Channel.LOOPBACK: None}
             )
             pending_guests = (
-                _guests_with_lines(self.pending)
-                if self.pending is not None
+                _guests_with_lines(self.awaiting_backfill)
+                if self.awaiting_backfill is not None
                 else None
             )
             return {
@@ -149,7 +145,7 @@ class AppState:
                     }
                 )
 
-            self.pending = None
+            self.awaiting_backfill = None
             self.session = Session(
                 self.config,
                 SessionOptions(
@@ -174,7 +170,7 @@ class AppState:
         needs_backfill = bool(_guests_with_lines(session)) and not session.log.is_empty
         with self.lock:
             if needs_backfill:
-                self.pending = session
+                self.awaiting_backfill = session
             else:
                 saved = session.save()
                 self.last_saved = str(saved) if saved else None
@@ -183,10 +179,10 @@ class AppState:
 
     def finalize(self, body: dict) -> dict:
         with self.lock:
-            if self.pending is None:
+            if self.awaiting_backfill is None:
                 return {"error": "nothing awaiting backfill"}
-            session = self.pending
-            self.pending = None
+            session = self.awaiting_backfill
+            self.awaiting_backfill = None
             renames = {
                 str(old): str(new)
                 for old, new in (body.get("renames") or {}).items()

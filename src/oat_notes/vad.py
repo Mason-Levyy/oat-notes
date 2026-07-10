@@ -1,10 +1,6 @@
-"""Streaming Silero VAD over the ONNX model bundled with faster-whisper.
-
-faster-whisper's own SileroVADModel wrapper is batch-only (it resets the LSTM
-state every call), so this runs the same model file through its own
-onnxruntime session, carrying the recurrent state and the 64-sample context
-tail across calls — one 512-sample window (32 ms at 16 kHz) at a time.
-"""
+"""Streaming Silero VAD over the ONNX model bundled with faster-whisper,
+whose own wrapper is batch-only: this session carries the LSTM state and the
+64-sample context tail across calls, one 512-sample window at a time."""
 
 import os
 

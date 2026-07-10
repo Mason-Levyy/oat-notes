@@ -1,15 +1,9 @@
-"""One live meeting session: capture + pipeline + attribution + log.
-
-Both front ends drive this class — the console (cli.py) and the web UI
-(server.py). Speaker switches arrive from the global hotkeys or the UI and
-funnel through ``switch_speaker``, which records the switch and cuts the
-in-flight mic chunk so the handoff attributes exactly.
-"""
+"""One live meeting session, shared by the console and web front ends."""
 
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -86,7 +80,6 @@ class Session:
         )
         self._label_channels = len(self.channels) > 1
 
-        self._attributor = None
         self.active: dict[Channel, int | None] = {
             Channel.MIC: None,
             Channel.LOOPBACK: None,
@@ -99,8 +92,7 @@ class Session:
         )
         self.active[Channel.MIC] = mic_first
         self.active[Channel.LOOPBACK] = remote_first
-        # Always constructed (even for an empty roster) so guests can be
-        # added mid-session; channels with no members fall back to Me/Remote.
+        # Constructed even for an empty roster: guests can be added mid-session.
         self._attributor = Attributor(
             tuple(self.roster),
             mic_log=SwitchLog(initial=mic_first if mic_first is not None else 0),
@@ -108,7 +100,6 @@ class Session:
                 initial=remote_first if remote_first is not None else 0
             ),
         )
-        attributor = self._attributor
 
         self.log = MeetingLog(label_channels=self._label_channels)
         self._pipeline = Pipeline(
@@ -117,7 +108,7 @@ class Session:
             transcriber,
             self._handle_segment,
             channels=self.channels,
-            attributor=attributor,
+            attributor=self._attributor,
         )
 
         self.captures = [

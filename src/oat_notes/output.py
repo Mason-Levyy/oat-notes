@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -12,7 +13,6 @@ CHANNEL_LABELS = {Channel.MIC: "Me", Channel.LOOPBACK: "Remote"}
 
 
 def slugify(name: str) -> str:
-    """Filesystem-safe file stem: ``"Stand-up Meeting!"`` → ``stand-up-meeting``."""
     slug = re.sub(r"[^\w\-]+", "-", name.strip().lower()).strip("-")
     return slug or "meeting"
 
@@ -25,10 +25,6 @@ def format_timestamp(seconds: float) -> str:
 
 
 def line_for(segment: TranscriptSegment, label_channels: bool) -> str:
-    """One transcript line: ``[00:03:12] Me: Let's walk through the model.``
-
-    ``speaker`` (Phase 2 attribution) wins over the channel label once set.
-    """
     label = ""
     if segment.speaker:
         label = f"{segment.speaker}: "
@@ -38,11 +34,8 @@ def line_for(segment: TranscriptSegment, label_channels: bool) -> str:
 
 
 class MeetingLog:
-    """Accumulates segments during a session; writes the sorted transcript.
-
-    ``add`` is called from the transcription worker thread; ``save`` only
-    after ``Pipeline.finish()`` has joined it, so no locking is needed.
-    """
+    """Unlocked by design: ``add`` runs on the transcription worker thread,
+    everything else only after ``Pipeline.finish()`` has joined it."""
 
     def __init__(self, label_channels: bool) -> None:
         self._label_channels = label_channels
@@ -57,9 +50,6 @@ class MeetingLog:
         }
 
     def rename(self, renames: dict[str, str]) -> None:
-        """Backfill speaker names, e.g. {"Guest 1": "Tom"}."""
-        from dataclasses import replace
-
         self._segments = [
             replace(segment, speaker=renames[segment.speaker])
             if segment.speaker in renames

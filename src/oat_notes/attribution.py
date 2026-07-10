@@ -1,13 +1,5 @@
-"""Speaker attribution over one unified roster of in-person and remote people.
-
-Every speaker gets a hotkey/chip 1..N regardless of where they sit. A press
-routes to the speaker's own channel: in-person names attribute mic chunks,
-remote (``*``) names attribute loopback chunks, and each channel keeps its
-own switch log and active pointer. A chunk goes to whichever speaker of its
-channel held the majority of its span — since the VAD splits at pauses and
-people hand off at pauses, this mostly self-corrects. With zero or one
-speaker on a channel no key is ever needed for it.
-"""
+"""Speaker attribution: one roster, but each channel (mic/loopback) has its
+own switch log and only its own members may claim its chunks."""
 
 from __future__ import annotations
 
@@ -36,12 +28,8 @@ def parse_speakers(text: str) -> tuple[Speaker, ...]:
 
 
 class SwitchLog:
-    """Append-only log of speaker switches for one channel.
-
-    ``initial`` is the roster index active from t=0. ``record`` is called
-    from the hotkey/UI threads, ``attribute`` from the transcription worker
-    — hence the lock.
-    """
+    """Append-only switch log for one channel; ``initial`` is active from
+    t=0. Locked: writers are hotkey/UI threads, reader is the worker."""
 
     def __init__(self, initial: int = 0) -> None:
         self._initial = initial
@@ -62,7 +50,7 @@ class SwitchLog:
             return active
 
     def attribute(self, start: float, end: float) -> int:
-        """Speaker with the largest overlap with [start, end]."""
+        """The speaker holding the largest share of [start, end]."""
         if end <= start:
             return self.active_at(start)
         with self._lock:
@@ -85,8 +73,8 @@ class SwitchLog:
 
 
 class Attributor:
-    """Names each chunk's speaker from the roster; returns None when the
-    chunk's channel has nobody listed (output falls back to Me/Remote)."""
+    """Names each chunk's speaker; None when the chunk's channel has nobody
+    listed, letting output fall back to the Me/Remote channel label."""
 
     def __init__(
         self,
