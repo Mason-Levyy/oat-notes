@@ -21,9 +21,23 @@ class FasterWhisperTranscriber(Transcriber):
         from faster_whisper import WhisperModel
 
         self._config = config
-        self._model = WhisperModel(
-            config.model_name, device="cpu", compute_type=config.compute_type
-        )
+        try:
+            self._model = WhisperModel(
+                config.model_name,
+                device="cpu",
+                compute_type=config.compute_type,
+                local_files_only=True,
+            )
+        except Exception:
+            if config.offline:
+                raise RuntimeError(
+                    f"model {config.model_name!r} is not cached locally and"
+                    " --offline forbids downloading it"
+                ) from None
+            print(f"downloading {config.model_name}…", file=sys.stderr)
+            self._model = WhisperModel(
+                config.model_name, device="cpu", compute_type=config.compute_type
+            )
 
     def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:
         segments, _ = self._model.transcribe(
@@ -53,7 +67,7 @@ class OpenVinoTranscriber(Transcriber):
                 " uv sync --extra openvino"
             ) from error
 
-        model_dir = self._resolve_model(config.openvino_model)
+        model_dir = self._resolve_model(config.openvino_model, config.offline)
         self.device = config.openvino_device
         try:
             self._pipeline = openvino_genai.WhisperPipeline(
@@ -71,14 +85,12 @@ class OpenVinoTranscriber(Transcriber):
             self._pipeline = openvino_genai.WhisperPipeline(model_dir, device="CPU")
 
     @staticmethod
-    def _resolve_model(source: str) -> str:
+    def _resolve_model(source: str, offline: bool) -> str:
         """Local directory or HF repo id; repos land as plain files under
         %LOCALAPPDATA% because the HF cache's symlinks need Developer Mode."""
         if Path(source).is_dir():
             return source
         import os
-
-        from huggingface_hub import snapshot_download
 
         target = (
             Path(os.environ["LOCALAPPDATA"])
@@ -86,6 +98,16 @@ class OpenVinoTranscriber(Transcriber):
             / "models"
             / source.replace("/", "--")
         )
+        if (target / "config.json").exists():
+            return str(target)
+        if offline:
+            raise RuntimeError(
+                f"model {source!r} is not cached locally and --offline forbids"
+                " downloading it"
+            )
+        print(f"downloading {source}…", file=sys.stderr)
+        from huggingface_hub import snapshot_download
+
         return snapshot_download(source, local_dir=target)
 
     def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:

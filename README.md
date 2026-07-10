@@ -42,6 +42,7 @@ uv run oat-notes --debug             # show per-chunk transcription latency
 uv run oat-notes --model small.en    # swap whisper models
 uv run oat-notes --backend openvino  # offload to the Intel NPU (see below)
 uv run oat-notes --backend openvino --ov-device GPU   # or the Arc GPU
+uv run oat-notes --offline           # never touch the network; fails if the model isn't cached yet
 ```
 
 Output, one line per speech chunk:
@@ -71,6 +72,10 @@ server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
 ```
 
 Chunks carry a channel tag (`MIC`/`LOOPBACK`) and segments carry a `speaker` field from day one, so the dual-stream and attribution phases slot in without restructuring.
+
+## Local-only by design
+
+Audio, transcription, and the transcript file never leave the machine. The web UI binds to `127.0.0.1` only and rejects requests whose `Host`/`Origin` headers don't name that address (blocks DNS-rebinding and cross-site POSTs from a browser tab). The only network traffic oat-notes ever makes is the one-time HuggingFace model download — cached after that, and `--offline` disables it entirely, failing immediately if a model isn't already on disk. HF telemetry and implicit-token lookups are disabled by default.
 
 ## OpenVINO backend (NPU/GPU offload)
 

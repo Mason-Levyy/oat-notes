@@ -214,6 +214,18 @@ class AppState:
         return self.status()
 
 
+def is_trusted_request(host_header: str | None, origin_header: str | None, port: int) -> bool:
+    """Blocks DNS-rebinding (Host must name this loopback port) and
+    cross-site POSTs (a present Origin must match too)."""
+    allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    if host_header not in allowed_hosts:
+        return False
+    if origin_header is None:
+        return True
+    allowed_origins = {f"http://{host}" for host in allowed_hosts}
+    return origin_header in allowed_origins
+
+
 def _guests_with_lines(session: Session) -> list[str]:
     spoke = session.log.speakers_with_lines()
     return [
@@ -229,6 +241,7 @@ def _load_asset(name: str) -> bytes:
 
 class Handler(BaseHTTPRequestHandler):
     state: AppState  # assigned by serve()
+    port: int  # assigned by serve()
 
     def log_message(self, format: str, *log_args) -> None:
         pass  # keep the console clean; transcript lines matter more
@@ -241,15 +254,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_json(self, payload: dict) -> None:
-        status = (
-            HTTPStatus.CONFLICT if "error" in payload else HTTPStatus.OK
-        )
-        self._send(
-            status, json.dumps(payload).encode(), "application/json"
+    def _send_json(self, payload: dict, status: HTTPStatus | None = None) -> None:
+        if status is None:
+            status = HTTPStatus.CONFLICT if "error" in payload else HTTPStatus.OK
+        self._send(status, json.dumps(payload).encode(), "application/json")
+
+    def _is_trusted(self) -> bool:
+        return is_trusted_request(
+            self.headers.get("Host"), self.headers.get("Origin"), self.port
         )
 
     def do_GET(self) -> None:
+        if not self._is_trusted():
+            self._send(HTTPStatus.FORBIDDEN, b"forbidden", "text/plain")
+            return
         if self.path in ("/", "/index.html"):
             self._send(HTTPStatus.OK, _load_asset("index.html"), "text/html; charset=utf-8")
         elif self.path == "/pixel.woff2":
@@ -262,14 +280,30 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.NOT_FOUND, b"not found", "text/plain")
 
     def do_POST(self) -> None:
+        if not self._is_trusted():
+            self._send(HTTPStatus.FORBIDDEN, b"forbidden", "text/plain")
+            return
         length = int(self.headers.get("Content-Length") or 0)
-        body = json.loads(self.rfile.read(length) or b"{}")
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("request body must be a JSON object")
+        except ValueError as error:
+            self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+
         if self.path == "/api/start":
             self._send_json(self.state.start_session(body))
         elif self.path == "/api/stop":
             self._send_json(self.state.stop_session())
         elif self.path == "/api/switch":
-            self._send_json(self.state.switch_speaker(int(body.get("index", 0))))
+            index = body.get("index")
+            if not isinstance(index, int):
+                self._send_json(
+                    {"error": "index must be an integer"}, status=HTTPStatus.BAD_REQUEST
+                )
+                return
+            self._send_json(self.state.switch_speaker(index))
         elif self.path == "/api/add_guest":
             self._send_json(self.state.add_guest(body))
         elif self.path == "/api/finalize":
@@ -311,6 +345,7 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
 
     state = AppState(config, transcriber)
     Handler.state = state
+    Handler.port = args.port
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     server.daemon_threads = True
     url = f"http://127.0.0.1:{args.port}"
