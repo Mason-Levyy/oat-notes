@@ -18,6 +18,7 @@ class Config:
     backend: str = "faster_whisper"
     openvino_model: str = "OpenVINO/whisper-small.en-int8-ov"
     openvino_device: str = "NPU"
+    offline: bool = False
     debug: bool = False
 
     @property

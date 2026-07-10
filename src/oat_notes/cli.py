@@ -109,6 +109,11 @@ def main() -> None:
         "--debug", action="store_true", help="show per-chunk transcription latency"
     )
     parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="never reach the network; fail if the model isn't already cached",
+    )
+    parser.add_argument(
         "--ui", action="store_true", help="launch the web UI instead of the console"
     )
     parser.add_argument(
@@ -125,7 +130,7 @@ def main() -> None:
         _print_devices()
         return
 
-    config_overrides = {"debug": args.debug}
+    config_overrides = {"debug": args.debug, "offline": args.offline}
     if args.model:
         config_overrides["model_name"] = args.model
     if args.backend:
@@ -149,7 +154,8 @@ def main() -> None:
         )
     else:
         print(f"Loading {config.model_name} ({config.compute_type})", flush=True)
-    print("(first run downloads the model to the HuggingFace cache)", flush=True)
+    if not config.offline:
+        print("(first run downloads the model to the HuggingFace cache)", flush=True)
     transcriber = create_transcriber(config)
 
     if args.wav:

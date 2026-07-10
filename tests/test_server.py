@@ -1,7 +1,7 @@
 import queue
 
 from oat_notes.config import Config
-from oat_notes.server import AppState, EventHub
+from oat_notes.server import AppState, EventHub, is_trusted_request
 
 
 def test_hub_fans_out_to_all_subscribers():
@@ -61,3 +61,33 @@ def test_finalize_without_pending_reports_error():
 def test_idle_status_has_no_pending_backfill():
     state = AppState(Config(), transcriber=None)
     assert state.status()["pending_backfill"] is None
+
+
+def test_trusted_host_no_origin():
+    assert is_trusted_request("127.0.0.1:8737", None, 8737)
+    assert is_trusted_request("localhost:8737", None, 8737)
+
+
+def test_trusted_host_matching_origin():
+    assert is_trusted_request("127.0.0.1:8737", "http://127.0.0.1:8737", 8737)
+    assert is_trusted_request("localhost:8737", "http://localhost:8737", 8737)
+
+
+def test_wrong_port_in_host_is_rejected():
+    assert not is_trusted_request("127.0.0.1:9999", None, 8737)
+
+
+def test_dns_rebinding_host_is_rejected():
+    assert not is_trusted_request("evil.example.com:8737", None, 8737)
+
+
+def test_missing_host_is_rejected():
+    assert not is_trusted_request(None, None, 8737)
+
+
+def test_cross_site_origin_is_rejected():
+    assert not is_trusted_request("127.0.0.1:8737", "https://evil.example", 8737)
+
+
+def test_origin_naming_a_different_loopback_port_is_rejected():
+    assert not is_trusted_request("127.0.0.1:8737", "http://127.0.0.1:9999", 8737)
