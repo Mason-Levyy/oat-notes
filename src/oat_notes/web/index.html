@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oat-notes</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23F0A63C'/><rect x='4' y='4' width='8' height='8' fill='%231A1A1A'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'><line x1='9' y1='0' x2='11' y2='2' stroke='%238B5E3C' stroke-width='1.4' stroke-linecap='round'/><!-- rim --><rect x='1' y='2' width='10' height='1.5' rx='0.5' fill='%231A1A1A'/><!-- oat --><rect x='1' y='3.5' width='10' height='1.5' fill='%23F0A63C'/><!-- bowl --><path d='M1 5 Q1 8.5 6 9 Q11 8.5 11 5Z' fill='%23EDE8DD' stroke='%231A1A1A' stroke-width='1'/></svg>">
 <style>
 @font-face {
   font-family: "Pixel";
@@ -50,21 +50,77 @@ body {
   padding: 14px 18px;
   border-bottom: 3px solid var(--ink);
 }
-/* An oat groat at 45 degrees: slender spindle from bottom-left to top-right,
-   pointed tips, lengthwise groove (dark), sun side highlighted (light). */
+/* Bowl of oats + spoon: compact 11×7 pixel grid.
+   r0–1 : spoon handle (2-px diagonal, top-right)
+   r2   : bowl rim (solid ink bar)
+   r3   : oat surface (dithered fill)
+   r4   : bowl body (cream)
+   r5   : bowl narrows
+   r6   : bowl base/foot */
 .sprite {
+  --wood: #8B5E3C;
   width: var(--px); height: var(--px);
-  margin: 0 calc(var(--px) * 8) calc(var(--px) * 8) 0;
+  margin: 0 calc(var(--px) * 10) calc(var(--px) * 6) 0;
   background: transparent;
   box-shadow:
-    calc(var(--px)*8) calc(var(--px)*1) var(--oat),
-    calc(var(--px)*7) calc(var(--px)*2) var(--oat), calc(var(--px)*5) calc(var(--px)*2) var(--oat-light),
-    calc(var(--px)*6) calc(var(--px)*3) var(--oat-dark), calc(var(--px)*4) calc(var(--px)*3) var(--oat-light),
-    calc(var(--px)*7) calc(var(--px)*4) var(--oat), calc(var(--px)*5) calc(var(--px)*4) var(--oat-dark), calc(var(--px)*3) calc(var(--px)*4) var(--oat-light),
-    calc(var(--px)*6) calc(var(--px)*5) var(--oat), calc(var(--px)*4) calc(var(--px)*5) var(--oat-dark), calc(var(--px)*2) calc(var(--px)*5) var(--oat),
-    calc(var(--px)*5) calc(var(--px)*6) var(--oat), calc(var(--px)*3) calc(var(--px)*6) var(--oat-dark), calc(var(--px)*1) calc(var(--px)*6) var(--oat),
-    calc(var(--px)*4) calc(var(--px)*7) var(--oat), calc(var(--px)*2) calc(var(--px)*7) var(--oat-dark),
-    calc(var(--px)*3) calc(var(--px)*8) var(--oat), calc(var(--px)*1) calc(var(--px)*8) var(--oat);
+    /* spoon handle — r0 col 3 (tip), r1 col 4; angles ↘ into bowl */
+    calc(var(--px)*3)  calc(var(--px)*0) var(--wood),
+    calc(var(--px)*4)  calc(var(--px)*0) var(--ink),
+    calc(var(--px)*4)  calc(var(--px)*1) var(--wood),
+    calc(var(--px)*5)  calc(var(--px)*1) var(--ink),
+    /* rim — r2, cols 1–10 */
+    calc(var(--px)*1)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*2)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*3)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*4)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*5)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*6)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*7)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*8)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*9)  calc(var(--px)*2) var(--ink),
+    calc(var(--px)*10) calc(var(--px)*2) var(--ink),
+    /* oat surface — r3, cols 0–10 */
+    calc(var(--px)*0)  calc(var(--px)*3) var(--ink),
+    calc(var(--px)*1)  calc(var(--px)*3) var(--oat),
+    calc(var(--px)*2)  calc(var(--px)*3) var(--oat-light),
+    calc(var(--px)*3)  calc(var(--px)*3) var(--oat),
+    calc(var(--px)*4)  calc(var(--px)*3) var(--oat-light),
+    calc(var(--px)*5)  calc(var(--px)*3) var(--oat),
+    calc(var(--px)*6)  calc(var(--px)*3) var(--oat-light),
+    calc(var(--px)*7)  calc(var(--px)*3) var(--oat),
+    calc(var(--px)*8)  calc(var(--px)*3) var(--oat-light),
+    calc(var(--px)*9)  calc(var(--px)*3) var(--oat-dark),
+    calc(var(--px)*10) calc(var(--px)*3) var(--ink),
+    /* bowl body — r4, cols 0–10 */
+    calc(var(--px)*0)  calc(var(--px)*4) var(--ink),
+    calc(var(--px)*1)  calc(var(--px)*4) var(--oat),
+    calc(var(--px)*2)  calc(var(--px)*4) var(--oat-light),
+    calc(var(--px)*3)  calc(var(--px)*4) var(--oat),
+    calc(var(--px)*4)  calc(var(--px)*4) var(--oat-light),
+    calc(var(--px)*5)  calc(var(--px)*4) var(--oat),
+    calc(var(--px)*6)  calc(var(--px)*4) var(--oat-light),
+    calc(var(--px)*7)  calc(var(--px)*4) var(--oat),
+    calc(var(--px)*8)  calc(var(--px)*4) var(--oat-light),
+    calc(var(--px)*9)  calc(var(--px)*4) var(--oat-dark),
+    calc(var(--px)*10) calc(var(--px)*4) var(--ink),
+    /* bowl narrows — r5, cols 1–9 */
+    calc(var(--px)*1)  calc(var(--px)*5) var(--ink),
+    calc(var(--px)*2)  calc(var(--px)*5) var(--oat-light),
+    calc(var(--px)*3)  calc(var(--px)*5) var(--oat),
+    calc(var(--px)*4)  calc(var(--px)*5) var(--oat-light),
+    calc(var(--px)*5)  calc(var(--px)*5) var(--oat),
+    calc(var(--px)*6)  calc(var(--px)*5) var(--oat-light),
+    calc(var(--px)*7)  calc(var(--px)*5) var(--oat),
+    calc(var(--px)*8)  calc(var(--px)*5) var(--oat-dark),
+    calc(var(--px)*9)  calc(var(--px)*5) var(--ink),
+    /* bowl foot — r6, cols 2–8 */
+    calc(var(--px)*2)  calc(var(--px)*6) var(--ink),
+    calc(var(--px)*3)  calc(var(--px)*6) var(--ink),
+    calc(var(--px)*4)  calc(var(--px)*6) var(--ink),
+    calc(var(--px)*5)  calc(var(--px)*6) var(--ink),
+    calc(var(--px)*6)  calc(var(--px)*6) var(--ink),
+    calc(var(--px)*7)  calc(var(--px)*6) var(--ink),
+    calc(var(--px)*8)  calc(var(--px)*6) var(--ink);
 }
 .wordmark { font-size: 14px; letter-spacing: 1px; }
 .header .badges { margin-left: auto; display: flex; gap: 8px; align-items: center; }
@@ -235,7 +291,7 @@ body {
         <div class="field" style="margin-bottom:16px">
           <label class="pixel" for="speakers">SPEAKERS</label>
           <input type="text" id="speakers" placeholder="Mason, Sarah, Priya*, Dev*">
-          <div class="hint">One row, comma-separated; <b>*</b> marks who's on the call. Ctrl+Alt+1–9 (any app focused) or a click switches the active speaker; an unused number auto-adds a guest.</div>
+          <div class="hint">One row, comma-separated; <b>*</b> marks who's on the call. Ctrl+Alt+1–9 switches the active speaker.</div>
         </div>
         <label class="check" style="margin-bottom:16px">
           <input type="checkbox" id="loopback" checked>
