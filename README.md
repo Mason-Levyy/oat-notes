@@ -99,10 +99,11 @@ Uses a pre-converted `OpenVINO/whisper-small.en-int8-ov` from HuggingFace (no to
 ## Packaged exe
 
 ```
+uv sync --extra openvino
 .\scripts\build_exe.ps1
 ```
 
-Produces `dist\oat-notes.exe` (PyInstaller onefile, console app). Double-click → web UI opens; all CLI flags work too. Model weights download to the user cache on first run so the exe stays smaller. The OpenVINO backend is excluded from the exe — run from source for NPU transcription.
+Produces `dist\oat-notes.exe` (PyInstaller onefile, console app). Double-click → web UI opens with the OpenVINO backend targeting the Intel NPU; if the NPU rejects the model, OpenVINO falls back to CPU. All CLI flags work too. Model weights download to the user cache on first run so the exe stays smaller.
 
 ## Tests
 
