@@ -2,6 +2,7 @@ import queue
 
 from oat_notes.config import Config
 from oat_notes.server import AppState, EventHub, is_trusted_request
+from oat_notes.settings import AppSettings
 
 
 def test_hub_fans_out_to_all_subscribers():
@@ -34,7 +35,65 @@ def test_idle_status_shape():
     assert status["recording"] is False
     assert status["lines"] == []
     assert status["backend"] == "faster_whisper"
+    assert status["model_status"] == "loading"
+    assert status["model_error"] is None
+    assert status["settings"]["hotkey_modifiers"] == ["ctrl", "alt"]
     assert status["last_saved"] is None
+
+
+def test_model_ready_updates_status_and_notifies_clients():
+    state = AppState(Config(), transcriber=None)
+    subscriber = state.hub.subscribe()
+    transcriber = object()
+
+    state.model_ready(transcriber, elapsed=1.25)
+
+    assert state.transcriber is transcriber
+    assert state.status()["model_status"] == "ready"
+    assert state.status()["model_load_seconds"] == 1.25
+    assert subscriber.get_nowait()["type"] == "status"
+
+
+def test_model_failure_is_exposed_and_blocks_start():
+    state = AppState(Config(), transcriber=None)
+    state.model_failed(RuntimeError("NPU unavailable"), elapsed=2.5)
+
+    status = state.status()
+    assert status["model_status"] == "error"
+    assert status["model_error"] == "RuntimeError: NPU unavailable"
+    assert state.start_session({}) == {"error": "RuntimeError: NPU unavailable"}
+
+
+def test_start_is_blocked_while_model_loads():
+    state = AppState(Config(), transcriber=None)
+    assert state.start_session({}) == {
+        "error": "transcription model is still loading"
+    }
+
+
+def test_settings_update_is_validated_and_persisted():
+    saved = []
+    state = AppState(Config(), transcriber=None, save_settings=saved.append)
+
+    status = state.update_settings({"hotkey_modifiers": ["shift", "ctrl"]})
+
+    assert status["settings"]["hotkey_modifiers"] == ["ctrl", "shift"]
+    assert status["settings"]["hotkey_label"] == "Ctrl+Shift+1–9"
+    assert saved == [AppSettings(("ctrl", "shift"))]
+
+
+def test_invalid_settings_do_not_replace_current_value():
+    state = AppState(Config(), transcriber=None)
+    response = state.update_settings({"hotkey_modifiers": []})
+    assert "error" in response
+    assert state.settings == AppSettings()
+
+
+def test_settings_cannot_change_during_meeting():
+    state = AppState(Config(), transcriber=None)
+    state.session = object()
+    response = state.update_settings({"hotkey_modifiers": ["shift"]})
+    assert response == {"error": "end the meeting before changing hotkeys"}
 
 
 def test_stop_without_session_reports_error():

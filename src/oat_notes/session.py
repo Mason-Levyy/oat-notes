@@ -29,6 +29,7 @@ class SessionOptions:
     out_dir: Path = Path("transcripts")
     save_file: bool = True
     hotkeys: bool = True
+    hotkey_modifiers: tuple[str, ...] = ("ctrl", "alt")
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,10 @@ class Session:
 
         self._hotkeys = None
         if options.hotkeys:
-            self._hotkeys = HotkeyListener(self.switch_speaker)
+            self._hotkeys = HotkeyListener(
+                self.switch_speaker,
+                modifiers=options.hotkey_modifiers,
+            )
 
     def start(self) -> None:
         if self._hotkeys is not None:

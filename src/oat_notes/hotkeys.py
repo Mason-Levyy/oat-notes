@@ -1,4 +1,4 @@
-"""Global Ctrl+Alt+digit speaker-switch hotkeys, active only during a session.
+"""Global modifier+digit speaker switching, active only during a session.
 
 The chord works from any focused application and never collides with plain
 number typing. Digits beyond the current roster are forwarded too — the
@@ -14,11 +14,18 @@ _NUMPAD_NINE_VK = 105
 
 
 class HotkeyListener:
-    def __init__(self, on_switch: Callable[[int], None]) -> None:
+    def __init__(
+        self,
+        on_switch: Callable[[int], None],
+        modifiers: tuple[str, ...] = ("ctrl", "alt"),
+    ) -> None:
+        allowed = {"ctrl", "alt", "shift", "win"}
+        if not modifiers or not set(modifiers).issubset(allowed):
+            raise ValueError("modifiers must contain ctrl, alt, shift, and/or win")
         self._on_switch = on_switch
+        self._required_modifiers = frozenset(modifiers)
         self._listener = None
-        self._ctrl_held = False
-        self._alt_held = False
+        self._held_modifiers: set[str] = set()
 
     def start(self) -> None:
         from pynput import keyboard
@@ -35,33 +42,33 @@ class HotkeyListener:
             self._listener = None
 
     def _handle_press(self, key) -> None:
-        if self._is_ctrl(key):
-            self._ctrl_held = True
+        modifier = self._modifier_name(key)
+        if modifier is not None:
+            self._held_modifiers.add(modifier)
             return
-        if self._is_alt(key):
-            self._alt_held = True
-            return
-        if not (self._ctrl_held and self._alt_held):
+        if self._held_modifiers != self._required_modifiers:
             return
         index = self._digit_index(key)
         if index is not None:
             self._on_switch(index)
 
     def _handle_release(self, key) -> None:
-        if self._is_ctrl(key):
-            self._ctrl_held = False
-        elif self._is_alt(key):
-            self._alt_held = False
+        modifier = self._modifier_name(key)
+        if modifier is not None:
+            self._held_modifiers.discard(modifier)
 
     @staticmethod
-    def _is_ctrl(key) -> bool:
+    def _modifier_name(key) -> str | None:
         name = getattr(key, "name", "")
-        return name.startswith("ctrl")
-
-    @staticmethod
-    def _is_alt(key) -> bool:
-        name = getattr(key, "name", "")
-        return name.startswith("alt")
+        if name.startswith("ctrl"):
+            return "ctrl"
+        if name.startswith("alt"):
+            return "alt"
+        if name.startswith("shift"):
+            return "shift"
+        if name.startswith("cmd") or name.startswith("win"):
+            return "win"
+        return None
 
     @staticmethod
     def _digit_index(key) -> int | None:

@@ -12,20 +12,22 @@ class FakeKey:
 
 CTRL = FakeKey(name="ctrl_l")
 ALT = FakeKey(name="alt_l")
+SHIFT = FakeKey(name="shift_l")
+WIN = FakeKey(name="cmd_l")
 
 
-def make_listener():
+def make_listener(modifiers=("ctrl", "alt")):
     received = []
-    listener = HotkeyListener(received.append)
+    listener = HotkeyListener(received.append, modifiers=modifiers)
     return listener, received
 
 
-def press_chord(listener, key):
-    listener._handle_press(CTRL)
-    listener._handle_press(ALT)
+def press_chord(listener, key, modifier_keys=(CTRL, ALT)):
+    for modifier in modifier_keys:
+        listener._handle_press(modifier)
     listener._handle_press(key)
-    listener._handle_release(ALT)
-    listener._handle_release(CTRL)
+    for modifier in reversed(modifier_keys):
+        listener._handle_release(modifier)
 
 
 def test_chord_fires_switch():
@@ -77,3 +79,27 @@ def test_out_of_roster_digit_still_forwards():
     listener, received = make_listener()
     press_chord(listener, FakeKey(char="9"))
     assert received == [8]
+
+
+def test_custom_ctrl_shift_chord_fires():
+    listener, received = make_listener(("ctrl", "shift"))
+    press_chord(listener, FakeKey(char="4"), (CTRL, SHIFT))
+    assert received == [3]
+
+
+def test_old_chord_does_not_fire_after_customization():
+    listener, received = make_listener(("ctrl", "shift"))
+    press_chord(listener, FakeKey(char="4"), (CTRL, ALT))
+    assert received == []
+
+
+def test_extra_modifier_does_not_match():
+    listener, received = make_listener(("ctrl", "alt"))
+    press_chord(listener, FakeKey(char="2"), (CTRL, ALT, SHIFT))
+    assert received == []
+
+
+def test_windows_modifier_is_supported():
+    listener, received = make_listener(("win", "shift"))
+    press_chord(listener, FakeKey(char="5"), (WIN, SHIFT))
+    assert received == [4]

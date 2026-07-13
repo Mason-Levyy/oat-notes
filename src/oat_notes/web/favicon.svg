@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 28" shape-rendering="crispEdges">
+  <title>Oat Notes</title>
+  <!-- Spoon -->
+  <path d="M12 0h4v4h-4zm4 4h4v4h-4z" fill="#8b5e3c"/>
+  <path d="M16 0h4v4h-4zm4 4h4v4h-4z" fill="#1a1a1a"/>
+  <!-- Rim -->
+  <path d="M4 8h40v4H4z" fill="#1a1a1a"/>
+  <!-- Oats and bowl face -->
+  <path d="M0 12h44v8H40v4h-4v4H8v-4H4v-4H0z" fill="#1a1a1a"/>
+  <path d="M4 12h36v8h-4v4H8v-4H4z" fill="#f0a63c"/>
+  <path d="M8 12h4v4H8zm8 0h4v4h-4zm8 0h4v4h-4zm8 0h4v4h-4zM8 16h4v4H8zm8 0h4v4h-4zm8 0h4v4h-4zm8 0h4v4h-4z" fill="#f7d08a"/>
+  <path d="M36 12h4v8h-4z" fill="#b87a1e"/>
+  <!-- Foot -->
+  <path d="M8 24h28v4H8z" fill="#1a1a1a"/>
+</svg>
