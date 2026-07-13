@@ -54,7 +54,7 @@ Output, one line per speech chunk:
 
 On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--name "stand-up"` → `stand-up_…​.txt`), merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-`--speakers` takes everyone in one list; a `*` suffix marks remote people on the call. **Ctrl+Alt+1..9** (any app focused — the hook is global, and plain digits still type normally everywhere) switches the active speaker, and the press routes to that speaker's own channel: in-person names attribute mic audio, `*` names attribute call audio, each channel tracking its own active speaker. A chord for a number with no speaker yet auto-adds an in-person `Guest N` and switches to them — name them in the backfill panel afterwards; guests who never spoke are dropped silently. A press also cuts the in-flight chunk on the spot, so rapid handoffs with no pause still attribute cleanly; otherwise a chunk goes to whoever held the majority of its span. A channel with a single listed speaker never needs a key (one remote person = fully automatic).
+`--speakers` takes everyone in one list; a `*` suffix marks remote people on the call. **Ctrl+Alt+1..9** by default (any app focused — the hook is global, and plain digits still type normally everywhere) switches the active speaker, and the press routes to that speaker's own channel: in-person names attribute mic audio, `*` names attribute call audio, each channel tracking its own active speaker. In the web UI, the **Settings** tab can change the modifier combination to any selection of Ctrl, Alt, Shift, and Win; the number still selects speaker slot 1..9. The choice is saved under `%LOCALAPPDATA%\oat-notes\settings.json` and applies to the next meeting. A chord for a number with no speaker yet auto-adds an in-person `Guest N` and switches to them — name them in the backfill panel afterwards; guests who never spoke are dropped silently. A press also cuts the in-flight chunk on the spot, so rapid handoffs with no pause still attribute cleanly; otherwise a chunk goes to whoever held the majority of its span. A channel with a single listed speaker never needs a key (one remote person = fully automatic).
 
 ## Architecture
 
@@ -66,7 +66,7 @@ chunker.py    state machine: split at 0.5s silence, force-split at 15s, drop bli
 transcriber.py  Transcriber ABC + faster-whisper and OpenVINO backends
 pipeline.py   capture → chunker thread → transcription worker → sink, via queues
 attribution.py  switch log + majority-overlap speaker attribution
-hotkeys.py    global 1..N listener (session-scoped)
+hotkeys.py    configurable global modifier+1..9 listener (session-scoped)
 session.py    one meeting: capture + pipeline + attribution + transcript log
 server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
 ```
@@ -89,6 +89,8 @@ uv run oat-notes --backend openvino --ov-device GPU
 
 Uses a pre-converted `OpenVINO/whisper-small.en-int8-ov` from HuggingFace (no torch/conversion toolchain), stored under `%LOCALAPPDATA%\oat-notes\models`. If the device rejects the model it falls back to OpenVINO-on-CPU. Benchmarks on a Core Ultra (11 s clip, distil-small.en vs whisper-small.en int8):
 
+Compiled OpenVINO models are cached under `%LOCALAPPDATA%\oat-notes\openvino-cache`, avoiding a minute-long NPU compilation on later starts. The cache uses about 850 MB on the tested Core Ultra system.
+
 | Backend | Load | Speed |
 |---|---|---|
 | faster-whisper CPU int8 | 1.4 s | 9× realtime |
@@ -96,14 +98,37 @@ Uses a pre-converted `OpenVINO/whisper-small.en-int8-ov` from HuggingFace (no to
 | OpenVINO GPU (Arc) | 18 s | 38× realtime |
 | OpenVINO CPU | 1.3 s | 18× realtime |
 
-## Packaged exe
+## Installed Windows app
 
 ```
 uv sync --extra openvino
-.\scripts\build_exe.ps1
+.\scripts\build_app.ps1
 ```
 
-Produces `dist\oat-notes.exe` (PyInstaller onefile, console app). Double-click → web UI opens with the OpenVINO backend targeting the Intel NPU; if the NPU rejects the model, OpenVINO falls back to CPU. All CLI flags work too. Model weights download to the user cache on first run so the exe stays smaller.
+Produces an unpacked, windowed application under
+`%LOCALAPPDATA%\oat-notes-build\dist\oat-notes`. Unlike the old one-file
+executable, the installed layout does not decompress 170+ MB into `%TEMP%` on
+every launch. Double-clicking `oat-notes.exe` starts the UI first, then loads
+and warms OpenVINO in the background. The START button enables when the model
+is ready.
+
+For a Start menu shortcut, uninstaller, and optional desktop shortcut, install
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) and run:
+
+```
+.\scripts\build_installer.ps1
+```
+
+The installer is written to `dist\installer\OatNotes-Setup.exe` and installs
+per-user under `%LOCALAPPDATA%\Programs\Oat Notes`, so it does not require an
+administrator prompt. Installed launches save transcripts under
+`Documents\Oat Notes`; windowed-app logs live under
+`%LOCALAPPDATA%\oat-notes\logs`. Model weights and compiled OpenVINO caches
+remain in `%LOCALAPPDATA%\oat-notes` and survive application upgrades.
+
+The legacy `.\scripts\build_exe.ps1` command remains as an alias for
+`build_app.ps1`. All CLI flags still work. Model weights download to the user
+cache on first run, keeping the installer smaller.
 
 ## Tests
 

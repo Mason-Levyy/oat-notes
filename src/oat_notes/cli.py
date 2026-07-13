@@ -7,18 +7,12 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import numpy as np
-
-from .attribution import Speaker, parse_speakers
-from .capture import list_input_devices
-from .clock import SessionClock
 from .config import Config
-from .output import MeetingLog, format_timestamp, line_for
-from .pipeline import Pipeline
-from .session import Session, SessionEvents, SessionOptions
-from .transcriber import create_transcriber
-from .types import AudioChunk, Channel, TranscriptSegment
+
+if TYPE_CHECKING:
+    from .output import MeetingLog
 
 
 def main() -> None:
@@ -147,6 +141,8 @@ def main() -> None:
         serve(config, args, open_browser=not args.no_browser)
         return
 
+    from .transcriber import create_transcriber
+
     if config.backend == "openvino":
         print(
             f"Loading {config.openvino_model} on {config.openvino_device} (OpenVINO)",
@@ -176,6 +172,10 @@ def _save_transcript(args: argparse.Namespace, log: MeetingLog, started_at: date
 
 def warm_up(config: Config, transcriber) -> None:
     """One dummy transcription so the first real chunk isn't slowed by lazy init."""
+    import numpy as np
+
+    from .types import AudioChunk, Channel
+
     transcriber.transcribe(
         AudioChunk(
             samples=np.zeros(config.sample_rate // 2, dtype=np.float32),
@@ -187,6 +187,11 @@ def warm_up(config: Config, transcriber) -> None:
 
 
 def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
+    from .attribution import parse_speakers
+    from .output import format_timestamp
+    from .session import Session, SessionEvents, SessionOptions
+    from .types import Channel, TranscriptSegment
+
     warm_up(config, transcriber)
     roster = parse_speakers(args.speakers or "")
     if args.remote_name:
@@ -251,6 +256,11 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
 def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
     from faster_whisper.audio import decode_audio
 
+    from .clock import SessionClock
+    from .output import MeetingLog, line_for
+    from .pipeline import Pipeline
+    from .types import Channel
+
     samples = decode_audio(args.wav, sampling_rate=config.sample_rate)
     duration = samples.size / config.sample_rate
     print(f"Transcribing {args.wav} ({duration:.1f}s)\n", flush=True)
@@ -275,6 +285,8 @@ def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
 
 def _print_devices() -> None:
     import pyaudiowpatch as pyaudio
+
+    from .capture import list_input_devices
 
     pa = pyaudio.PyAudio()
     try:

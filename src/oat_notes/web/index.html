@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oat-notes</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'><line x1='9' y1='0' x2='11' y2='2' stroke='%238B5E3C' stroke-width='1.4' stroke-linecap='round'/><!-- rim --><rect x='1' y='2' width='10' height='1.5' rx='0.5' fill='%231A1A1A'/><!-- oat --><rect x='1' y='3.5' width='10' height='1.5' fill='%23F0A63C'/><!-- bowl --><path d='M1 5 Q1 8.5 6 9 Q11 8.5 11 5Z' fill='%23EDE8DD' stroke='%231A1A1A' stroke-width='1'/></svg>">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 @font-face {
   font-family: "Pixel";
@@ -139,6 +139,16 @@ body {
 }
 .power:active { transform: translate(2px, 2px); box-shadow: none; }
 
+.tabs { display: flex; border-bottom: 3px solid var(--ink); }
+.tab {
+  flex: 1; border: 0; border-right: 3px solid var(--ink); background: #fff;
+  padding: 9px 14px; cursor: pointer; font-family: "Pixel", Consolas, monospace;
+  font-size: 9px;
+}
+.tab:last-child { border-right: 0; }
+.tab.active { background: var(--oat); }
+.tab:focus-visible { outline: 3px solid var(--ink); outline-offset: -3px; }
+
 /* ---------- layout ---------- */
 .body { display: flex; }
 .rail {
@@ -182,8 +192,42 @@ body {
 }
 .btn:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
 .btn:focus-visible { outline: 3px solid var(--oat); outline-offset: 2px; }
+.btn:disabled {
+  cursor: wait; opacity: 0.55; box-shadow: 2px 2px 0 var(--ink);
+  transform: none;
+}
 .btn.start { background: var(--oat); }
 .btn.stop { background: var(--rec); color: #fff; display: none; }
+
+/* ---------- settings ---------- */
+.settings-view { display: none; padding: 24px; min-height: 520px; }
+.settings-card {
+  width: min(620px, 100%); border: 3px solid var(--ink); background: #fff;
+  box-shadow: 5px 5px 0 var(--ink); padding: 22px;
+}
+.settings-card h2 { font-size: 12px; margin-bottom: 12px; }
+.modifier-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px; margin: 20px 0;
+}
+.modifier-option { cursor: pointer; }
+.modifier-option input { position: absolute; opacity: 0; }
+.modifier-option span {
+  display: block; border: 3px solid var(--ink); padding: 12px 6px;
+  text-align: center; background: var(--paper); font-size: 9px;
+}
+.modifier-option input:checked + span {
+  background: var(--oat); box-shadow: 3px 3px 0 var(--ink);
+}
+.modifier-option input:focus-visible + span { outline: 3px solid var(--sprout); }
+.hotkey-preview {
+  border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
+  padding: 18px; margin-bottom: 18px; text-align: center; font-size: 12px;
+}
+.settings-message { min-height: 18px; margin-top: 14px; font-size: 8px; }
+.settings-message.error { color: var(--rec); }
+.settings-message.saved { color: var(--sprout); }
+.settings-view .btn:disabled { cursor: not-allowed; }
 
 /* ---------- live session rail ---------- */
 .live { display: none; flex-direction: column; gap: 16px; }
@@ -266,6 +310,7 @@ body {
   .body { flex-direction: column; }
   .rail { width: 100%; border-right: none; border-bottom: 3px solid var(--ink); }
   .screen { min-height: 300px; }
+  .modifier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
 </head>
@@ -280,7 +325,12 @@ body {
     </div>
   </header>
 
-  <div class="body">
+  <nav class="tabs" aria-label="Application sections">
+    <button class="tab active" id="tab-meeting" type="button" aria-selected="true">MEETING</button>
+    <button class="tab" id="tab-settings" type="button" aria-selected="false">SETTINGS</button>
+  </nav>
+
+  <div class="body" id="meeting-view">
     <aside class="rail">
       <form id="setup" autocomplete="off">
         <div class="field" style="margin-bottom:16px">
@@ -291,7 +341,7 @@ body {
         <div class="field" style="margin-bottom:16px">
           <label class="pixel" for="speakers">SPEAKERS</label>
           <input type="text" id="speakers" placeholder="Mason, Sarah, Priya*, Dev*">
-          <div class="hint">One row, comma-separated; <b>*</b> marks who's on the call. Ctrl+Alt+1–9 switches the active speaker.</div>
+          <div class="hint">One row, comma-separated; <b>*</b> marks who's on the call. <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches the active speaker.</div>
         </div>
         <label class="check" style="margin-bottom:16px">
           <input type="checkbox" id="loopback" checked>
@@ -325,12 +375,38 @@ body {
       </div>
     </main>
   </div>
+
+  <section class="settings-view" id="settings-view">
+    <div class="settings-card">
+      <h2 class="pixel">SPEAKER SWITCH HOTKEY</h2>
+      <p>Choose the modifiers held with <b>1–9</b>. The number still selects that speaker's slot.</p>
+      <div class="hint">The shortcut is global while a meeting is recording. Single-modifier combinations may conflict with shortcuts in other apps.</div>
+      <form id="settings-form">
+        <div class="modifier-grid">
+          <label class="modifier-option pixel"><input type="checkbox" value="ctrl"><span>CTRL</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="alt"><span>ALT</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="shift"><span>SHIFT</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="win"><span>WIN</span></label>
+        </div>
+        <div class="hotkey-preview pixel" id="hotkey-preview">CTRL+ALT+1–9</div>
+        <button type="submit" class="btn start" id="settings-save">SAVE HOTKEY</button>
+        <div class="settings-message pixel" id="settings-message" role="status"></div>
+      </form>
+    </div>
+  </section>
 </div>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-let state = { recording: false, speakers: [], actives: { mic: null, loopback: null }, elapsed: 0 };
+let state = {
+  recording: false,
+  speakers: [],
+  actives: { mic: null, loopback: null },
+  elapsed: 0,
+  model_status: "loading",
+  settings: { hotkey_modifiers: ["ctrl", "alt"], hotkey_label: "Ctrl+Alt+1–9" },
+};
 let sessionEpoch = null;
 let tick = null;
 
@@ -348,6 +424,51 @@ function fmt(totalSeconds) {
   const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
   const sec = String(s % 60).padStart(2, "0");
   return `${h}:${m}:${sec}`;
+}
+
+const modifierLabels = { ctrl: "Ctrl", alt: "Alt", shift: "Shift", win: "Win" };
+
+function selectedModifiers() {
+  return Array.from($("settings-form").querySelectorAll("input[type=checkbox]:checked"))
+    .map((input) => input.value);
+}
+
+function hotkeyLabel(modifiers) {
+  if (!modifiers.length) return "CHOOSE A MODIFIER";
+  return `${modifiers.map((item) => modifierLabels[item]).join("+")}+1–9`;
+}
+
+function updateHotkeyPreview() {
+  $("hotkey-preview").textContent = hotkeyLabel(selectedModifiers()).toUpperCase();
+}
+
+function openTab(name) {
+  const settingsOpen = name === "settings";
+  $("meeting-view").style.display = settingsOpen ? "none" : "flex";
+  $("settings-view").style.display = settingsOpen ? "block" : "none";
+  $("tab-meeting").classList.toggle("active", !settingsOpen);
+  $("tab-settings").classList.toggle("active", settingsOpen);
+  $("tab-meeting").setAttribute("aria-selected", String(!settingsOpen));
+  $("tab-settings").setAttribute("aria-selected", String(settingsOpen));
+}
+
+function renderSettings() {
+  const settings = state.settings || { hotkey_modifiers: ["ctrl", "alt"] };
+  const selected = new Set(settings.hotkey_modifiers || []);
+  $("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
+    input.checked = selected.has(input.value);
+  });
+  updateHotkeyPreview();
+  $("hotkey-hint").textContent = settings.hotkey_label || hotkeyLabel([...selected]);
+  $("settings-save").disabled = !!state.recording;
+  const message = $("settings-message");
+  if (state.recording) {
+    message.textContent = "END THE MEETING BEFORE CHANGING THE HOTKEY";
+    message.className = "settings-message pixel error";
+  } else if (message.textContent === "END THE MEETING BEFORE CHANGING THE HOTKEY") {
+    message.textContent = "";
+    message.className = "settings-message pixel";
+  }
 }
 
 function addLine(line) {
@@ -449,7 +570,11 @@ function setRecording(recording) {
 
 function applyState(s) {
   state = Object.assign(state, s);
-  $("backend-badge").textContent = (s.backend || "cpu").replace("faster_whisper", "CPU").replace("openvino", "NPU/OV").toUpperCase();
+  const backend = (state.backend || "cpu").replace("faster_whisper", "CPU").replace("openvino", "NPU/OV").toUpperCase();
+  $("backend-badge").textContent = state.model_status === "loading" ? `${backend} …` : backend;
+  const modelReady = state.model_status === "ready";
+  $("start-btn").disabled = !modelReady;
+  $("start-btn").innerHTML = modelReady ? "&#9654; START MEETING" : "LOADING MODEL…";
   const pending = !s.recording && Array.isArray(s.pending_backfill);
   $("setup").style.display = s.recording || pending ? "none" : "block";
   $("live").style.display = s.recording ? "flex" : "none";
@@ -467,7 +592,20 @@ function applyState(s) {
     $("statusline").innerHTML = `<span class="saved">SAVED &#9654; ${escapeHtml(s.last_saved)}</span>`;
   }
   setRecording(!!s.recording);
+  if (!s.recording && !pending && state.model_status === "loading") {
+    $("statusline").textContent = "LOADING TRANSCRIPTION MODEL…";
+    $("empty-title").textContent = "WARMING UP";
+    $("empty-sub").textContent = "THE UI IS READY — THE MODEL IS LOADING";
+  } else if (!s.recording && !pending && state.model_status === "error") {
+    $("statusline").textContent = `MODEL ERROR: ${state.model_error || "UNKNOWN ERROR"}`;
+    $("empty-title").textContent = "MODEL ERROR";
+    $("empty-sub").textContent = "CHECK THE OAT-NOTES LOG";
+  } else if (!s.recording && !pending && !s.last_saved && modelReady) {
+    const elapsed = Number(state.model_load_seconds);
+    $("statusline").textContent = Number.isFinite(elapsed) ? `MODEL READY IN ${elapsed.toFixed(1)}S` : "MODEL READY";
+  }
   if (s.recording) renderPlayers();
+  renderSettings();
 }
 
 $("setup").onsubmit = (event) => {
@@ -485,7 +623,13 @@ $("setup").onsubmit = (event) => {
     name: $("mname").value.trim(),
     speakers,
     loopback: $("loopback").checked,
-  }).then(applyState);
+  }).then((result) => {
+    if (result.error) {
+      $("statusline").textContent = result.error.toUpperCase();
+      return;
+    }
+    applyState(result);
+  });
 };
 
 $("stop-btn").onclick = () => post("/api/stop").then(applyState);
@@ -496,6 +640,34 @@ $("finalize-btn").onclick = () => {
     if (input.value.trim()) renames[input.dataset.guest] = input.value.trim();
   });
   post("/api/finalize", { renames }).then(applyState);
+};
+
+$("tab-meeting").onclick = () => openTab("meeting");
+$("tab-settings").onclick = () => openTab("settings");
+
+$("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
+  input.onchange = updateHotkeyPreview;
+});
+
+$("settings-form").onsubmit = (event) => {
+  event.preventDefault();
+  const modifiers = selectedModifiers();
+  const message = $("settings-message");
+  if (!modifiers.length) {
+    message.textContent = "CHOOSE AT LEAST ONE MODIFIER";
+    message.className = "settings-message pixel error";
+    return;
+  }
+  post("/api/settings", { hotkey_modifiers: modifiers }).then((result) => {
+    if (result.error) {
+      message.textContent = result.error.toUpperCase();
+      message.className = "settings-message pixel error";
+      return;
+    }
+    applyState(result);
+    message.textContent = `SAVED — ${result.settings.hotkey_label}`;
+    message.className = "settings-message pixel saved";
+  });
 };
 
 $("quit-btn").onclick = () => {

@@ -8,15 +8,18 @@ import json
 import queue
 import sys
 import threading
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import Path
+from typing import Callable
 
 from .attribution import Speaker
 from .config import Config
 from .output import format_timestamp
-from .session import Session, SessionEvents, SessionOptions
+from .settings import AppSettings, SettingsStore
 from .types import Channel, TranscriptSegment
 
 
@@ -51,9 +54,22 @@ class EventHub:
 class AppState:
     """Everything the handlers share. One meeting at a time."""
 
-    def __init__(self, config: Config, transcriber) -> None:
+    def __init__(
+        self,
+        config: Config,
+        transcriber,
+        out_dir: Path = Path("transcripts"),
+        settings: AppSettings = AppSettings(),
+        save_settings: Callable[[AppSettings], None] | None = None,
+    ) -> None:
         self.config = config
         self.transcriber = transcriber
+        self._out_dir = out_dir
+        self.settings = settings
+        self._save_settings = save_settings
+        self.model_status = "ready" if transcriber is not None else "loading"
+        self.model_error: str | None = None
+        self.model_load_seconds: float | None = None
         self.hub = EventHub()
         self.lock = threading.Lock()
         self.session: Session | None = None
@@ -96,14 +112,57 @@ class AppState:
                     else []
                 ),
                 "backend": self.config.backend,
+                "model_status": self.model_status,
+                "model_error": self.model_error,
+                "model_load_seconds": self.model_load_seconds,
+                "settings": self.settings.to_dict(),
                 "lines": self.lines,
                 "last_saved": self.last_saved,
             }
+
+    def model_ready(self, transcriber, elapsed: float) -> None:
+        with self.lock:
+            self.transcriber = transcriber
+            self.model_status = "ready"
+            self.model_error = None
+            self.model_load_seconds = elapsed
+        self.hub.publish({"type": "status", "recording": False})
+
+    def model_failed(self, error: Exception, elapsed: float) -> None:
+        with self.lock:
+            self.transcriber = None
+            self.model_status = "error"
+            self.model_error = f"{type(error).__name__}: {error}"
+            self.model_load_seconds = elapsed
+        self.hub.publish({"type": "status", "recording": False})
+
+    def update_settings(self, body: dict) -> dict:
+        try:
+            settings = AppSettings.from_dict(body)
+        except (TypeError, ValueError) as error:
+            return {"error": str(error)}
+        with self.lock:
+            if self.session is not None:
+                return {"error": "end the meeting before changing hotkeys"}
+            try:
+                if self._save_settings is not None:
+                    self._save_settings(settings)
+            except OSError as error:
+                return {"error": f"could not save settings: {error}"}
+            self.settings = settings
+        self.hub.publish({"type": "status", "recording": False})
+        return self.status()
 
     def start_session(self, body: dict) -> dict:
         with self.lock:
             if self.session is not None:
                 return {"error": "already recording"}
+            if self.transcriber is None:
+                if self.model_status == "error":
+                    return {"error": self.model_error or "model failed to load"}
+                return {"error": "transcription model is still loading"}
+            from .session import Session, SessionEvents, SessionOptions
+
             self.roster = tuple(
                 Speaker(
                     name=str(entry.get("name", "")).strip(),
@@ -152,6 +211,8 @@ class AppState:
                     speakers=self.roster,
                     meeting_name=self.meeting_name,
                     use_loopback=bool(body.get("loopback", True)),
+                    out_dir=self._out_dir,
+                    hotkey_modifiers=self.settings.hotkey_modifiers,
                 ),
                 self.transcriber,
                 SessionEvents(on_segment=on_segment, on_speaker=on_speaker),
@@ -270,6 +331,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ("/", "/index.html"):
             self._send(HTTPStatus.OK, _load_asset("index.html"), "text/html; charset=utf-8")
+        elif self.path == "/favicon.svg":
+            self._send(HTTPStatus.OK, _load_asset("favicon.svg"), "image/svg+xml")
         elif self.path == "/pixel.woff2":
             self._send(HTTPStatus.OK, _load_asset("pixel.woff2"), "font/woff2")
         elif self.path == "/api/state":
@@ -308,6 +371,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.add_guest(body))
         elif self.path == "/api/finalize":
             self._send_json(self.state.finalize(body))
+        elif self.path == "/api/settings":
+            self._send_json(self.state.update_settings(body))
         elif self.path == "/api/quit":
             self._send_json({"ok": True})
             self.state.shutdown.set()
@@ -335,26 +400,68 @@ class Handler(BaseHTTPRequestHandler):
             self.state.hub.unsubscribe(subscriber)
 
 
+def _initialize_model(state: AppState, config: Config) -> None:
+    """Load and warm the expensive transcription backend off the UI thread."""
+    started = time.perf_counter()
+    try:
+        from .cli import warm_up
+        from .transcriber import create_transcriber
+
+        print(f"Loading transcription model ({config.backend})…", flush=True)
+        transcriber = create_transcriber(config)
+        warm_up(config, transcriber)
+    except Exception as error:
+        elapsed = time.perf_counter() - started
+        print(f"Model initialization failed after {elapsed:.1f}s: {error}", file=sys.stderr)
+        state.model_failed(error, elapsed)
+        return
+    elapsed = time.perf_counter() - started
+    print(f"Transcription model ready in {elapsed:.1f}s", flush=True)
+    state.model_ready(transcriber, elapsed)
+
+
 def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -> None:
-    from .cli import warm_up
-    from .transcriber import create_transcriber
-
-    print(f"Loading transcription model ({config.backend})…", flush=True)
-    transcriber = create_transcriber(config)
-    warm_up(config, transcriber)
-
-    state = AppState(config, transcriber)
+    started = time.perf_counter()
+    settings_store = SettingsStore()
+    state = AppState(
+        config,
+        transcriber=None,
+        out_dir=args.out_dir,
+        settings=settings_store.load(),
+        save_settings=settings_store.save,
+    )
     Handler.state = state
     Handler.port = args.port
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    server.daemon_threads = True
     url = f"http://127.0.0.1:{args.port}"
-    print(f"oat-notes UI: {url}  (Ctrl+C to quit)", flush=True)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 10048 or error.errno == 98:
+            print(f"oat-notes is already running at {url}", flush=True)
+            if open_browser:
+                webbrowser.open(url)
+            return
+        raise
+    server.daemon_threads = True
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    print(
+        f"oat-notes UI ready in {time.perf_counter() - started:.2f}s: {url}",
+        flush=True,
+    )
     if open_browser:
         webbrowser.open(url)
+    # OpenVINO construction can hold the interpreter lock briefly. Give the
+    # browser enough time to fetch and paint the tiny UI before it begins.
+    model_thread = threading.Timer(
+        0.75,
+        _initialize_model,
+        args=(state, config),
+    )
+    model_thread.name = "model-loader"
+    model_thread.daemon = True
+    model_thread.start()
     try:
         while not state.shutdown.wait(timeout=0.3):
             pass

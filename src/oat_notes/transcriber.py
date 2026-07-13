@@ -3,6 +3,7 @@ CPU, or OpenVINO GenAI offloading to the Intel NPU/GPU."""
 
 from __future__ import annotations
 
+import os
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -69,9 +70,14 @@ class OpenVinoTranscriber(Transcriber):
 
         model_dir = self._resolve_model(config.openvino_model, config.offline)
         self.device = config.openvino_device
+        cache_dir = (
+            Path(os.environ["LOCALAPPDATA"])
+            / "oat-notes"
+            / "openvino-cache"
+        )
         try:
             self._pipeline = openvino_genai.WhisperPipeline(
-                model_dir, device=self.device
+                model_dir, device=self.device, CACHE_DIR=str(cache_dir)
             )
         except Exception as error:
             if self.device == "CPU":
@@ -90,8 +96,6 @@ class OpenVinoTranscriber(Transcriber):
         %LOCALAPPDATA% because the HF cache's symlinks need Developer Mode."""
         if Path(source).is_dir():
             return source
-        import os
-
         target = (
             Path(os.environ["LOCALAPPDATA"])
             / "oat-notes"
