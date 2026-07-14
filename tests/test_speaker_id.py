@@ -3,7 +3,13 @@ import math
 import numpy as np
 
 from oat_notes.attribution import Speaker
-from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
+from oat_notes.speaker_id import (
+    AttributionDecision,
+    RollingSpeakerBuffer,
+    SpeakerChangeGate,
+    SpeakerEmbeddingEngine,
+    SpeakerResolver,
+)
 from oat_notes.speaker_store import SpeakerStore
 from oat_notes.types import AudioChunk, Channel
 
@@ -197,3 +203,45 @@ def test_enrollment_rejects_short_or_clipped_turns(tmp_path):
     )
     assert resolver.wants_embedding(clipped) is False
     assert resolver.wants_embedding(chunk(manual=0, seconds=1.0)) is True
+
+
+def test_rolling_speaker_buffer_checks_overlapping_windows_on_hop():
+    buffer = RollingSpeakerBuffer(Channel.MIC, 100, 1.5, 0.5, 1.0)
+    block = np.full(10, 0.2, dtype=np.float32)
+
+    emitted = [buffer.push(index / 10, block, True) for index in range(15)]
+    first = emitted[-1]
+    assert first is not None
+    assert first.duration == 1.5
+    assert first.speech_seconds == 1.5
+
+    assert all(buffer.push(1.5 + index / 10, block, True) is None for index in range(4))
+    second = buffer.push(1.9, block, True)
+    assert second is not None
+    assert second.start == 0.5
+    assert second.duration == 1.5
+
+
+def test_rolling_speaker_buffer_skips_windows_without_one_second_of_speech():
+    buffer = RollingSpeakerBuffer(Channel.MIC, 100, 1.5, 0.5, 1.0)
+    block = np.full(10, 0.2, dtype=np.float32)
+
+    result = None
+    for index in range(15):
+        result = buffer.push(index / 10, block, index < 9)
+    assert result is None
+
+
+def test_speaker_change_gate_requires_two_consecutive_matches():
+    gate = SpeakerChangeGate(confirmations=2)
+    alice = AttributionDecision("Alice", 0, "alice", "auto", 0.9)
+    bob = AttributionDecision("Bob", 1, "bob", "auto", 0.9)
+    unknown = AttributionDecision("Unknown", None, None, "unknown")
+
+    assert gate.observe(alice) is None
+    assert gate.observe(unknown) is None
+    assert gate.observe(alice) is None
+    assert gate.observe(alice) == alice
+    assert gate.observe(alice) is None
+    assert gate.observe(bob) is None
+    assert gate.observe(bob) == bob

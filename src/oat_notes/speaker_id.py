@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
+import threading
 from abc import ABC, abstractmethod
+from collections import deque
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -111,6 +113,9 @@ class SpeakerResolver:
         self._engine = engine
         self._sample_rate = sample_rate
         self._temporary: dict[int, list[_TemporarySample]] = {}
+        # The bundled extractor owns mutable stream state and may be reached by
+        # both turn attribution and rolling speaker tracking.
+        self._embed_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -151,7 +156,8 @@ class SpeakerResolver:
     def embed(self, chunk: AudioChunk) -> np.ndarray:
         if self._engine is None:
             raise RuntimeError("speaker recognition is unavailable")
-        return self._engine.embed(chunk.samples, self._sample_rate)
+        with self._embed_lock:
+            return self._engine.embed(chunk.samples, self._sample_rate)
 
     def resolve(
         self, chunk: AudioChunk, embedding: np.ndarray | None
@@ -259,3 +265,107 @@ class SpeakerResolver:
                 sample.quality,
             )
         return profile
+
+
+class RollingSpeakerBuffer:
+    """Build overlapping, speech-qualified windows without changing ASR chunks."""
+
+    def __init__(
+        self,
+        channel: Channel,
+        sample_rate: int,
+        window_seconds: float,
+        hop_seconds: float,
+        min_speech_seconds: float = MIN_ENROLLMENT_SECONDS,
+    ) -> None:
+        self._channel = channel
+        self._sample_rate = sample_rate
+        self._window_samples = max(1, round(window_seconds * sample_rate))
+        self._hop_samples = max(1, round(hop_seconds * sample_rate))
+        self._min_speech_samples = max(1, round(min_speech_seconds * sample_rate))
+        self._windows: deque[tuple[float, np.ndarray, bool]] = deque()
+        self._sample_count = 0
+        self._samples_since_check = 0
+        self._ready = False
+
+    def reset(self) -> None:
+        self._windows.clear()
+        self._sample_count = 0
+        self._samples_since_check = 0
+        self._ready = False
+
+    def push(
+        self, timestamp: float, samples: np.ndarray, is_speech: bool
+    ) -> AudioChunk | None:
+        block = np.asarray(samples, dtype=np.float32)
+        self._windows.append((timestamp, block, is_speech))
+        self._sample_count += block.size
+        self._samples_since_check += block.size
+
+        # Keep the shortest whole-block window that still covers the target.
+        while (
+            len(self._windows) > 1
+            and self._sample_count - self._windows[0][1].size
+            >= self._window_samples
+        ):
+            _, removed, _ = self._windows.popleft()
+            self._sample_count -= removed.size
+
+        if self._sample_count < self._window_samples:
+            return None
+        if self._ready and self._samples_since_check < self._hop_samples:
+            return None
+        self._ready = True
+        self._samples_since_check = 0
+
+        speech_samples = sum(
+            window.size for _, window, speech in self._windows if speech
+        )
+        if speech_samples < self._min_speech_samples:
+            return None
+        start = self._windows[0][0]
+        waveform = np.concatenate([window for _, window, _ in self._windows])
+        return AudioChunk(
+            samples=waveform,
+            channel=self._channel,
+            start=start,
+            end=start + waveform.size / self._sample_rate,
+            speech_seconds=speech_samples / self._sample_rate,
+        )
+
+
+class SpeakerChangeGate:
+    """Require stable repeated matches before publishing a speaker change."""
+
+    def __init__(self, confirmations: int = 2) -> None:
+        self._confirmations = max(1, confirmations)
+        self._current: int | None = None
+        self._candidate: int | None = None
+        self._count = 0
+
+    def force(self, speaker_index: int | None) -> None:
+        self._current = speaker_index
+        self._candidate = None
+        self._count = 0
+
+    def observe(self, decision: AttributionDecision) -> AttributionDecision | None:
+        index = decision.speaker_index
+        if decision.source != "auto" or index is None:
+            self._candidate = None
+            self._count = 0
+            return None
+        if index == self._current:
+            self._candidate = None
+            self._count = 0
+            return None
+        if index == self._candidate:
+            self._count += 1
+        else:
+            self._candidate = index
+            self._count = 1
+        if self._count < self._confirmations:
+            return None
+        self._current = index
+        self._candidate = None
+        self._count = 0
+        return decision

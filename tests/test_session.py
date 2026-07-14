@@ -115,3 +115,23 @@ def test_delayed_old_attribution_cannot_override_manual_selection():
     session._handle_segment(selected_turn, 0.1)
     assert attributed[-1][:3] == (1, Channel.MIC, "manual")
     assert session._manual_override_pending[Channel.MIC] is False
+
+
+def test_rolling_attribution_updates_active_but_defers_to_manual_selection():
+    session = bare_session()
+    session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
+    session._manual_override_pending = {
+        Channel.MIC: False,
+        Channel.LOOPBACK: False,
+    }
+    attributed = []
+    session._events = SimpleNamespace(on_attribution=lambda *args: attributed.append(args))
+
+    session._handle_tracking_attribution(1, Channel.MIC, "auto", 0.91)
+    assert session.active[Channel.MIC] == 1
+    assert attributed == [(1, Channel.MIC, "auto", 0.91)]
+
+    session._manual_override_pending[Channel.MIC] = True
+    session._handle_tracking_attribution(0, Channel.MIC, "auto", 0.95)
+    assert session.active[Channel.MIC] == 1
+    assert len(attributed) == 1

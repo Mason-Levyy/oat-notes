@@ -127,6 +127,7 @@ class Session:
             channels=self.channels,
             attributor=self._attributor,
             speaker_resolver=self._speaker_resolver,
+            speaker_tracking_sink=self._handle_tracking_attribution,
         )
 
         self.captures = [
@@ -289,8 +290,8 @@ class Session:
 
     def _handle_segment(self, segment: TranscriptSegment, latency: float) -> None:
         # A long utterance may produce several max-duration transcript
-        # chunks. Keep its turn connected and update the automatic active
-        # chip only when natural silence closes that utterance.
+        # chunks. Keep its turn connected; rolling tracking updates the live
+        # chip independently while turn attribution closes on natural silence.
         pending_manual = self._manual_override_pending.get(segment.channel, False)
         if segment.attribution == "manual" and segment.speaker_index is not None:
             self.active[segment.channel] = segment.speaker_index
@@ -333,3 +334,16 @@ class Session:
         else:
             label = ""
         self._events.on_segment(segment, label, latency)
+
+    def _handle_tracking_attribution(
+        self,
+        index: int,
+        channel: Channel,
+        source: str,
+        confidence: float | None,
+    ) -> None:
+        """Publish stable rolling matches without waiting for a VAD turn end."""
+        if self._manual_override_pending.get(channel, False):
+            return
+        self.active[channel] = index
+        self._events.on_attribution(index, channel, source, confidence)

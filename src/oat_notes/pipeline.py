@@ -15,12 +15,13 @@ from .attribution import Attributor
 from .chunker import Vad, VadChunker
 from .clock import SessionClock
 from .config import Config
-from .speaker_id import SpeakerResolver
+from .speaker_id import RollingSpeakerBuffer, SpeakerChangeGate, SpeakerResolver
 from .transcriber import Transcriber
 from .types import AudioChunk, Channel, TranscriptSegment
 from .vad import SileroVad
 
 Sink = Callable[[TranscriptSegment, float], None]
+TrackingSink = Callable[[int, Channel, str, float | None], None]
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class Pipeline:
         vad_factory: Callable[[], Vad] = SileroVad,
         attributor: Attributor | None = None,
         speaker_resolver: SpeakerResolver | None = None,
+        speaker_tracking_sink: TrackingSink | None = None,
     ) -> None:
         self._config = config
         self._clock = clock
@@ -47,10 +49,52 @@ class Pipeline:
         self._sink = sink
         self._attributor = attributor
         self._speaker_resolver = speaker_resolver
+        self._speaker_tracking_sink = speaker_tracking_sink
         self.frame_queue: queue.Queue = queue.Queue(maxsize=512)
         self._chunk_queue: queue.Queue = queue.Queue(maxsize=64)
+        self._tracking_lock = threading.Lock()
+        tracking_enabled = bool(
+            speaker_resolver is not None
+            and speaker_resolver.enabled
+            and speaker_tracking_sink is not None
+        )
+        self._tracking_queue: queue.Queue | None = (
+            queue.Queue(maxsize=8) if tracking_enabled else None
+        )
+        self._tracking_buffers = (
+            {
+                channel: RollingSpeakerBuffer(
+                    channel,
+                    config.sample_rate,
+                    config.speaker_window_seconds,
+                    config.speaker_hop_seconds,
+                )
+                for channel in channels
+            }
+            if tracking_enabled
+            else {}
+        )
+        self._tracking_gates = (
+            {
+                channel: SpeakerChangeGate(config.speaker_confirmations)
+                for channel in channels
+            }
+            if tracking_enabled
+            else {}
+        )
+        self._tracking_generations = {channel: 0 for channel in channels}
         self._chunkers = {
-            channel: VadChunker(vad_factory(), config, channel)
+            channel: VadChunker(
+                vad_factory(),
+                config,
+                channel,
+                window_sink=(
+                    lambda timestamp, samples, is_speech, channel=channel:
+                    self._track_window(channel, timestamp, samples, is_speech)
+                )
+                if tracking_enabled
+                else None,
+            )
             for channel in channels
         }
         self._pending_manual: dict[Channel, int | None] = {
@@ -63,16 +107,29 @@ class Pipeline:
         self._worker_thread = threading.Thread(
             target=self._run_worker, name="transcriber", daemon=True
         )
+        self._tracking_thread = (
+            threading.Thread(
+                target=self._run_speaker_tracker,
+                name="speaker-tracker",
+                daemon=True,
+            )
+            if tracking_enabled
+            else None
+        )
 
     def start(self) -> None:
         self._chunker_thread.start()
         self._worker_thread.start()
+        if self._tracking_thread is not None:
+            self._tracking_thread.start()
 
     def finish(self) -> None:
         """Signal end of input and block until every queued chunk is out."""
         self.frame_queue.put(None)
         self._chunker_thread.join()
         self._worker_thread.join()
+        if self._tracking_thread is not None:
+            self._tracking_thread.join()
 
     def split_channel(self, channel: Channel) -> None:
         """Cut the in-flight chunk on ``channel`` right now (hotkey press).
@@ -86,10 +143,51 @@ class Pipeline:
 
     def manual_override(self, channel: Channel, speaker_index: int) -> None:
         """Cut now and force only the next/current VAD turn to one speaker."""
+        self._reset_tracking(channel, speaker_index)
         try:
             self.frame_queue.put_nowait(_Split(channel, speaker_index))
         except queue.Full:
             pass
+
+    def _reset_tracking(self, channel: Channel, speaker_index: int) -> None:
+        if self._tracking_queue is None:
+            return
+        with self._tracking_lock:
+            self._tracking_generations[channel] += 1
+            self._tracking_buffers[channel].reset()
+            self._tracking_gates[channel].force(speaker_index)
+
+    def _track_window(
+        self,
+        channel: Channel,
+        timestamp: float,
+        samples,
+        is_speech: bool,
+    ) -> None:
+        tracking_queue = self._tracking_queue
+        if tracking_queue is None:
+            return
+        with self._tracking_lock:
+            chunk = self._tracking_buffers[channel].push(
+                timestamp, samples, is_speech
+            )
+            generation = self._tracking_generations[channel]
+        if chunk is None:
+            return
+        item = (generation, chunk)
+        try:
+            tracking_queue.put_nowait(item)
+        except queue.Full:
+            # Tracking is live state, so a fresh window is more useful than a
+            # stale backlog when inference briefly falls behind.
+            try:
+                tracking_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                tracking_queue.put_nowait(item)
+            except queue.Full:
+                pass
 
     def _queue_chunk(self, chunk: AudioChunk) -> None:
         key = (chunk.channel, chunk.turn_id)
@@ -112,6 +210,8 @@ class Pipeline:
                     if final_chunk is not None:
                         self._queue_chunk(final_chunk)
                 self._chunk_queue.put(None)
+                if self._tracking_queue is not None:
+                    self._tracking_queue.put(None)
                 return
             if isinstance(block, _Split):
                 forced = self._chunkers[block.channel].split()
@@ -123,6 +223,43 @@ class Pipeline:
             channel, timestamp, samples = block
             for chunk in self._chunkers[channel].push(timestamp, samples):
                 self._queue_chunk(chunk)
+
+    def _run_speaker_tracker(self) -> None:
+        tracking_queue = self._tracking_queue
+        resolver = self._speaker_resolver
+        sink = self._speaker_tracking_sink
+        if tracking_queue is None or resolver is None or sink is None:
+            return
+        while True:
+            item = tracking_queue.get()
+            if item is None:
+                return
+            generation, chunk = item
+            with self._tracking_lock:
+                if generation != self._tracking_generations[chunk.channel]:
+                    continue
+            if not resolver.wants_embedding(chunk):
+                continue
+            try:
+                embedding = resolver.embed(chunk)
+                decision = resolver.resolve(chunk, embedding)
+            except Exception as error:
+                print(
+                    f"speaker tracking error: {type(error).__name__}",
+                    file=sys.stderr,
+                )
+                continue
+            with self._tracking_lock:
+                if generation != self._tracking_generations[chunk.channel]:
+                    continue
+                confirmed = self._tracking_gates[chunk.channel].observe(decision)
+            if confirmed is not None and confirmed.speaker_index is not None:
+                sink(
+                    confirmed.speaker_index,
+                    chunk.channel,
+                    confirmed.source,
+                    confirmed.confidence,
+                )
 
     def _run_worker(self) -> None:
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="speaker-id") as pool:
