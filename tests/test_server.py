@@ -3,6 +3,7 @@ import queue
 from oat_notes.config import Config
 from oat_notes.server import AppState, EventHub, is_trusted_request
 from oat_notes.settings import AppSettings
+from oat_notes.speaker_store import SpeakerStore
 
 
 def test_hub_fans_out_to_all_subscribers():
@@ -150,3 +151,42 @@ def test_cross_site_origin_is_rejected():
 
 def test_origin_naming_a_different_loopback_port_is_rejected():
     assert not is_trusted_request("127.0.0.1:8737", "http://127.0.0.1:9999", 8737)
+
+
+def test_local_speaker_library_crud_and_groups(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    state = AppState(Config(), transcriber=None, speaker_store=store)
+
+    result = state.create_library_speaker({"name": "Sarah"})
+    speaker = result["library"]["speakers"][0]
+    assert speaker["profile_state"] == "untrained"
+
+    result = state.create_library_group(
+        {
+            "name": "Standup",
+            "members": [{"speaker_id": speaker["id"], "remote": True}],
+        }
+    )
+    assert result["library"]["groups"][0]["members"][0]["remote"] is True
+
+    state.update_library_speaker({"id": speaker["id"], "name": "Sarah K"})
+    assert store.profile(speaker["id"]).name == "Sarah K"
+
+
+def test_speaker_library_mutations_are_blocked_during_meeting(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    state = AppState(Config(), transcriber=None, speaker_store=store)
+    state.session = object()
+    result = state.create_library_speaker({"name": "Blocked"})
+    assert result == {"error": "end the meeting before changing the speaker library"}
+    assert store.list_speakers() == ()
+
+
+def test_speaker_model_failure_does_not_block_transcription_model(tmp_path):
+    state = AppState(
+        Config(), transcriber=object(), speaker_store=SpeakerStore(tmp_path / "db.sqlite")
+    )
+    state.speaker_model_failed(RuntimeError("local model missing"))
+    status = state.status()
+    assert status["model_status"] == "ready"
+    assert status["speaker_model_status"] == "error"

@@ -41,6 +41,8 @@ class VadChunker:
         self._first_speech_time: float | None = None
         self._last_speech_time: float | None = None
         self._silence_run = 0.0
+        self._next_turn_id = 1
+        self._turn_id: int | None = None
 
     def push(self, timestamp: float, samples: np.ndarray) -> list[AudioChunk]:
         if self._buffer.size == 0:
@@ -84,6 +86,9 @@ class VadChunker:
                 self._pre_roll.append((window_time, window))
                 return None
             self._in_speech = True
+            if self._turn_id is None:
+                self._turn_id = self._next_turn_id
+                self._next_turn_id += 1
             self._chunk_windows = [w for _, w in self._pre_roll]
             self._chunk_start = (
                 self._pre_roll[0][0] if self._pre_roll else window_time
@@ -106,15 +111,18 @@ class VadChunker:
             window_time + self._window_seconds - self._chunk_start
         )
         if self._silence_run >= self._config.silence_split_seconds:
-            return self._finalize()
+            return self._finalize(end_turn=True)
         if chunk_duration >= self._config.max_chunk_seconds:
-            return self._finalize(continue_speech=True)
+            return self._finalize(continue_speech=True, end_turn=False)
         return None
 
-    def _finalize(self, continue_speech: bool = False) -> AudioChunk | None:
+    def _finalize(
+        self, continue_speech: bool = False, end_turn: bool = True
+    ) -> AudioChunk | None:
         samples = np.concatenate(self._chunk_windows)
         start = self._chunk_start
         end = start + samples.size / self._config.sample_rate
+        turn_id = self._turn_id or 0
 
         speech_span = 0.0
         if self._first_speech_time is not None and self._last_speech_time is not None:
@@ -130,15 +138,25 @@ class VadChunker:
             self._first_speech_time = end
             self._last_speech_time = end
             self._silence_run = 0.0
+            if end_turn:
+                self._turn_id = self._next_turn_id
+                self._next_turn_id += 1
         else:
             self._in_speech = False
             self._chunk_windows = []
             self._first_speech_time = None
             self._last_speech_time = None
             self._silence_run = 0.0
+            self._turn_id = None
 
         if speech_span < self._config.min_speech_seconds:
             return None
         return AudioChunk(
-            samples=samples, channel=self._channel, start=start, end=end
+            samples=samples,
+            channel=self._channel,
+            start=start,
+            end=end,
+            turn_id=turn_id,
+            turn_end=end_turn,
+            speech_seconds=speech_span,
         )

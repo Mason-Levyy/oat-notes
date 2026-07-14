@@ -20,6 +20,7 @@ from .attribution import Speaker
 from .config import Config
 from .output import format_timestamp
 from .settings import AppSettings, SettingsStore
+from .speaker_store import SpeakerStore
 from .types import Channel, TranscriptSegment
 
 
@@ -61,12 +62,20 @@ class AppState:
         out_dir: Path = Path("transcripts"),
         settings: AppSettings = AppSettings(),
         save_settings: Callable[[AppSettings], None] | None = None,
+        speaker_store: SpeakerStore | None = None,
+        embedding_engine=None,
     ) -> None:
         self.config = config
         self.transcriber = transcriber
         self._out_dir = out_dir
         self.settings = settings
         self._save_settings = save_settings
+        self.speaker_store = speaker_store
+        self.embedding_engine = embedding_engine
+        self.speaker_model_status = (
+            "ready" if embedding_engine is not None else "loading" if speaker_store else "unavailable"
+        )
+        self.speaker_model_error: str | None = None
         self.model_status = "ready" if transcriber is not None else "loading"
         self.model_error: str | None = None
         self.model_load_seconds: float | None = None
@@ -93,12 +102,32 @@ class AppState:
                 if self.awaiting_backfill is not None
                 else None
             )
+            speakers = []
+            for index, speaker in enumerate(self.roster):
+                profile_state = "untrained"
+                enrollment_seconds = 0.0
+                if recording and self.session is not None:
+                    profile_state, enrollment_seconds = self.session.profile_status(index)
+                elif speaker.speaker_id and self.speaker_store is not None:
+                    try:
+                        profile = self.speaker_store.profile(speaker.speaker_id)
+                        profile_state = profile.state
+                        enrollment_seconds = profile.enrollment_seconds
+                    except KeyError:
+                        pass
+                speakers.append(
+                    {
+                        "id": speaker.speaker_id,
+                        "name": speaker.name,
+                        "remote": speaker.remote,
+                        "hotkey_slot": speaker.hotkey_slot,
+                        "profile_state": profile_state,
+                        "enrollment_seconds": round(enrollment_seconds, 2),
+                    }
+                )
             return {
                 "recording": recording,
-                "speakers": [
-                    {"name": speaker.name, "remote": speaker.remote}
-                    for speaker in self.roster
-                ],
+                "speakers": speakers,
                 "actives": {
                     "mic": actives[Channel.MIC],
                     "loopback": actives[Channel.LOOPBACK],
@@ -116,6 +145,14 @@ class AppState:
                 "model_error": self.model_error,
                 "model_load_seconds": self.model_load_seconds,
                 "settings": self.settings.to_dict(),
+                "hotkey_bank": self.session.hotkey_bank if recording else 0,
+                "speaker_model_status": self.speaker_model_status,
+                "speaker_model_error": self.speaker_model_error,
+                "library": (
+                    self.speaker_store.library()
+                    if self.speaker_store is not None
+                    else {"speakers": [], "groups": [], "ready_seconds": 4.0}
+                ),
                 "lines": self.lines,
                 "last_saved": self.last_saved,
             }
@@ -136,6 +173,20 @@ class AppState:
             self.model_load_seconds = elapsed
         self.hub.publish({"type": "status", "recording": False})
 
+    def speaker_model_ready(self, engine) -> None:
+        with self.lock:
+            self.embedding_engine = engine
+            self.speaker_model_status = "ready"
+            self.speaker_model_error = None
+        self.hub.publish({"type": "status", "recording": self.session is not None})
+
+    def speaker_model_failed(self, error: Exception) -> None:
+        with self.lock:
+            self.embedding_engine = None
+            self.speaker_model_status = "error"
+            self.speaker_model_error = f"{type(error).__name__}: {error}"
+        self.hub.publish({"type": "status", "recording": self.session is not None})
+
     def update_settings(self, body: dict) -> dict:
         try:
             settings = AppSettings.from_dict(body)
@@ -153,6 +204,69 @@ class AppState:
         self.hub.publish({"type": "status", "recording": False})
         return self.status()
 
+    def _library_mutation(self, operation: Callable[[], object]) -> dict:
+        with self.lock:
+            if self.session is not None:
+                return {"error": "end the meeting before changing the speaker library"}
+            if self.speaker_store is None:
+                return {"error": "speaker library is unavailable"}
+            try:
+                operation()
+            except (KeyError, ValueError) as error:
+                return {"error": str(error).strip("'")}
+        self.hub.publish({"type": "status", "recording": False})
+        return self.status()
+
+    def create_library_speaker(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.create_speaker(str(body.get("name", "")))
+        )
+
+    def update_library_speaker(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.rename_speaker(
+                str(body.get("id", "")), str(body.get("name", ""))
+            )
+        )
+
+    def delete_library_speaker(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.delete_speaker(str(body.get("id", "")))
+        )
+
+    def reset_library_speaker(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.reset_profile(str(body.get("id", "")))
+        )
+
+    @staticmethod
+    def _group_members(body: dict) -> list[dict]:
+        members = body.get("members", [])
+        if not isinstance(members, list):
+            raise ValueError("group members must be a list")
+        return members
+
+    def create_library_group(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.create_group(
+                str(body.get("name", "")), self._group_members(body)
+            )
+        )
+
+    def update_library_group(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.update_group(
+                str(body.get("id", "")),
+                str(body.get("name", "")),
+                self._group_members(body),
+            )
+        )
+
+    def delete_library_group(self, body: dict) -> dict:
+        return self._library_mutation(
+            lambda: self.speaker_store.delete_group(str(body.get("id", "")))
+        )
+
     def start_session(self, body: dict) -> dict:
         with self.lock:
             if self.session is not None:
@@ -163,14 +277,30 @@ class AppState:
                 return {"error": "transcription model is still loading"}
             from .session import Session, SessionEvents, SessionOptions
 
-            self.roster = tuple(
-                Speaker(
-                    name=str(entry.get("name", "")).strip(),
-                    remote=bool(entry.get("remote", False)),
+            roster = []
+            for position, entry in enumerate(body.get("speakers", [])):
+                if not isinstance(entry, dict):
+                    continue
+                speaker_id = str(entry.get("speaker_id") or "").strip() or None
+                name = str(entry.get("name", "")).strip()
+                if speaker_id and self.speaker_store is not None:
+                    try:
+                        name = self.speaker_store.profile(speaker_id).name
+                    except KeyError:
+                        return {"error": "saved speaker not found"}
+                if not name:
+                    continue
+                requested_slot = entry.get("hotkey_slot", position)
+                hotkey_slot = requested_slot if isinstance(requested_slot, int) else position
+                roster.append(
+                    Speaker(
+                        name=name,
+                        remote=bool(entry.get("remote", False)),
+                        speaker_id=speaker_id,
+                        hotkey_slot=hotkey_slot,
+                    )
                 )
-                for entry in body.get("speakers", [])
-                if str(entry.get("name", "")).strip()
-            )
+            self.roster = tuple(roster)
             self.meeting_name = str(body.get("name") or "meeting").strip() or "meeting"
             self.lines = []
             self.last_saved = None
@@ -181,6 +311,9 @@ class AppState:
                     "label": label,
                     "text": segment.text,
                     "channel": segment.channel.value,
+                    "speaker_id": segment.speaker_id,
+                    "attribution": segment.attribution,
+                    "confidence": segment.confidence,
                 }
                 self.lines.append(line)
                 self.hub.publish({"type": "line", **line})
@@ -201,8 +334,29 @@ class AppState:
                         "channel": (
                             "loopback" if session.roster[index].remote else "mic"
                         ),
+                        "source": "manual",
                     }
                 )
+
+            def on_attribution(
+                index: int | None,
+                channel: Channel,
+                source: str,
+                confidence: float | None,
+            ) -> None:
+                self.hub.publish(
+                    {
+                        "type": "speaker",
+                        "index": index,
+                        "channel": channel.value,
+                        "source": source,
+                        "confidence": confidence,
+                    }
+                )
+                self.hub.publish({"type": "status", "recording": True})
+
+            def on_hotkey_bank(bank: int) -> None:
+                self.hub.publish({"type": "hotkey_bank", "bank": bank})
 
             self.awaiting_backfill = None
             self.session = Session(
@@ -213,9 +367,16 @@ class AppState:
                     use_loopback=bool(body.get("loopback", True)),
                     out_dir=self._out_dir,
                     hotkey_modifiers=self.settings.hotkey_modifiers,
+                    speaker_store=self.speaker_store,
+                    embedding_engine=self.embedding_engine,
                 ),
                 self.transcriber,
-                SessionEvents(on_segment=on_segment, on_speaker=on_speaker),
+                SessionEvents(
+                    on_segment=on_segment,
+                    on_speaker=on_speaker,
+                    on_attribution=on_attribution,
+                    on_hotkey_bank=on_hotkey_bank,
+                ),
             )
             self.session.start()
         self.hub.publish({"type": "status", "recording": True})
@@ -243,12 +404,32 @@ class AppState:
             if self.awaiting_backfill is None:
                 return {"error": "nothing awaiting backfill"}
             session = self.awaiting_backfill
-            self.awaiting_backfill = None
             renames = {
                 str(old): str(new)
                 for old, new in (body.get("renames") or {}).items()
                 if str(new).strip()
             }
+            guest_profiles = body.get("guest_profiles") or {}
+            if not isinstance(guest_profiles, dict):
+                return {"error": "guest_profiles must be an object"}
+            if self.speaker_store is not None:
+                try:
+                    for guest_name, selection in guest_profiles.items():
+                        if not isinstance(selection, dict):
+                            continue
+                        speaker_id = str(selection.get("speaker_id") or "").strip()
+                        if speaker_id:
+                            profile = self.speaker_store.profile(speaker_id)
+                        else:
+                            new_name = str(selection.get("name") or "").strip()
+                            if not new_name:
+                                continue
+                            profile = self.speaker_store.create_speaker(new_name)
+                        session.persist_guest(str(guest_name), profile.speaker_id)
+                        renames[str(guest_name)] = profile.name
+                except (KeyError, ValueError) as error:
+                    return {"error": str(error).strip("'")}
+            self.awaiting_backfill = None
             saved = session.save(renames)
             self.last_saved = str(saved) if saved else None
             for line in self.lines:
@@ -272,6 +453,13 @@ class AppState:
             session = self.session
         if session is not None:
             session.switch_speaker(index)
+        return self.status()
+
+    def page_hotkeys(self, direction: int) -> dict:
+        with self.lock:
+            session = self.session
+        if session is not None:
+            session.page_hotkeys(direction)
         return self.status()
 
 
@@ -337,6 +525,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, _load_asset("pixel.woff2"), "font/woff2")
         elif self.path == "/api/state":
             self._send_json(self.state.status())
+        elif self.path == "/api/library":
+            self._send_json(
+                self.state.speaker_store.library()
+                if self.state.speaker_store is not None
+                else {"speakers": [], "groups": [], "ready_seconds": 4.0}
+            )
         elif self.path == "/api/events":
             self._serve_events()
         else:
@@ -369,10 +563,33 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.switch_speaker(index))
         elif self.path == "/api/add_guest":
             self._send_json(self.state.add_guest(body))
+        elif self.path == "/api/hotkey_bank":
+            direction = body.get("direction")
+            if direction not in (-1, 1):
+                self._send_json(
+                    {"error": "direction must be -1 or 1"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            self._send_json(self.state.page_hotkeys(direction))
         elif self.path == "/api/finalize":
             self._send_json(self.state.finalize(body))
         elif self.path == "/api/settings":
             self._send_json(self.state.update_settings(body))
+        elif self.path == "/api/library/speakers/create":
+            self._send_json(self.state.create_library_speaker(body))
+        elif self.path == "/api/library/speakers/update":
+            self._send_json(self.state.update_library_speaker(body))
+        elif self.path == "/api/library/speakers/delete":
+            self._send_json(self.state.delete_library_speaker(body))
+        elif self.path == "/api/library/speakers/reset":
+            self._send_json(self.state.reset_library_speaker(body))
+        elif self.path == "/api/library/groups/create":
+            self._send_json(self.state.create_library_group(body))
+        elif self.path == "/api/library/groups/update":
+            self._send_json(self.state.update_library_group(body))
+        elif self.path == "/api/library/groups/delete":
+            self._send_json(self.state.delete_library_group(body))
         elif self.path == "/api/quit":
             self._send_json({"ok": True})
             self.state.shutdown.set()
@@ -401,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _initialize_model(state: AppState, config: Config) -> None:
-    """Load and warm the expensive transcription backend off the UI thread."""
+    """Load both local inference engines off the UI thread."""
     started = time.perf_counter()
     try:
         from .cli import warm_up
@@ -414,21 +631,37 @@ def _initialize_model(state: AppState, config: Config) -> None:
         elapsed = time.perf_counter() - started
         print(f"Model initialization failed after {elapsed:.1f}s: {error}", file=sys.stderr)
         state.model_failed(error, elapsed)
-        return
-    elapsed = time.perf_counter() - started
-    print(f"Transcription model ready in {elapsed:.1f}s", flush=True)
-    state.model_ready(transcriber, elapsed)
+    else:
+        elapsed = time.perf_counter() - started
+        print(f"Transcription model ready in {elapsed:.1f}s", flush=True)
+        state.model_ready(transcriber, elapsed)
+
+    try:
+        from .speaker_id import SherpaOnnxEmbeddingEngine
+
+        engine = SherpaOnnxEmbeddingEngine()
+    except Exception as error:
+        print(
+            f"Speaker recognition unavailable: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        state.speaker_model_failed(error)
+    else:
+        print("Local speaker recognition ready", flush=True)
+        state.speaker_model_ready(engine)
 
 
 def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -> None:
     started = time.perf_counter()
     settings_store = SettingsStore()
+    speaker_store = SpeakerStore()
     state = AppState(
         config,
         transcriber=None,
         out_dir=args.out_dir,
         settings=settings_store.load(),
         save_settings=settings_store.save,
+        speaker_store=speaker_store,
     )
     Handler.state = state
     Handler.port = args.port

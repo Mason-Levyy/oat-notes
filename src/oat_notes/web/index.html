@@ -202,8 +202,8 @@ body {
 /* ---------- settings ---------- */
 .settings-view { display: none; padding: 24px; min-height: 520px; }
 .settings-card {
-  width: min(620px, 100%); border: 3px solid var(--ink); background: #fff;
-  box-shadow: 5px 5px 0 var(--ink); padding: 22px;
+  width: min(760px, 100%); border: 3px solid var(--ink); background: #fff;
+  box-shadow: 5px 5px 0 var(--ink); padding: 22px; margin-bottom: 22px;
 }
 .settings-card h2 { font-size: 12px; margin-bottom: 12px; }
 .modifier-grid {
@@ -228,6 +228,33 @@ body {
 .settings-message.error { color: var(--rec); }
 .settings-message.saved { color: var(--sprout); }
 .settings-view .btn:disabled { cursor: not-allowed; }
+.compact-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.compact-row input, .compact-row select, .roster-tools input, .roster-tools select {
+  min-width: 0; flex: 1; border: 2px solid var(--ink); background: #fff;
+  font-family: Consolas, monospace; padding: 7px;
+}
+.mini {
+  border: 2px solid var(--ink); background: var(--paper); cursor: pointer;
+  font-family: "Pixel", Consolas, monospace; font-size: 7px; padding: 7px;
+}
+.mini.primary { background: var(--oat-light); }
+.mini.danger { color: var(--rec); }
+.library-list, .group-list, .setup-roster { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+.library-row, .setup-roster-row {
+  border: 2px solid var(--ink); padding: 8px; background: var(--paper);
+  display: flex; gap: 7px; align-items: center;
+}
+.library-row .name, .setup-roster-row .name { flex: 1; min-width: 0; }
+.profile-pill { font-size: 7px; color: #6b6558; }
+.profile-pill.ready { color: var(--sprout); }
+.roster-tools { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+.setup-roster-row.untrained, .setup-roster-row.learning { background: #d2d0ca; color: #68645c; }
+.group-card { border: 2px dashed var(--ink); padding: 10px; margin-top: 10px; }
+.group-card h3 { font-size: 8px; margin-bottom: 7px; }
+.group-member { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.group-member .name { flex: 1; }
+.bank-row { display: flex; gap: 8px; align-items: center; }
+.bank-row .pixel { flex: 1; text-align: center; font-size: 8px; }
 
 /* ---------- live session rail ---------- */
 .live { display: none; flex-direction: column; gap: 16px; }
@@ -269,6 +296,10 @@ body {
 }
 .chip.ghost .slot { color: #6b6558; }
 .chip.ghost:hover { border-style: solid; background: #fff; color: var(--ink); }
+.chip.untrained, .chip.learning { background: #c9c7c1; color: #66625b; }
+.chip.learning { border-style: dashed; }
+.chip .progress { font-size: 7px; margin-left: auto; }
+.chip .progress + .dot { margin-left: 0; }
 
 /* ---------- screen ---------- */
 .statusline { font-size: 8px; min-height: 14px; }
@@ -339,9 +370,20 @@ body {
           <div class="hint">Names the transcript file.</div>
         </div>
         <div class="field" style="margin-bottom:16px">
-          <label class="pixel" for="speakers">SPEAKERS</label>
-          <input type="text" id="speakers" placeholder="Mason, Sarah, Priya*, Dev*">
-          <div class="hint">One row, comma-separated; <b>*</b> marks who's on the call. <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches the active speaker.</div>
+          <label class="pixel">SPEAKERS</label>
+          <div class="roster-tools">
+            <input type="text" id="person-search" list="person-options" aria-label="Search saved speakers" placeholder="Search saved people">
+            <datalist id="person-options"></datalist>
+            <button type="button" class="mini primary" id="add-person-btn">+ PERSON</button>
+            <select id="group-select" aria-label="Saved group"></select>
+            <button type="button" class="mini primary" id="add-group-btn">+ GROUP</button>
+          </div>
+          <div class="compact-row">
+            <input type="text" id="new-person-name" placeholder="New speaker name">
+            <button type="button" class="mini" id="create-person-btn">CREATE</button>
+          </div>
+          <div class="setup-roster" id="setup-roster"></div>
+          <div class="hint">Order sets hotkey slots. Toggle ROOM/CALL per meeting. <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches; brackets change banks.</div>
         </div>
         <label class="check" style="margin-bottom:16px">
           <input type="checkbox" id="loopback" checked>
@@ -355,6 +397,11 @@ body {
         <div class="rec-row pixel"><span class="rec-dot"></span> REC</div>
         <div class="counter pixel" id="counter">00:00:00</div>
         <div class="players" id="players"></div>
+        <div class="bank-row" id="bank-row">
+          <button type="button" class="mini" id="bank-prev">[ PREV</button>
+          <span class="pixel" id="bank-label">SLOTS 1–9</span>
+          <button type="button" class="mini" id="bank-next">NEXT ]</button>
+        </div>
         <button class="btn stop" id="stop-btn" style="display:block">&#9632; END MEETING</button>
       </div>
 
@@ -393,6 +440,24 @@ body {
         <div class="settings-message pixel" id="settings-message" role="status"></div>
       </form>
     </div>
+    <div class="settings-card">
+      <h2 class="pixel">SPEAKER LIBRARY</h2>
+      <p>Profiles stay on this machine. Only voice embeddings are saved; captured audio is never retained.</p>
+      <div class="compact-row">
+        <input type="text" id="library-new-name" placeholder="Speaker name">
+        <button type="button" class="mini primary" id="library-create">ADD SPEAKER</button>
+      </div>
+      <div class="library-list" id="library-list"></div>
+    </div>
+    <div class="settings-card">
+      <h2 class="pixel">GROUPS</h2>
+      <p>Save recurring rosters with their normal order and ROOM/CALL placement.</p>
+      <div class="compact-row">
+        <input type="text" id="group-new-name" placeholder="Group name">
+        <button type="button" class="mini primary" id="group-create">ADD GROUP</button>
+      </div>
+      <div class="group-list" id="group-list"></div>
+    </div>
   </section>
 </div>
 
@@ -405,8 +470,11 @@ let state = {
   actives: { mic: null, loopback: null },
   elapsed: 0,
   model_status: "loading",
+  hotkey_bank: 0,
+  library: { speakers: [], groups: [], ready_seconds: 4.0 },
   settings: { hotkey_modifiers: ["ctrl", "alt"], hotkey_label: "Ctrl+Alt+1–9" },
 };
+let setupRoster = [];
 let sessionEpoch = null;
 let tick = null;
 
@@ -452,6 +520,188 @@ function openTab(name) {
   $("tab-settings").setAttribute("aria-selected", String(settingsOpen));
 }
 
+function librarySpeakers() {
+  return (state.library && state.library.speakers) || [];
+}
+
+function libraryGroups() {
+  return (state.library && state.library.groups) || [];
+}
+
+function profileText(speaker) {
+  if (speaker.profile_state === "ready") return "READY";
+  const goal = Number((state.library || {}).ready_seconds || 4);
+  return `${Number(speaker.enrollment_seconds || 0).toFixed(1)} / ${goal.toFixed(1)}s`;
+}
+
+function addRosterSpeaker(speaker, remote) {
+  if (!speaker || setupRoster.some((entry) => entry.speaker_id === speaker.id)) return;
+  setupRoster.push({
+    speaker_id: speaker.id,
+    name: speaker.name,
+    remote: !!remote,
+    profile_state: speaker.profile_state,
+    enrollment_seconds: speaker.enrollment_seconds || 0,
+  });
+  renderSetupRoster();
+}
+
+function renderSetupRoster() {
+  const people = librarySpeakers();
+  $("person-options").innerHTML = people.map((speaker) =>
+    `<option value="${escapeHtml(speaker.name)}">${profileText(speaker)}</option>`
+  ).join("");
+  const groups = libraryGroups();
+  $("group-select").innerHTML = groups.length
+    ? groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)}</option>`).join("")
+    : '<option value="">NO SAVED GROUPS</option>';
+
+  const container = $("setup-roster");
+  container.innerHTML = "";
+  setupRoster.forEach((entry, index) => {
+    const current = people.find((speaker) => speaker.id === entry.speaker_id);
+    if (current) {
+      entry.name = current.name;
+      entry.profile_state = current.profile_state;
+      entry.enrollment_seconds = current.enrollment_seconds;
+    }
+    const row = document.createElement("div");
+    row.className = `setup-roster-row ${entry.profile_state || "untrained"}`;
+    row.innerHTML = `<span class="pixel">${index + 1}</span><span class="name">${escapeHtml(entry.name)}</span>
+      <span class="profile-pill ${entry.profile_state === "ready" ? "ready" : ""}">${profileText(entry)}</span>`;
+    const placement = document.createElement("button");
+    placement.type = "button";
+    placement.className = "mini";
+    placement.textContent = entry.remote ? "CALL" : "ROOM";
+    placement.onclick = () => { entry.remote = !entry.remote; renderSetupRoster(); };
+    row.appendChild(placement);
+    [["↑", -1], ["↓", 1]].forEach(([label, delta]) => {
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "mini"; button.textContent = label;
+      button.onclick = () => {
+        const target = index + delta;
+        if (target < 0 || target >= setupRoster.length) return;
+        [setupRoster[index], setupRoster[target]] = [setupRoster[target], setupRoster[index]];
+        renderSetupRoster();
+      };
+      row.appendChild(button);
+    });
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "mini danger"; remove.textContent = "×";
+    remove.onclick = () => { setupRoster.splice(index, 1); renderSetupRoster(); };
+    row.appendChild(remove);
+    container.appendChild(row);
+  });
+}
+
+function applyLibraryResult(result, message) {
+  if (result.error) {
+    $("settings-message").textContent = result.error.toUpperCase();
+    $("settings-message").className = "settings-message pixel error";
+    return false;
+  }
+  applyState(result);
+  if (message) {
+    $("settings-message").textContent = message;
+    $("settings-message").className = "settings-message pixel saved";
+  }
+  return true;
+}
+
+function saveGroup(group) {
+  return post("/api/library/groups/update", {
+    id: group.id,
+    name: group.name,
+    members: group.members.map((member) => ({
+      speaker_id: member.speaker_id,
+      remote: !!member.remote,
+    })),
+  }).then((result) => applyLibraryResult(result, "GROUP SAVED"));
+}
+
+function renderLibrarySettings() {
+  const disabled = !!state.recording;
+  const list = $("library-list");
+  list.innerHTML = "";
+  librarySpeakers().forEach((speaker) => {
+    const row = document.createElement("div");
+    row.className = "library-row";
+    row.innerHTML = `<span class="name">${escapeHtml(speaker.name)}</span>
+      <span class="profile-pill ${speaker.profile_state === "ready" ? "ready" : ""}">${profileText(speaker)}</span>`;
+    const rename = document.createElement("button");
+    rename.type = "button"; rename.className = "mini"; rename.textContent = "RENAME"; rename.disabled = disabled;
+    rename.onclick = () => {
+      const name = window.prompt("Speaker name", speaker.name);
+      if (name && name.trim()) post("/api/library/speakers/update", { id: speaker.id, name: name.trim() }).then((r) => applyLibraryResult(r, "SPEAKER RENAMED"));
+    };
+    const reset = document.createElement("button");
+    reset.type = "button"; reset.className = "mini"; reset.textContent = "RESET VOICE"; reset.disabled = disabled;
+    reset.onclick = () => {
+      if (window.confirm(`Reset ${speaker.name}'s saved voice profile?`)) post("/api/library/speakers/reset", { id: speaker.id }).then((r) => applyLibraryResult(r, "VOICE PROFILE RESET"));
+    };
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "mini danger"; remove.textContent = "DELETE"; remove.disabled = disabled;
+    remove.onclick = () => {
+      if (window.confirm(`Delete ${speaker.name} from the local library?`)) {
+        setupRoster = setupRoster.filter((entry) => entry.speaker_id !== speaker.id);
+        post("/api/library/speakers/delete", { id: speaker.id }).then((r) => applyLibraryResult(r, "SPEAKER DELETED"));
+      }
+    };
+    row.append(rename, reset, remove);
+    list.appendChild(row);
+  });
+
+  const groupList = $("group-list");
+  groupList.innerHTML = "";
+  libraryGroups().forEach((group) => {
+    const card = document.createElement("div");
+    card.className = "group-card";
+    const title = document.createElement("input");
+    title.type = "text"; title.value = group.name; title.disabled = disabled;
+    title.onchange = () => { group.name = title.value.trim() || group.name; saveGroup(group); };
+    card.appendChild(title);
+    group.members.forEach((member, index) => {
+      const row = document.createElement("div");
+      row.className = "group-member";
+      row.innerHTML = `<span class="name">${escapeHtml(member.name)}</span>`;
+      const placement = document.createElement("button");
+      placement.type = "button"; placement.className = "mini"; placement.textContent = member.remote ? "CALL" : "ROOM"; placement.disabled = disabled;
+      placement.onclick = () => { member.remote = !member.remote; saveGroup(group); };
+      row.appendChild(placement);
+      [["↑", -1], ["↓", 1]].forEach(([label, delta]) => {
+        const button = document.createElement("button"); button.type = "button"; button.className = "mini"; button.textContent = label; button.disabled = disabled;
+        button.onclick = () => {
+          const target = index + delta;
+          if (target < 0 || target >= group.members.length) return;
+          [group.members[index], group.members[target]] = [group.members[target], group.members[index]];
+          saveGroup(group);
+        };
+        row.appendChild(button);
+      });
+      const remove = document.createElement("button"); remove.type = "button"; remove.className = "mini danger"; remove.textContent = "×"; remove.disabled = disabled;
+      remove.onclick = () => { group.members.splice(index, 1); saveGroup(group); };
+      row.appendChild(remove);
+      card.appendChild(row);
+    });
+    const addRow = document.createElement("div"); addRow.className = "compact-row";
+    const select = document.createElement("select");
+    librarySpeakers().filter((speaker) => !group.members.some((member) => member.speaker_id === speaker.id)).forEach((speaker) => {
+      const option = document.createElement("option"); option.value = speaker.id; option.textContent = speaker.name; select.appendChild(option);
+    });
+    const add = document.createElement("button"); add.type = "button"; add.className = "mini"; add.textContent = "+ MEMBER"; add.disabled = disabled || !select.options.length;
+    add.onclick = () => {
+      const speaker = librarySpeakers().find((item) => item.id === select.value);
+      if (!speaker) return;
+      group.members.push({ speaker_id: speaker.id, name: speaker.name, remote: false });
+      saveGroup(group);
+    };
+    const del = document.createElement("button"); del.type = "button"; del.className = "mini danger"; del.textContent = "DELETE GROUP"; del.disabled = disabled;
+    del.onclick = () => { if (window.confirm(`Delete group ${group.name}?`)) post("/api/library/groups/delete", { id: group.id }).then((r) => applyLibraryResult(r, "GROUP DELETED")); };
+    addRow.append(select, add, del); card.appendChild(addRow); groupList.appendChild(card);
+  });
+  renderSetupRoster();
+}
+
 function renderSettings() {
   const settings = state.settings || { hotkey_modifiers: ["ctrl", "alt"] };
   const selected = new Set(settings.hotkey_modifiers || []);
@@ -469,6 +719,7 @@ function renderSettings() {
     message.textContent = "";
     message.className = "settings-message pixel";
   }
+  renderLibrarySettings();
 }
 
 function addLine(line) {
@@ -493,10 +744,16 @@ function escapeHtml(text) {
 function renderPlayers() {
   const players = $("players");
   players.innerHTML = "";
+  const bank = Number(state.hotkey_bank || 0);
+  const firstSlot = bank * 9;
+  $("bank-label").textContent = `SLOTS ${firstSlot + 1}–${firstSlot + 9}`;
   state.speakers.forEach((speaker, index) => {
+    const hotkeySlot = Number.isInteger(speaker.hotkey_slot) ? speaker.hotkey_slot : index;
+    if (hotkeySlot < firstSlot || hotkeySlot >= firstSlot + 9) return;
     const chip = document.createElement("button");
     chip.type = "button";
     let cls = "chip";
+    if (speaker.profile_state === "untrained" || speaker.profile_state === "learning") cls += ` ${speaker.profile_state}`;
     if (speaker.remote) {
       cls += " remote";
       if (index === state.actives.loopback) cls += " active-remote";
@@ -504,8 +761,11 @@ function renderPlayers() {
       cls += " active";
     }
     chip.className = cls;
-    const slot = speaker.remote ? "&#9741;" : `P${index + 1}`;
-    chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="dot"></span>`;
+    const bankKey = hotkeySlot - firstSlot + 1;
+    const slot = speaker.remote ? `C${bankKey}` : `P${bankKey}`;
+    const progress = speaker.profile_state === "ready" ? "READY" : `${Number(speaker.enrollment_seconds || 0).toFixed(1)}/4.0s`;
+    chip.title = `Hotkey ${bankKey}; saved slot ${hotkeySlot + 1}`;
+    chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
     players.appendChild(chip);
   });
@@ -539,8 +799,10 @@ function renderBackfill(guests) {
     const wrap = document.createElement("div");
     wrap.className = "field";
     const safe = escapeHtml(guest);
+    const options = librarySpeakers().map((speaker) => `<option value="${speaker.id}">${escapeHtml(speaker.name)}</option>`).join("");
     wrap.innerHTML = `<label class="pixel">${safe.toUpperCase()}</label>
-      <input type="text" data-guest="${safe}" placeholder="Who was this?">`;
+      <select data-guest-speaker="${safe}"><option value="">CREATE NEW / KEEP GUEST</option>${options}</select>
+      <input type="text" data-guest="${safe}" placeholder="New speaker name (optional)">`;
     fields.appendChild(wrap);
   });
 }
@@ -610,14 +872,12 @@ function applyState(s) {
 
 $("setup").onsubmit = (event) => {
   event.preventDefault();
-  const speakers = $("speakers").value.split(",")
-    .map((raw) => raw.trim())
-    .filter(Boolean)
-    .map((raw) => ({
-      name: raw.replace(/\*+$/, "").trim(),
-      remote: raw.endsWith("*"),
-    }))
-    .filter((speaker) => speaker.name);
+  const speakers = setupRoster.map((speaker, index) => ({
+    speaker_id: speaker.speaker_id,
+    name: speaker.name,
+    remote: !!speaker.remote,
+    hotkey_slot: index,
+  }));
   $("statusline").textContent = "";
   post("/api/start", {
     name: $("mname").value.trim(),
@@ -636,11 +896,61 @@ $("stop-btn").onclick = () => post("/api/stop").then(applyState);
 
 $("finalize-btn").onclick = () => {
   const renames = {};
+  const guestProfiles = {};
   $("guest-fields").querySelectorAll("input[data-guest]").forEach((input) => {
-    if (input.value.trim()) renames[input.dataset.guest] = input.value.trim();
+    const name = input.value.trim();
+    const select = $("guest-fields").querySelector(`select[data-guest-speaker="${CSS.escape(input.dataset.guest)}"]`);
+    if (select && select.value) guestProfiles[input.dataset.guest] = { speaker_id: select.value };
+    else if (name) guestProfiles[input.dataset.guest] = { name };
   });
-  post("/api/finalize", { renames }).then(applyState);
+  post("/api/finalize", { renames, guest_profiles: guestProfiles }).then(applyState);
 };
+
+$("add-person-btn").onclick = () => {
+  const query = $("person-search").value.trim().toLowerCase();
+  const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === query);
+  addRosterSpeaker(speaker, false);
+  if (speaker) $("person-search").value = "";
+};
+
+$("add-group-btn").onclick = () => {
+  const group = libraryGroups().find((item) => item.id === $("group-select").value);
+  if (!group) return;
+  group.members.forEach((member) => {
+    const speaker = librarySpeakers().find((item) => item.id === member.speaker_id);
+    addRosterSpeaker(speaker, member.remote);
+  });
+};
+
+$("create-person-btn").onclick = () => {
+  const name = $("new-person-name").value.trim();
+  if (!name) return;
+  post("/api/library/speakers/create", { name }).then((result) => {
+    if (!applyLibraryResult(result, "SPEAKER CREATED")) return;
+    const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === name.toLowerCase());
+    addRosterSpeaker(speaker, false);
+    $("new-person-name").value = "";
+  });
+};
+
+$("library-create").onclick = () => {
+  const name = $("library-new-name").value.trim();
+  if (!name) return;
+  post("/api/library/speakers/create", { name }).then((result) => {
+    if (applyLibraryResult(result, "SPEAKER CREATED")) $("library-new-name").value = "";
+  });
+};
+
+$("group-create").onclick = () => {
+  const name = $("group-new-name").value.trim();
+  if (!name) return;
+  post("/api/library/groups/create", { name, members: [] }).then((result) => {
+    if (applyLibraryResult(result, "GROUP CREATED")) $("group-new-name").value = "";
+  });
+};
+
+$("bank-prev").onclick = () => post("/api/hotkey_bank", { direction: -1 }).then(applyState);
+$("bank-next").onclick = () => post("/api/hotkey_bank", { direction: 1 }).then(applyState);
 
 $("tab-meeting").onclick = () => openTab("meeting");
 $("tab-settings").onclick = () => openTab("settings");
@@ -681,6 +991,9 @@ events.onmessage = (message) => {
   if (event.type === "line") addLine(event);
   else if (event.type === "speaker") {
     state.actives[event.channel] = event.index;
+    renderPlayers();
+  } else if (event.type === "hotkey_bank") {
+    state.hotkey_bank = event.bank;
     renderPlayers();
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);

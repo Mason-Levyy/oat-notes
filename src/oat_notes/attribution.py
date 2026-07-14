@@ -13,6 +13,8 @@ from .types import AudioChunk, Channel
 class Speaker:
     name: str
     remote: bool = False
+    speaker_id: str | None = None
+    hotkey_slot: int | None = None
 
 
 def parse_speakers(text: str) -> tuple[Speaker, ...]:

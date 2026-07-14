@@ -27,6 +27,10 @@ class AudioChunk:
     channel: Channel
     start: float
     end: float
+    turn_id: int = 0
+    turn_end: bool = True
+    manual_speaker_index: int | None = None
+    speech_seconds: float | None = None
 
     @property
     def duration(self) -> float:
@@ -42,3 +46,10 @@ class TranscriptSegment:
     start: float
     end: float
     speaker: str | None = None
+    speaker_id: str | None = None
+    speaker_index: int | None = None
+    attribution: str | None = None
+    confidence: float | None = None
+    profile_state: str | None = None
+    enrollment_seconds: float | None = None
+    turn_end: bool = True

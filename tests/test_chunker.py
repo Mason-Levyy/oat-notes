@@ -76,6 +76,9 @@ def test_force_split_at_max_chunk_length():
     assert first.duration == pytest.approx(469 * WINDOW_SECONDS)
     assert second.start == pytest.approx(first.end)
     assert first.samples.size + second.samples.size == total * WINDOW
+    assert first.turn_end is False
+    assert second.turn_end is True
+    assert first.turn_id == second.turn_id
 
 
 def test_timestamps_reanchor_on_block_stamp():
@@ -115,6 +118,8 @@ def test_split_mid_speech_emits_and_continues():
     rest = chunker.push(31 * WINDOW_SECONDS, windows(31 + SILENCE_WINDOWS))
     assert len(rest) == 1
     assert rest[0].start == pytest.approx(forced.end)
+    assert forced.turn_end is True
+    assert rest[0].turn_id != forced.turn_id
 
 
 def test_split_when_idle_returns_none():

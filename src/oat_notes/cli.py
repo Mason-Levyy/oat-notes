@@ -205,7 +205,8 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
         print(line, flush=True)
 
     def print_speaker(index: int) -> None:
-        print(f"  → active speaker: {roster[index].name}", flush=True)
+        if 0 <= index < len(session.roster):
+            print(f"  → active speaker: {session.roster[index].name}", flush=True)
 
     session = Session(
         config,
@@ -230,7 +231,10 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
             f"[{number}] {speaker.name}{'*' if speaker.remote else ''}"
             for number, speaker in enumerate(roster, start=1)
         )
-        print(f"Speakers: {mapping} — Ctrl+Alt+number to switch", flush=True)
+        print(
+            f"Speakers: {mapping} — Ctrl+Alt+number to switch; brackets page",
+            flush=True,
+        )
     print("Listening — Ctrl+C to stop\n", flush=True)
 
     deadline = time.monotonic() + args.seconds if args.seconds else None

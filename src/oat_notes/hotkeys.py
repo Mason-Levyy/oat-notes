@@ -18,11 +18,13 @@ class HotkeyListener:
         self,
         on_switch: Callable[[int], None],
         modifiers: tuple[str, ...] = ("ctrl", "alt"),
+        on_page: Callable[[int], None] = lambda delta: None,
     ) -> None:
         allowed = {"ctrl", "alt", "shift", "win"}
         if not modifiers or not set(modifiers).issubset(allowed):
             raise ValueError("modifiers must contain ctrl, alt, shift, and/or win")
         self._on_switch = on_switch
+        self._on_page = on_page
         self._required_modifiers = frozenset(modifiers)
         self._listener = None
         self._held_modifiers: set[str] = set()
@@ -51,6 +53,10 @@ class HotkeyListener:
         index = self._digit_index(key)
         if index is not None:
             self._on_switch(index)
+            return
+        direction = self._page_direction(key)
+        if direction is not None:
+            self._on_page(direction)
 
     def _handle_release(self, key) -> None:
         modifier = self._modifier_name(key)
@@ -82,4 +88,18 @@ class HotkeyListener:
         # (\x11 for 1, etc.) or the raw vk instead of the digit char.
         if virtual_key is not None and ord("1") <= virtual_key <= ord("9"):
             return virtual_key - ord("1")
+        return None
+
+    @staticmethod
+    def _page_direction(key) -> int | None:
+        char = getattr(key, "char", None)
+        if char == "[":
+            return -1
+        if char == "]":
+            return 1
+        virtual_key = getattr(key, "vk", None)
+        if virtual_key == 219:  # OEM_4: [ on a US Windows keyboard
+            return -1
+        if virtual_key == 221:  # OEM_6: ] on a US Windows keyboard
+            return 1
         return None
