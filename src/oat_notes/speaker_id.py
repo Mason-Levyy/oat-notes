@@ -29,6 +29,20 @@ GLOBAL_THRESHOLD = 0.65
 MATCH_MARGIN = 0.05
 
 
+def chunk_speech_seconds(chunk: AudioChunk) -> float:
+    return float(
+        chunk.speech_seconds if chunk.speech_seconds is not None else chunk.duration
+    )
+
+
+def chunk_quality(chunk: AudioChunk) -> float:
+    """1.0 is clean; approaches 0.0 as more of the chunk reads as clipped."""
+    if chunk.samples.size == 0:
+        return 0.0
+    clipped = float(np.mean(np.abs(chunk.samples) >= 0.999))
+    return max(0.0, 1.0 - clipped)
+
+
 class SpeakerEmbeddingEngine(ABC):
     model_key: str = DEFAULT_MODEL_KEY
 
@@ -107,15 +121,22 @@ class SpeakerResolver:
         store: SpeakerStore,
         engine: SpeakerEmbeddingEngine | None,
         sample_rate: int,
+        tracking_engine: SpeakerEmbeddingEngine | None = None,
     ) -> None:
         self._roster = roster
         self._store = store
         self._engine = engine
         self._sample_rate = sample_rate
         self._temporary: dict[int, list[_TemporarySample]] = {}
-        # The bundled extractor owns mutable stream state and may be reached by
-        # both turn attribution and rolling speaker tracking.
+        # Each bundled extractor instance owns mutable stream state, so calls
+        # against the same instance must be serialized. Turn attribution and
+        # rolling speaker tracking get their own instance (when the caller
+        # supplies one) so they no longer queue behind each other.
         self._embed_lock = threading.Lock()
+        self._tracking_engine = tracking_engine or engine
+        self._tracking_embed_lock = (
+            threading.Lock() if tracking_engine is not None else self._embed_lock
+        )
 
     @property
     def enabled(self) -> bool:
@@ -124,25 +145,10 @@ class SpeakerResolver:
     def _members(self) -> list[int]:
         return list(range(len(self._roster)))
 
-    @staticmethod
-    def _speech_seconds(chunk: AudioChunk) -> float:
-        return float(
-            chunk.speech_seconds
-            if chunk.speech_seconds is not None
-            else chunk.duration
-        )
-
-    @staticmethod
-    def _quality(chunk: AudioChunk) -> float:
-        if chunk.samples.size == 0:
-            return 0.0
-        clipped = float(np.mean(np.abs(chunk.samples) >= 0.999))
-        return max(0.0, 1.0 - clipped)
-
     def wants_embedding(self, chunk: AudioChunk) -> bool:
-        if self._engine is None or self._speech_seconds(chunk) < MIN_ENROLLMENT_SECONDS:
+        if self._engine is None or chunk_speech_seconds(chunk) < MIN_ENROLLMENT_SECONDS:
             return False
-        if self._quality(chunk) < 1.0 - MAX_CLIPPED_RATIO:
+        if chunk_quality(chunk) < 1.0 - MAX_CLIPPED_RATIO:
             return False
         if chunk.manual_speaker_index is not None:
             return 0 <= chunk.manual_speaker_index < len(self._roster)
@@ -159,6 +165,12 @@ class SpeakerResolver:
         with self._embed_lock:
             return self._engine.embed(chunk.samples, self._sample_rate)
 
+    def embed_for_tracking(self, chunk: AudioChunk) -> np.ndarray:
+        if self._tracking_engine is None:
+            raise RuntimeError("speaker recognition is unavailable")
+        with self._tracking_embed_lock:
+            return self._tracking_engine.embed(chunk.samples, self._sample_rate)
+
     def resolve(
         self, chunk: AudioChunk, embedding: np.ndarray | None
     ) -> AttributionDecision:
@@ -168,8 +180,8 @@ class SpeakerResolver:
             speaker = self._roster[manual]
             profile = None
             if embedding is not None:
-                seconds = self._speech_seconds(chunk)
-                quality = self._quality(chunk)
+                seconds = chunk_speech_seconds(chunk)
+                quality = chunk_quality(chunk)
                 if speaker.speaker_id:
                     profile = self._store.add_sample(
                         speaker.speaker_id,
@@ -342,6 +354,10 @@ class SpeakerChangeGate:
         self._current: int | None = None
         self._candidate: int | None = None
         self._count = 0
+
+    @property
+    def current(self) -> int | None:
+        return self._current
 
     def force(self, speaker_index: int | None) -> None:
         self._current = speaker_index

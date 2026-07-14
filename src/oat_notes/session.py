@@ -34,6 +34,7 @@ class SessionOptions:
     hotkey_modifiers: tuple[str, ...] = ("ctrl", "alt")
     speaker_store: SpeakerStore | None = None
     embedding_engine: SpeakerEmbeddingEngine | None = None
+    tracking_embedding_engine: SpeakerEmbeddingEngine | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,7 @@ class Session:
                 options.speaker_store,
                 options.embedding_engine,
                 config.sample_rate,
+                tracking_engine=options.tracking_embedding_engine,
             )
             if options.speaker_store is not None
             else None
