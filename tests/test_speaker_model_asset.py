@@ -1,9 +1,26 @@
 import hashlib
 import socket
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from oat_notes.speaker_id import SherpaOnnxEmbeddingEngine, bundled_model_path
+
+
+def test_incomplete_windows_runtime_fails_cleanly(monkeypatch):
+    import oat_notes.speaker_id as speaker_id
+
+    missing_package = Path(__file__).with_name("missing_sherpa_onnx") / "__init__.py"
+    fake_package = SimpleNamespace(__file__=str(missing_package))
+    monkeypatch.setitem(__import__("sys").modules, "sherpa_onnx", fake_package)
+    monkeypatch.setattr(speaker_id.sys, "platform", "win32")
+    try:
+        SherpaOnnxEmbeddingEngine()
+    except RuntimeError as error:
+        assert "native runtime is incomplete" in str(error)
+    else:
+        raise AssertionError("incomplete native runtime was accepted")
 
 
 def test_bundled_speaker_model_loads_and_embeds_without_network(monkeypatch):

@@ -6,13 +6,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$appSource = Join-Path $env:LOCALAPPDATA "oat-notes-build\dist\oat-notes"
+$stageRoot = Join-Path $env:LOCALAPPDATA "oat-notes-build"
+$appSource = Join-Path $stageRoot "dist\oat-notes"
 
 if (-not $SkipAppBuild) {
-    $buildArgs = @()
-    if ($SkipSync) { $buildArgs += "-SkipSync" }
-    if ($SkipTests) { $buildArgs += "-SkipTests" }
-    & "$PSScriptRoot\build_app.ps1" @buildArgs
+    # Do not rebuild over the normal runnable folder: Windows locks native
+    # DLLs while that copy of oat-notes is open. The installer gets a private
+    # staging folder so upgrades can be built while the app is running.
+    $installerDistPath = Join-Path $stageRoot "installer-dist"
+    $appSource = Join-Path $installerDistPath "oat-notes"
+    $buildParams = @{ DistPath = $installerDistPath }
+    if ($SkipSync) { $buildParams.SkipSync = $true }
+    if ($SkipTests) { $buildParams.SkipTests = $true }
+    & "$PSScriptRoot\build_app.ps1" @buildParams
 }
 
 $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
