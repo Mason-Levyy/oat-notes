@@ -10,7 +10,7 @@ drains, so they follow the session clock rather than sample counts.
 from __future__ import annotations
 
 from collections import deque
-from typing import Protocol
+from typing import Callable, Protocol
 
 import numpy as np
 
@@ -25,10 +25,17 @@ class Vad(Protocol):
 
 
 class VadChunker:
-    def __init__(self, vad: Vad, config: Config, channel: Channel) -> None:
+    def __init__(
+        self,
+        vad: Vad,
+        config: Config,
+        channel: Channel,
+        window_sink: Callable[[float, np.ndarray, bool], None] | None = None,
+    ) -> None:
         self._vad = vad
         self._config = config
         self._channel = channel
+        self._window_sink = window_sink
         self._window_seconds = vad.window_samples / config.sample_rate
         self._buffer = np.empty(0, dtype=np.float32)
         self._next_sample_time = 0.0
@@ -80,6 +87,8 @@ class VadChunker:
         self, window_time: float, window: np.ndarray
     ) -> AudioChunk | None:
         is_speech = self._vad.speech_probability(window) >= self._config.vad_threshold
+        if self._window_sink is not None:
+            self._window_sink(window_time, window, is_speech)
 
         if not self._in_speech:
             if not is_speech:

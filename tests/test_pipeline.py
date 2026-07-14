@@ -215,6 +215,56 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     assert store.profile(saved.speaker_id).state == "learning"
 
 
+def test_rolling_speaker_tracking_updates_without_splitting_transcript(tmp_path):
+    from oat_notes.attribution import Speaker
+    from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
+    from oat_notes.speaker_store import SpeakerStore
+
+    class BobEngine(SpeakerEmbeddingEngine):
+        def embed(self, samples, sample_rate):
+            return np.array([0.0, 1.0], dtype=np.float32)
+
+    store = SpeakerStore(tmp_path / "speakers.db")
+    alice = store.create_speaker("Alice")
+    bob = store.create_speaker("Bob")
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
+    resolver = SpeakerResolver(
+        [
+            Speaker("Alice", speaker_id=alice.speaker_id),
+            Speaker("Bob", speaker_id=bob.speaker_id),
+        ],
+        store,
+        BobEngine(),
+        CONFIG.sample_rate,
+    )
+    received = []
+    tracked = []
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        FakeTranscriber(),
+        lambda segment, latency: received.append(segment),
+        channels=(Channel.MIC,),
+        vad_factory=EnergyFakeVad,
+        speaker_resolver=resolver,
+        speaker_tracking_sink=lambda *event: tracked.append(event),
+    )
+    pipeline.start()
+    duration_windows = 90
+    pipeline.frame_queue.put(
+        (
+            Channel.MIC,
+            0.0,
+            np.full(duration_windows * WINDOW, 0.75, dtype=np.float32),
+        )
+    )
+    pipeline.finish()
+
+    assert len(received) == 1
+    assert tracked == [(1, Channel.MIC, "auto", 1.0)]
+
+
 def test_transcription_errors_never_log_backend_message(capsys):
     class PrivateFailureTranscriber(Transcriber):
         def transcribe(self, chunk):

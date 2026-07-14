@@ -10,7 +10,7 @@ Live mic + system-audio loopback → timestamped transcript with speaker labels,
 uv run oat-notes --ui
 ```
 
-Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until hotkey-labeled turns provide four seconds of usable enrollment speech. Voice embedding and transcription run locally in parallel; ready profiles are matched automatically at the end of later turns, regardless of which audio source captured them.
+Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until hotkey-labeled turns provide four seconds of usable enrollment speech. Voice embedding and transcription run locally in parallel; ready profiles are checked in overlapping 1.5-second windows about every 0.5 seconds, with two consecutive matches required before the live speaker changes.
 
 The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order but stay editable per meeting. Someone unexpected joins? Click `+ GUEST`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
 
