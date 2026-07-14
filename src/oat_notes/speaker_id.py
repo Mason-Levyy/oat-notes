@@ -45,6 +45,15 @@ class SherpaOnnxEmbeddingEngine(SpeakerEmbeddingEngine):
     def __init__(self, model_path: Path | None = None) -> None:
         import sherpa_onnx
 
+        if sys.platform == "win32":
+            lib_dir = Path(sherpa_onnx.__file__).resolve().parent / "lib"
+            required = ("onnxruntime.dll", "sherpa-onnx-cxx-api.dll")
+            missing = [name for name in required if not (lib_dir / name).is_file()]
+            if missing:
+                raise RuntimeError(
+                    "sherpa-onnx native runtime is incomplete; reinstall "
+                    "sherpa-onnx-core (missing " + ", ".join(missing) + ")"
+                )
         path = model_path or bundled_model_path()
         if not path.is_file():
             raise RuntimeError(f"bundled speaker model is missing: {path.name}")

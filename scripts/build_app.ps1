@@ -1,18 +1,22 @@
 param(
     [switch]$SkipSync,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$DistPath
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $stageRoot = Join-Path $env:LOCALAPPDATA "oat-notes-build"
+$buildEnvironment = Join-Path $stageRoot ".venv"
 $workPath = Join-Path $stageRoot "build"
-$distPath = Join-Path $stageRoot "dist"
+$resolvedDistPath = if ($DistPath) { $DistPath } else { Join-Path $stageRoot "dist" }
+$previousProjectEnvironment = $env:UV_PROJECT_ENVIRONMENT
+$env:UV_PROJECT_ENVIRONMENT = $buildEnvironment
 
 Push-Location $root
 try {
     if (-not $SkipSync) {
-        uv sync --extra openvino
+        uv sync --frozen --link-mode copy --extra openvino
         if ($LASTEXITCODE -ne 0) { throw "uv sync failed" }
     }
     if (-not $SkipTests) {
@@ -21,12 +25,13 @@ try {
     }
     uv run --no-sync pyinstaller `
         --workpath $workPath `
-        --distpath $distPath `
+        --distpath $resolvedDistPath `
         --noconfirm `
         oat-notes.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
-    Write-Host "Application built: $distPath\oat-notes\oat-notes.exe"
+    Write-Host "Application built: $resolvedDistPath\oat-notes\oat-notes.exe"
 }
 finally {
     Pop-Location
+    $env:UV_PROJECT_ENVIRONMENT = $previousProjectEnvironment
 }
