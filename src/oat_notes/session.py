@@ -98,21 +98,14 @@ class Session:
             Channel.MIC: False,
             Channel.LOOPBACK: False,
         }
-        mic_first = next(
-            (i for i, s in enumerate(self.roster) if not s.remote), None
-        )
-        remote_first = next(
-            (i for i, s in enumerate(self.roster) if s.remote), None
-        )
-        self.active[Channel.MIC] = mic_first
-        self.active[Channel.LOOPBACK] = remote_first
+        first = 0 if self.roster else None
+        self.active[Channel.MIC] = first
+        self.active[Channel.LOOPBACK] = first
         # Constructed even for an empty roster: guests can be added mid-session.
         self._attributor = Attributor(
             tuple(self.roster),
-            mic_log=SwitchLog(initial=mic_first if mic_first is not None else 0),
-            loopback_log=SwitchLog(
-                initial=remote_first if remote_first is not None else 0
-            ),
+            mic_log=SwitchLog(initial=first if first is not None else 0),
+            loopback_log=SwitchLog(initial=first if first is not None else 0),
         )
         self._speaker_resolver = (
             SpeakerResolver(
@@ -182,18 +175,13 @@ class Session:
             capture.start()
 
     def switch_speaker(self, index: int) -> None:
-        """Route a switch to the speaker's own channel and cut its in-flight
-        chunk, so the previous speaker's words transcribe immediately.
-
-        An index past the roster auto-creates in-person guests up to that
-        slot — the pressed key permanently becomes that guest's key.
-        """
+        """Select a person for either audio source and cut in-flight chunks."""
         if not 0 <= index < len(self.roster):
             return
-        channel = self._attributor.channel_of(index)
-        self._attributor.log_for(index).record(self.clock.now(), index)
-        self.active[channel] = index
-        if channel in self.channels:
+        timestamp = self.clock.now()
+        for channel in self.channels:
+            self._attributor.log_for(channel).record(timestamp, index)
+            self.active[channel] = index
             if self._speaker_resolver is not None:
                 self._manual_override_pending[channel] = True
                 self._pipeline.manual_override(channel, index)
@@ -212,7 +200,7 @@ class Session:
             None,
         )
         if index is None:
-            index = self._create_guest(remote=False, hotkey_slot=slot)
+            index = self._create_guest(hotkey_slot=slot)
         self.switch_speaker(index)
 
     def page_hotkeys(self, direction: int) -> None:
@@ -222,7 +210,7 @@ class Session:
         self.hotkey_bank = max(0, self.hotkey_bank + direction)
         self._events.on_hotkey_bank(self.hotkey_bank)
 
-    def add_guest(self, remote: bool) -> int:
+    def add_guest(self) -> int:
         """Create a placeholder speaker mid-meeting and switch to them.
 
         The name is backfilled at save time via ``renames``.
@@ -232,14 +220,13 @@ class Session:
         slot = next((item for item in range(start, start + 9) if item not in used), None)
         if slot is None:
             slot = max((item for item in used if item is not None), default=-1) + 1
-        index = self._create_guest(remote, hotkey_slot=slot)
+        index = self._create_guest(hotkey_slot=slot)
         self.switch_speaker(index)
         return index
 
-    def _create_guest(self, remote: bool, hotkey_slot: int | None = None) -> int:
+    def _create_guest(self, hotkey_slot: int | None = None) -> int:
         guest = Speaker(
             f"Guest {len(self.guest_indices) + 1}",
-            remote=remote,
             hotkey_slot=hotkey_slot,
         )
         index = self._attributor.add(guest)

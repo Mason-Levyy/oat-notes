@@ -102,7 +102,7 @@ def test_worker_applies_attributor():
         channels=(Channel.MIC, Channel.LOOPBACK),
         vad_factory=EnergyFakeVad,
         attributor=Attributor(
-            parse_speakers("Mason, Sarah, Priya*"),
+            parse_speakers("Mason, Sarah, Priya"),
             mic_log=log,
             loopback_log=SwitchLog(initial=2),
         ),

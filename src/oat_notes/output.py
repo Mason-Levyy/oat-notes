@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .types import Channel, TranscriptSegment
 
-CHANNEL_LABELS = {Channel.MIC: "Me", Channel.LOOPBACK: "Remote"}
+CHANNEL_LABELS = {Channel.MIC: "Microphone", Channel.LOOPBACK: "System audio"}
 
 
 def slugify(name: str) -> str:

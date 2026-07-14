@@ -75,19 +75,18 @@ def test_store_rejects_short_or_invalid_quality_samples(tmp_path):
         )
 
 
-def test_groups_round_trip_order_and_placement(tmp_path):
+def test_groups_round_trip_order(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     a = store.create_speaker("A")
     b = store.create_speaker("B")
     group = store.create_group(
         "Standup",
         [
-            {"speaker_id": b.speaker_id, "remote": True},
-            {"speaker_id": a.speaker_id, "remote": False},
+            {"speaker_id": b.speaker_id},
+            {"speaker_id": a.speaker_id},
         ],
     )
     assert [member.name for member in group.members] == ["B", "A"]
-    assert [member.remote for member in group.members] == [True, False]
 
     store.delete_speaker(b.speaker_id)
     assert [member.name for member in store.group(group.group_id).members] == ["A"]
@@ -111,12 +110,12 @@ def test_schema_is_versioned_and_delete_cascades(tmp_path):
     store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
     store.create_group(
         "Temporary group",
-        [{"speaker_id": speaker.speaker_id, "remote": False}],
+        [{"speaker_id": speaker.speaker_id}],
     )
     store.delete_speaker(speaker.speaker_id)
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
         assert connection.execute("SELECT COUNT(*) FROM voice_samples").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM group_members").fetchone()[0] == 0
 

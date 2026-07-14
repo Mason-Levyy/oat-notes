@@ -18,12 +18,12 @@ def test_format_timestamp():
 
 def test_line_labels():
     mic = segment("hello", 5.0)
-    remote = segment("hi there", 6.0, channel=Channel.LOOPBACK)
+    system = segment("hi there", 6.0, channel=Channel.LOOPBACK)
     named = segment("agreed", 7.0, speaker="Sarah")
 
     assert line_for(mic, label_channels=False) == "[00:00:05] hello"
-    assert line_for(mic, label_channels=True) == "[00:00:05] Me: hello"
-    assert line_for(remote, label_channels=True) == "[00:00:06] Remote: hi there"
+    assert line_for(mic, label_channels=True) == "[00:00:05] Microphone: hello"
+    assert line_for(system, label_channels=True) == "[00:00:06] System audio: hi there"
     # A named speaker (Phase 2 attribution) wins over the channel label.
     assert line_for(named, label_channels=True) == "[00:00:07] Sarah: agreed"
 
@@ -56,9 +56,9 @@ def test_meeting_log_sorts_and_writes(tmp_path):
 
     assert path.name == "meeting_2026-07-09_1430.txt"
     assert path.read_text(encoding="utf-8") == (
-        "[00:00:03] Me: first\n"
-        "[00:00:10] Remote: second\n"
-        "[00:00:20] Me: third\n"
+        "[00:00:03] Microphone: first\n"
+        "[00:00:10] System audio: second\n"
+        "[00:00:20] Microphone: third\n"
     )
 
 

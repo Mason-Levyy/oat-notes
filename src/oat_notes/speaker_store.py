@@ -17,7 +17,7 @@ import numpy as np
 
 from .paths import app_data_dir
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 DEFAULT_MODEL_KEY = "3dspeaker-eres2net-en-voxceleb-v1"
 READY_SPEECH_SECONDS = 4.0
 MIN_SAMPLE_SPEECH_SECONDS = 1.0
@@ -64,14 +64,12 @@ class GroupMember:
     speaker_id: str
     name: str
     position: int
-    remote: bool
 
     def to_dict(self) -> dict:
         return {
             "speaker_id": self.speaker_id,
             "name": self.name,
             "position": self.position,
-            "remote": self.remote,
         }
 
 
@@ -145,11 +143,29 @@ class SpeakerStore:
                         speaker_id TEXT NOT NULL REFERENCES speakers(id)
                             ON DELETE CASCADE,
                         position INTEGER NOT NULL CHECK(position >= 0),
-                        remote INTEGER NOT NULL CHECK(remote IN (0, 1)),
                         PRIMARY KEY(group_id, speaker_id),
                         UNIQUE(group_id, position)
                     );
-                    PRAGMA user_version = 1;
+                    PRAGMA user_version = 2;
+                    """
+                )
+            elif version < 2:
+                connection.executescript(
+                    """
+                    CREATE TABLE group_members_v2 (
+                        group_id TEXT NOT NULL REFERENCES groups(id)
+                            ON DELETE CASCADE,
+                        speaker_id TEXT NOT NULL REFERENCES speakers(id)
+                            ON DELETE CASCADE,
+                        position INTEGER NOT NULL CHECK(position >= 0),
+                        PRIMARY KEY(group_id, speaker_id),
+                        UNIQUE(group_id, position)
+                    );
+                    INSERT INTO group_members_v2(group_id, speaker_id, position)
+                        SELECT group_id, speaker_id, position FROM group_members;
+                    DROP TABLE group_members;
+                    ALTER TABLE group_members_v2 RENAME TO group_members;
+                    PRAGMA user_version = 2;
                     """
                 )
 
@@ -419,10 +435,10 @@ class SpeakerStore:
             seen.add(speaker_id)
             connection.execute(
                 """
-                INSERT INTO group_members(group_id, speaker_id, position, remote)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO group_members(group_id, speaker_id, position)
+                VALUES (?, ?, ?)
                 """,
-                (group_id, speaker_id, position, int(bool(member.get("remote")))),
+                (group_id, speaker_id, position),
             )
 
     def delete_group(self, group_id: str) -> None:
@@ -440,7 +456,7 @@ class SpeakerStore:
                 raise KeyError("group not found")
             member_rows = connection.execute(
                 """
-                SELECT gm.speaker_id, s.name, gm.position, gm.remote
+                SELECT gm.speaker_id, s.name, gm.position
                 FROM group_members gm
                 JOIN speakers s ON s.id = gm.speaker_id
                 WHERE gm.group_id = ?
@@ -456,7 +472,6 @@ class SpeakerStore:
                     str(member["speaker_id"]),
                     str(member["name"]),
                     int(member["position"]),
-                    bool(member["remote"]),
                 )
                 for member in member_rows
             ),

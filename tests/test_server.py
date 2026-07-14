@@ -110,7 +110,7 @@ def test_switch_without_session_is_harmless():
 
 def test_add_guest_without_session_reports_error():
     state = AppState(Config(), transcriber=None)
-    assert state.add_guest({"remote": False}) == {"error": "not recording"}
+    assert state.add_guest({}) == {"error": "not recording"}
 
 
 def test_finalize_without_pending_reports_error():
@@ -164,10 +164,10 @@ def test_local_speaker_library_crud_and_groups(tmp_path):
     result = state.create_library_group(
         {
             "name": "Standup",
-            "members": [{"speaker_id": speaker["id"], "remote": True}],
+            "members": [{"speaker_id": speaker["id"]}],
         }
     )
-    assert result["library"]["groups"][0]["members"][0]["remote"] is True
+    assert result["library"]["groups"][0]["members"][0]["speaker_id"] == speaker["id"]
 
     state.update_library_speaker({"id": speaker["id"], "name": "Sarah K"})
     assert store.profile(speaker["id"]).name == "Sarah K"

@@ -34,8 +34,8 @@ def test_empty_hotkey_slot_creates_guest_at_exact_slot():
     created = []
     switched = []
 
-    def create_guest(remote, hotkey_slot):
-        created.append((remote, hotkey_slot))
+    def create_guest(hotkey_slot):
+        created.append(hotkey_slot)
         session.roster.append(Speaker("Guest 1", hotkey_slot=hotkey_slot))
         return 0
 
@@ -43,8 +43,37 @@ def test_empty_hotkey_slot_creates_guest_at_exact_slot():
     session.switch_speaker = switched.append
     session.switch_hotkey(4)
 
-    assert created == [(False, 31)]
+    assert created == [31]
     assert switched == [0]
+
+
+def test_selecting_person_applies_to_both_audio_sources():
+    session = bare_session()
+    session.roster = [Speaker("Alex"), Speaker("Taylor")]
+    session.channels = (Channel.MIC, Channel.LOOPBACK)
+    session.active = {Channel.MIC: 0, Channel.LOOPBACK: 0}
+    session.clock = SimpleNamespace(now=lambda: 4.0)
+    recorded = []
+    session._attributor = SimpleNamespace(
+        log_for=lambda channel: SimpleNamespace(
+            record=lambda timestamp, index: recorded.append((channel, timestamp, index))
+        )
+    )
+    split = []
+    session._pipeline = SimpleNamespace(split_channel=split.append)
+    session._speaker_resolver = None
+    selected = []
+    session._events = SimpleNamespace(on_speaker=selected.append)
+
+    session.switch_speaker(1)
+
+    assert recorded == [
+        (Channel.MIC, 4.0, 1),
+        (Channel.LOOPBACK, 4.0, 1),
+    ]
+    assert split == [Channel.MIC, Channel.LOOPBACK]
+    assert session.active == {Channel.MIC: 1, Channel.LOOPBACK: 1}
+    assert selected == [1]
 
 
 def test_delayed_old_attribution_cannot_override_manual_selection():

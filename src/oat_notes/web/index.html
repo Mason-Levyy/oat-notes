@@ -248,6 +248,7 @@ body {
 .profile-pill { font-size: 7px; color: #6b6558; }
 .profile-pill.ready { color: var(--sprout); }
 .roster-tools { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
+.roster-tools .group-picker { grid-column: 1 / -1; }
 .setup-roster-row.untrained, .setup-roster-row.learning { background: #d2d0ca; color: #68645c; }
 .group-card { border: 2px dashed var(--ink); padding: 10px; margin-top: 10px; }
 .group-card h3 { font-size: 8px; margin-bottom: 7px; }
@@ -284,10 +285,6 @@ body {
 .chip.active { background: var(--oat); box-shadow: 3px 3px 0 var(--ink); }
 .chip.active .slot { color: var(--ink); }
 .chip.active .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
-.chip.remote .slot { color: var(--sprout); }
-.chip.active-remote { background: var(--sprout); color: #fff; box-shadow: 3px 3px 0 var(--ink); }
-.chip.active-remote .slot { color: #fff; }
-.chip.active-remote .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
 .chip.fallback { cursor: default; }
 .chip.ghost {
   border-style: dashed;
@@ -372,18 +369,17 @@ body {
         <div class="field" style="margin-bottom:16px">
           <label class="pixel">SPEAKERS</label>
           <div class="roster-tools">
+            <select id="group-select" class="group-picker" aria-label="Choose a saved group"></select>
             <input type="text" id="person-search" list="person-options" aria-label="Search saved speakers" placeholder="Search saved people">
             <datalist id="person-options"></datalist>
             <button type="button" class="mini primary" id="add-person-btn">+ PERSON</button>
-            <select id="group-select" aria-label="Saved group"></select>
-            <button type="button" class="mini primary" id="add-group-btn">+ GROUP</button>
           </div>
           <div class="compact-row">
             <input type="text" id="new-person-name" placeholder="New speaker name">
             <button type="button" class="mini" id="create-person-btn">CREATE</button>
           </div>
           <div class="setup-roster" id="setup-roster"></div>
-          <div class="hint">Order sets hotkey slots. Toggle ROOM/CALL per meeting. <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches; brackets change banks.</div>
+          <div class="hint">Choose a group to fill the roster, then add any extra people. Order sets hotkey slots. <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches; brackets change banks.</div>
         </div>
         <label class="check" style="margin-bottom:16px">
           <input type="checkbox" id="loopback" checked>
@@ -451,7 +447,7 @@ body {
     </div>
     <div class="settings-card">
       <h2 class="pixel">GROUPS</h2>
-      <p>Save recurring rosters with their normal order and ROOM/CALL placement.</p>
+      <p>Save recurring rosters with their normal order.</p>
       <div class="compact-row">
         <input type="text" id="group-new-name" placeholder="Group name">
         <button type="button" class="mini primary" id="group-create">ADD GROUP</button>
@@ -534,12 +530,11 @@ function profileText(speaker) {
   return `${Number(speaker.enrollment_seconds || 0).toFixed(1)} / ${goal.toFixed(1)}s`;
 }
 
-function addRosterSpeaker(speaker, remote) {
+function addRosterSpeaker(speaker) {
   if (!speaker || setupRoster.some((entry) => entry.speaker_id === speaker.id)) return;
   setupRoster.push({
     speaker_id: speaker.id,
     name: speaker.name,
-    remote: !!remote,
     profile_state: speaker.profile_state,
     enrollment_seconds: speaker.enrollment_seconds || 0,
   });
@@ -553,7 +548,7 @@ function renderSetupRoster() {
   ).join("");
   const groups = libraryGroups();
   $("group-select").innerHTML = groups.length
-    ? groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)}</option>`).join("")
+    ? '<option value="">SELECT GROUP TO FILL ROSTER</option>' + groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)}</option>`).join("")
     : '<option value="">NO SAVED GROUPS</option>';
 
   const container = $("setup-roster");
@@ -569,12 +564,6 @@ function renderSetupRoster() {
     row.className = `setup-roster-row ${entry.profile_state || "untrained"}`;
     row.innerHTML = `<span class="pixel">${index + 1}</span><span class="name">${escapeHtml(entry.name)}</span>
       <span class="profile-pill ${entry.profile_state === "ready" ? "ready" : ""}">${profileText(entry)}</span>`;
-    const placement = document.createElement("button");
-    placement.type = "button";
-    placement.className = "mini";
-    placement.textContent = entry.remote ? "CALL" : "ROOM";
-    placement.onclick = () => { entry.remote = !entry.remote; renderSetupRoster(); };
-    row.appendChild(placement);
     [["↑", -1], ["↓", 1]].forEach(([label, delta]) => {
       const button = document.createElement("button");
       button.type = "button"; button.className = "mini"; button.textContent = label;
@@ -612,10 +601,7 @@ function saveGroup(group) {
   return post("/api/library/groups/update", {
     id: group.id,
     name: group.name,
-    members: group.members.map((member) => ({
-      speaker_id: member.speaker_id,
-      remote: !!member.remote,
-    })),
+    members: group.members.map((member) => ({ speaker_id: member.speaker_id })),
   }).then((result) => applyLibraryResult(result, "GROUP SAVED"));
 }
 
@@ -664,10 +650,6 @@ function renderLibrarySettings() {
       const row = document.createElement("div");
       row.className = "group-member";
       row.innerHTML = `<span class="name">${escapeHtml(member.name)}</span>`;
-      const placement = document.createElement("button");
-      placement.type = "button"; placement.className = "mini"; placement.textContent = member.remote ? "CALL" : "ROOM"; placement.disabled = disabled;
-      placement.onclick = () => { member.remote = !member.remote; saveGroup(group); };
-      row.appendChild(placement);
       [["↑", -1], ["↓", 1]].forEach(([label, delta]) => {
         const button = document.createElement("button"); button.type = "button"; button.className = "mini"; button.textContent = label; button.disabled = disabled;
         button.onclick = () => {
@@ -692,7 +674,7 @@ function renderLibrarySettings() {
     add.onclick = () => {
       const speaker = librarySpeakers().find((item) => item.id === select.value);
       if (!speaker) return;
-      group.members.push({ speaker_id: speaker.id, name: speaker.name, remote: false });
+      group.members.push({ speaker_id: speaker.id, name: speaker.name });
       saveGroup(group);
     };
     const del = document.createElement("button"); del.type = "button"; del.className = "mini danger"; del.textContent = "DELETE GROUP"; del.disabled = disabled;
@@ -754,41 +736,28 @@ function renderPlayers() {
     chip.type = "button";
     let cls = "chip";
     if (speaker.profile_state === "untrained" || speaker.profile_state === "learning") cls += ` ${speaker.profile_state}`;
-    if (speaker.remote) {
-      cls += " remote";
-      if (index === state.actives.loopback) cls += " active-remote";
-    } else if (index === state.actives.mic) {
+    if (index === state.actives.mic || index === state.actives.loopback) {
       cls += " active";
     }
     chip.className = cls;
     const bankKey = hotkeySlot - firstSlot + 1;
-    const slot = speaker.remote ? `C${bankKey}` : `P${bankKey}`;
+    const slot = `P${bankKey}`;
     const progress = speaker.profile_state === "ready" ? "READY" : `${Number(speaker.enrollment_seconds || 0).toFixed(1)}/4.0s`;
     chip.title = `Hotkey ${bankKey}; saved slot ${hotkeySlot + 1}`;
     chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
     players.appendChild(chip);
   });
-  const hasRemoteSpeaker = state.speakers.some((speaker) => speaker.remote);
-  if (!hasRemoteSpeaker && state.channels && state.channels.includes("loopback")) {
-    const chip = document.createElement("div");
-    chip.className = "chip remote fallback";
-    chip.innerHTML = `<span class="slot">&#9741;</span> REMOTE`;
-    players.appendChild(chip);
-  }
-  addGhost(players, false, "+ WALK-IN");
-  if (state.channels && state.channels.includes("loopback")) {
-    addGhost(players, true, "+ CALL-IN");
-  }
+  addGhost(players);
 }
 
-function addGhost(players, remote, label) {
+function addGhost(players) {
   const chip = document.createElement("button");
   chip.type = "button";
-  chip.className = "chip ghost" + (remote ? " remote" : "");
+  chip.className = "chip ghost";
   chip.title = "Unexpected speaker? Click to switch to them now; name them after the meeting.";
-  chip.innerHTML = `<span class="slot">${remote ? "&#9741;" : "P?"}</span> ${label}`;
-  chip.onclick = () => post("/api/add_guest", { remote });
+  chip.innerHTML = `<span class="slot">P?</span> + GUEST`;
+  chip.onclick = () => post("/api/add_guest", {});
   players.appendChild(chip);
 }
 
@@ -875,7 +844,6 @@ $("setup").onsubmit = (event) => {
   const speakers = setupRoster.map((speaker, index) => ({
     speaker_id: speaker.speaker_id,
     name: speaker.name,
-    remote: !!speaker.remote,
     hotkey_slot: index,
   }));
   $("statusline").textContent = "";
@@ -909,17 +877,25 @@ $("finalize-btn").onclick = () => {
 $("add-person-btn").onclick = () => {
   const query = $("person-search").value.trim().toLowerCase();
   const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === query);
-  addRosterSpeaker(speaker, false);
+  addRosterSpeaker(speaker);
   if (speaker) $("person-search").value = "";
 };
 
-$("add-group-btn").onclick = () => {
+$("group-select").onchange = () => {
   const group = libraryGroups().find((item) => item.id === $("group-select").value);
   if (!group) return;
+  setupRoster = [];
   group.members.forEach((member) => {
     const speaker = librarySpeakers().find((item) => item.id === member.speaker_id);
-    addRosterSpeaker(speaker, member.remote);
+    if (!speaker || setupRoster.some((entry) => entry.speaker_id === speaker.id)) return;
+    setupRoster.push({
+      speaker_id: speaker.id,
+      name: speaker.name,
+      profile_state: speaker.profile_state,
+      enrollment_seconds: speaker.enrollment_seconds || 0,
+    });
   });
+  renderSetupRoster();
 };
 
 $("create-person-btn").onclick = () => {
@@ -928,7 +904,7 @@ $("create-person-btn").onclick = () => {
   post("/api/library/speakers/create", { name }).then((result) => {
     if (!applyLibraryResult(result, "SPEAKER CREATED")) return;
     const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === name.toLowerCase());
-    addRosterSpeaker(speaker, false);
+    addRosterSpeaker(speaker);
     $("new-person-name").value = "";
   });
 };
@@ -990,7 +966,11 @@ events.onmessage = (message) => {
   const event = JSON.parse(message.data);
   if (event.type === "line") addLine(event);
   else if (event.type === "speaker") {
-    state.actives[event.channel] = event.index;
+    if (event.channel) state.actives[event.channel] = event.index;
+    else {
+      state.actives.mic = event.index;
+      state.actives.loopback = event.index;
+    }
     renderPlayers();
   } else if (event.type === "hotkey_bank") {
     state.hotkey_bank = event.bank;

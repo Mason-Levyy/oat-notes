@@ -107,12 +107,8 @@ class SpeakerResolver:
     def enabled(self) -> bool:
         return self._engine is not None
 
-    def _members(self, channel: Channel) -> list[int]:
-        return [
-            index
-            for index, speaker in enumerate(self._roster)
-            if speaker.remote == (channel is Channel.LOOPBACK)
-        ]
+    def _members(self) -> list[int]:
+        return list(range(len(self._roster)))
 
     @staticmethod
     def _speech_seconds(chunk: AudioChunk) -> float:
@@ -138,7 +134,7 @@ class SpeakerResolver:
             return 0 <= chunk.manual_speaker_index < len(self._roster)
         member_ids = [
             self._roster[index].speaker_id
-            for index in self._members(chunk.channel)
+            for index in self._members()
             if self._roster[index].speaker_id
         ]
         return bool(self._store.match_vectors(member_ids, chunk.channel.value))
@@ -151,7 +147,7 @@ class SpeakerResolver:
     def resolve(
         self, chunk: AudioChunk, embedding: np.ndarray | None
     ) -> AttributionDecision:
-        members = self._members(chunk.channel)
+        members = self._members()
         manual = chunk.manual_speaker_index
         if manual is not None and manual in members:
             speaker = self._roster[manual]
