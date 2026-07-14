@@ -88,7 +88,7 @@ def test_matching_never_considers_people_outside_roster(tmp_path):
 
 def test_guest_embeddings_stay_temporary_until_linked(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
-    person = store.create_speaker("Walk-in")
+    person = store.create_speaker("Visitor")
     resolver = SpeakerResolver([Speaker("Guest 1")], store, FakeEngine([1, 0]), 16_000)
     resolver.resolve(chunk(manual=0), np.array([1.0, 0.0], dtype=np.float32))
     assert resolver.profile_status(0) == ("learning", 2.0)
@@ -140,8 +140,8 @@ def test_source_specific_and_cross_source_thresholds(tmp_path):
 
     cross_source = SpeakerResolver(
         [
-            Speaker("Same source", remote=True, speaker_id=same_source.speaker_id),
-            Speaker("Untrained", remote=True, speaker_id=untrained.speaker_id),
+            Speaker("Same source", speaker_id=same_source.speaker_id),
+            Speaker("Untrained", speaker_id=untrained.speaker_id),
         ],
         store,
         FakeEngine([1.0, 0.0]),
@@ -153,19 +153,19 @@ def test_source_specific_and_cross_source_thresholds(tmp_path):
     assert decision.source == "unknown"
 
 
-def test_matching_is_isolated_to_the_current_channel(tmp_path):
+def test_matching_considers_every_rostered_person_on_either_source(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     mic_a = store.create_speaker("Mic A")
     mic_b = store.create_speaker("Mic B")
-    remote = store.create_speaker("Remote")
+    system_speaker = store.create_speaker("Taylor")
     store.add_sample(mic_a.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
     store.add_sample(mic_b.speaker_id, np.array([0.0, -1.0]), "mic", 4.0, 1.0)
-    store.add_sample(remote.speaker_id, np.array([1.0, 0.0]), "loopback", 4.0, 1.0)
+    store.add_sample(system_speaker.speaker_id, np.array([1.0, 0.0]), "loopback", 4.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Mic A", speaker_id=mic_a.speaker_id),
             Speaker("Mic B", speaker_id=mic_b.speaker_id),
-            Speaker("Remote", remote=True, speaker_id=remote.speaker_id),
+            Speaker("Taylor", speaker_id=system_speaker.speaker_id),
         ],
         store,
         FakeEngine([1.0, 0.0]),
@@ -173,7 +173,8 @@ def test_matching_is_isolated_to_the_current_channel(tmp_path):
     )
 
     decision = resolver.resolve(chunk(), np.array([1.0, 0.0], dtype=np.float32))
-    assert decision.source == "unknown"
+    assert decision.name == "Taylor"
+    assert decision.source == "auto"
 
 
 def test_enrollment_rejects_short_or_clipped_turns(tmp_path):

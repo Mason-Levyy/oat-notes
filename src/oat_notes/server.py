@@ -119,7 +119,6 @@ class AppState:
                     {
                         "id": speaker.speaker_id,
                         "name": speaker.name,
-                        "remote": speaker.remote,
                         "hotkey_slot": speaker.hotkey_slot,
                         "profile_state": profile_state,
                         "enrollment_seconds": round(enrollment_seconds, 2),
@@ -295,7 +294,6 @@ class AppState:
                 roster.append(
                     Speaker(
                         name=name,
-                        remote=bool(entry.get("remote", False)),
                         speaker_id=speaker_id,
                         hotkey_slot=hotkey_slot,
                     )
@@ -331,9 +329,6 @@ class AppState:
                     {
                         "type": "speaker",
                         "index": index,
-                        "channel": (
-                            "loopback" if session.roster[index].remote else "mic"
-                        ),
                         "source": "manual",
                     }
                 )
@@ -443,7 +438,7 @@ class AppState:
             session = self.session
             if session is None:
                 return {"error": "not recording"}
-            session.add_guest(remote=bool(body.get("remote", False)))
+            session.add_guest()
             self.roster = tuple(session.roster)
         self.hub.publish({"type": "status", "recording": True})
         return self.status()

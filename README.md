@@ -2,7 +2,7 @@
 
 Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
-Live mic + system-audio loopback → timestamped transcript with speaker labels, in the console or a local 8-bit web UI. On a Zoom/Teams call, the remote side is captured from the loopback of your output device — no mic pickup needed. Wear headphones, or the mic will also hear the remote speaker and produce duplicate lines.
+Live mic + system-audio loopback → timestamped transcript with speaker labels, in the console or a local 8-bit web UI. On a Zoom/Teams call, other participants are captured from the loopback of your output device — no mic pickup needed. Wear headphones to prevent the mic from capturing the same speech and producing duplicate lines.
 
 ## Web UI
 
@@ -10,9 +10,9 @@ Live mic + system-audio loopback → timestamped transcript with speaker labels,
 uv run oat-notes --ui
 ```
 
-Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, choose ROOM/CALL placement, START MEETING, and the transcript streams onto the screen live. New people are gray until hotkey-labeled turns provide four seconds of usable enrollment speech. Voice embedding and transcription run locally in parallel; ready profiles are matched automatically at the end of later turns.
+Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until hotkey-labeled turns provide four seconds of usable enrollment speech. Voice embedding and transcription run locally in parallel; ready profiles are matched automatically at the end of later turns, regardless of which audio source captured them.
 
-The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order and normal ROOM/CALL placement but stay editable per meeting. Someone unexpected joins? Click `+ WALK-IN` or `+ CALL-IN`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
+The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order but stay editable per meeting. Someone unexpected joins? Click `+ GUEST`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
 
 ## Setup
 
@@ -33,7 +33,7 @@ uv run oat-notes --list-devices      # enumerate input devices (loopback endpoin
 uv run oat-notes --device-index 5    # pick a specific mic
 uv run oat-notes --loopback-index 10 # pick a specific loopback endpoint
 uv run oat-notes --seconds 30        # auto-stop (handy for testing)
-uv run oat-notes --speakers "Mason,Sarah,Priya*"  # * = remote; keys 1..N switch
+uv run oat-notes --speakers "Mason,Sarah,Priya"   # keys 1..N switch
 uv run oat-notes --name "stand-up"          # names the transcript file
 uv run oat-notes --out-dir D:\notes  # transcript folder (default: ./transcripts)
 uv run oat-notes --no-file           # console only, skip the transcript file
@@ -48,13 +48,13 @@ uv run oat-notes --offline           # never touch the network; fails if the mod
 Output, one line per speech chunk:
 
 ```
-[00:03:12] Me: Let's walk through the model assumptions.
-[00:03:28] Remote: The churn number looks high to me.
+[00:03:12] Microphone: Let's walk through the model assumptions.
+[00:03:28] System audio: The churn number looks high to me.
 ```
 
 On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--name "stand-up"` → `stand-up_…​.txt`), merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-`--speakers` keeps the console's comma-separated interface; a `*` suffix marks remote people. In the UI, the saved roster determines stable hotkey slots. **Ctrl+Alt+1..9** by default selects a speaker in the active bank, while **Ctrl+Alt+[** and **Ctrl+Alt+]** page through larger rosters. The Settings tab can change the modifier combination. A manual press is authoritative for the current VAD turn, cuts the in-flight audio cleanly, and is the only event allowed to improve a saved voice profile. Automatic low-confidence matches are labeled `Unknown` rather than guessed.
+`--speakers` accepts a comma-separated roster. In the UI, the saved roster determines stable hotkey slots. **Ctrl+Alt+1..9** by default selects a speaker in the active bank, while **Ctrl+Alt+[** and **Ctrl+Alt+]** page through larger rosters. The Settings tab can change the modifier combination. A manual press is authoritative for the current VAD turn on either audio source, cuts in-flight audio cleanly, and is the only event allowed to improve a saved voice profile. Automatic low-confidence matches are labeled `Unknown` rather than guessed.
 
 ## Architecture
 

@@ -57,14 +57,7 @@ def main() -> None:
         "--speakers",
         default=None,
         metavar="NAMES",
-        help="comma-separated speakers, * marks remote: \"Mason,Sarah,Priya*\";"
-        " keys 1..N switch between them",
-    )
-    parser.add_argument(
-        "--remote-name",
-        default=None,
-        metavar="NAME",
-        help="shorthand for adding one remote speaker to --speakers",
+        help="comma-separated speakers; keys 1..N switch between them",
     )
     parser.add_argument(
         "--name",
@@ -194,8 +187,6 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
 
     warm_up(config, transcriber)
     roster = parse_speakers(args.speakers or "")
-    if args.remote_name:
-        roster = roster + (Speaker(args.remote_name.strip(), remote=True),)
 
     def print_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
         prefix = f"{label}: " if label else ""
@@ -224,11 +215,11 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     )
     session.start()
     for capture in session.captures:
-        role = "Me" if capture.channel is Channel.MIC else "Remote"
+        role = "Mic" if capture.channel is Channel.MIC else "System"
         print(f"{role:>6}: {capture.device_name}", flush=True)
     if len(roster) > 1:
         mapping = "  ".join(
-            f"[{number}] {speaker.name}{'*' if speaker.remote else ''}"
+            f"[{number}] {speaker.name}"
             for number, speaker in enumerate(roster, start=1)
         )
         print(
