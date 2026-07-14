@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -15,6 +15,8 @@ from .config import Config
 from .hotkeys import HotkeyListener
 from .output import CHANNEL_LABELS, MeetingLog
 from .pipeline import Pipeline
+from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
+from .speaker_store import SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
 from .types import Channel, TranscriptSegment
 
@@ -30,6 +32,8 @@ class SessionOptions:
     save_file: bool = True
     hotkeys: bool = True
     hotkey_modifiers: tuple[str, ...] = ("ctrl", "alt")
+    speaker_store: SpeakerStore | None = None
+    embedding_engine: SpeakerEmbeddingEngine | None = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,10 @@ class SessionEvents:
         lambda segment, label, latency: None
     )
     on_speaker: Callable[[int], None] = lambda index: None
+    on_attribution: Callable[[int | None, Channel, str, float | None], None] = (
+        lambda index, channel, source, confidence: None
+    )
+    on_hotkey_bank: Callable[[int], None] = lambda bank: None
 
 
 class Session:
@@ -59,8 +67,9 @@ class Session:
         self._stopped = False
         self._saved = False
         self.clock = SessionClock()
-        self.roster: list[Speaker] = list(options.speakers)
+        self.roster = self._assign_hotkey_slots(options.speakers)
         self.guest_indices: list[int] = []
+        self.hotkey_bank = 0
 
         self._pa = pyaudio.PyAudio()
         loopback_info = None
@@ -85,6 +94,10 @@ class Session:
             Channel.MIC: None,
             Channel.LOOPBACK: None,
         }
+        self._manual_override_pending = {
+            Channel.MIC: False,
+            Channel.LOOPBACK: False,
+        }
         mic_first = next(
             (i for i, s in enumerate(self.roster) if not s.remote), None
         )
@@ -101,6 +114,16 @@ class Session:
                 initial=remote_first if remote_first is not None else 0
             ),
         )
+        self._speaker_resolver = (
+            SpeakerResolver(
+                self.roster,
+                options.speaker_store,
+                options.embedding_engine,
+                config.sample_rate,
+            )
+            if options.speaker_store is not None
+            else None
+        )
 
         self.log = MeetingLog(label_channels=self._label_channels)
         self._pipeline = Pipeline(
@@ -110,6 +133,7 @@ class Session:
             self._handle_segment,
             channels=self.channels,
             attributor=self._attributor,
+            speaker_resolver=self._speaker_resolver,
         )
 
         self.captures = [
@@ -129,9 +153,26 @@ class Session:
         self._hotkeys = None
         if options.hotkeys:
             self._hotkeys = HotkeyListener(
-                self.switch_speaker,
+                self.switch_hotkey,
                 modifiers=options.hotkey_modifiers,
+                on_page=self.page_hotkeys,
             )
+
+    @staticmethod
+    def _assign_hotkey_slots(speakers: tuple[Speaker, ...]) -> list[Speaker]:
+        roster: list[Speaker] = []
+        used: set[int] = set()
+        next_slot = 0
+        for speaker in speakers:
+            requested = speaker.hotkey_slot
+            if requested is None or requested < 0 or requested in used:
+                while next_slot in used:
+                    next_slot += 1
+                requested = next_slot
+            used.add(requested)
+            next_slot = max(next_slot, requested + 1)
+            roster.append(replace(speaker, hotkey_slot=requested))
+        return roster
 
     def start(self) -> None:
         if self._hotkeys is not None:
@@ -147,32 +188,84 @@ class Session:
         An index past the roster auto-creates in-person guests up to that
         slot — the pressed key permanently becomes that guest's key.
         """
-        if not 0 <= index < 9:
+        if not 0 <= index < len(self.roster):
             return
-        while index >= len(self.roster):
-            self._create_guest(remote=False)
         channel = self._attributor.channel_of(index)
         self._attributor.log_for(index).record(self.clock.now(), index)
         self.active[channel] = index
         if channel in self.channels:
-            self._pipeline.split_channel(channel)
+            if self._speaker_resolver is not None:
+                self._manual_override_pending[channel] = True
+                self._pipeline.manual_override(channel, index)
+            else:
+                self._pipeline.split_channel(channel)
         self._events.on_speaker(index)
+
+    def switch_hotkey(self, offset: int) -> None:
+        slot = self.hotkey_bank * 9 + offset
+        index = next(
+            (
+                item
+                for item, speaker in enumerate(self.roster)
+                if speaker.hotkey_slot == slot
+            ),
+            None,
+        )
+        if index is None:
+            index = self._create_guest(remote=False, hotkey_slot=slot)
+        self.switch_speaker(index)
+
+    def page_hotkeys(self, direction: int) -> None:
+        # Banks are intentionally unbounded in the forward direction. This
+        # lets a user page into a completely empty bank and create a Guest at
+        # any exact slot with the next digit press.
+        self.hotkey_bank = max(0, self.hotkey_bank + direction)
+        self._events.on_hotkey_bank(self.hotkey_bank)
 
     def add_guest(self, remote: bool) -> int:
         """Create a placeholder speaker mid-meeting and switch to them.
 
         The name is backfilled at save time via ``renames``.
         """
-        index = self._create_guest(remote)
+        used = {speaker.hotkey_slot for speaker in self.roster}
+        start = self.hotkey_bank * 9
+        slot = next((item for item in range(start, start + 9) if item not in used), None)
+        if slot is None:
+            slot = max((item for item in used if item is not None), default=-1) + 1
+        index = self._create_guest(remote, hotkey_slot=slot)
         self.switch_speaker(index)
         return index
 
-    def _create_guest(self, remote: bool) -> int:
-        guest = Speaker(f"Guest {len(self.guest_indices) + 1}", remote=remote)
+    def _create_guest(self, remote: bool, hotkey_slot: int | None = None) -> int:
+        guest = Speaker(
+            f"Guest {len(self.guest_indices) + 1}",
+            remote=remote,
+            hotkey_slot=hotkey_slot,
+        )
         index = self._attributor.add(guest)
         self.roster.append(guest)
         self.guest_indices.append(index)
         return index
+
+    def profile_status(self, index: int) -> tuple[str, float]:
+        if self._speaker_resolver is None:
+            return "untrained", 0.0
+        return self._speaker_resolver.profile_status(index)
+
+    def persist_guest(self, guest_name: str, speaker_id: str) -> SpeakerProfile | None:
+        if self._speaker_resolver is None:
+            return None
+        index = next(
+            (
+                item
+                for item in self.guest_indices
+                if self.roster[item].name == guest_name
+            ),
+            None,
+        )
+        if index is None:
+            return None
+        return self._speaker_resolver.persist_guest(index, speaker_id)
 
     def elapsed(self) -> float:
         return self.clock.now()
@@ -208,6 +301,43 @@ class Session:
         )
 
     def _handle_segment(self, segment: TranscriptSegment, latency: float) -> None:
+        # A long utterance may produce several max-duration transcript
+        # chunks. Keep its turn connected and update the automatic active
+        # chip only when natural silence closes that utterance.
+        pending_manual = self._manual_override_pending.get(segment.channel, False)
+        if segment.attribution == "manual" and segment.speaker_index is not None:
+            self.active[segment.channel] = segment.speaker_index
+            self._events.on_attribution(
+                segment.speaker_index,
+                segment.channel,
+                "manual",
+                segment.confidence,
+            )
+        elif (
+            segment.turn_end
+            and segment.attribution == "unknown"
+            and not pending_manual
+        ):
+            self.active[segment.channel] = None
+            self._events.on_attribution(
+                None, segment.channel, "unknown", segment.confidence
+            )
+        elif (
+            segment.turn_end
+            and segment.speaker_index is not None
+            and not pending_manual
+        ):
+            self.active[segment.channel] = segment.speaker_index
+            self._events.on_attribution(
+                segment.speaker_index,
+                segment.channel,
+                segment.attribution or "manual",
+                segment.confidence,
+            )
+        if segment.attribution == "manual":
+            self._manual_override_pending[segment.channel] = False
+        if not segment.text:
+            return
         self.log.add(segment)
         if segment.speaker:
             label = segment.speaker

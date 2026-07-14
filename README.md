@@ -10,9 +10,9 @@ Live mic + system-audio loopback → timestamped transcript with speaker labels,
 uv run oat-notes --ui
 ```
 
-Opens `http://127.0.0.1:8737`: name the meeting, list everyone in one row (`Mason, Sarah, Priya*, Dev*` — `*` marks who's on the call), START MEETING, and the transcript streams onto the screen live. Chips or the global 1..N hotkeys switch the active speaker; a press routes to the speaker's own channel, so in-person names attribute the mic and `*` names attribute the call audio, independently.
+Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, choose ROOM/CALL placement, START MEETING, and the transcript streams onto the screen live. New people are gray until hotkey-labeled turns provide four seconds of usable enrollment speech. Voice embedding and transcription run locally in parallel; ready profiles are matched automatically at the end of later turns.
 
-Someone unexpected joins? Click the dashed `+ WALK-IN` (in the room) or `+ CALL-IN` (on the call) chip — it creates `Guest 1`, switches to them instantly, and another empty slot appears for the next surprise. When you END MEETING with guests in the roster, a backfill panel asks who they were before writing the file; every line they own gets the real name. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` available.
+The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order and normal ROOM/CALL placement but stay editable per meeting. Someone unexpected joins? Click `+ WALK-IN` or `+ CALL-IN`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
 
 ## Setup
 
@@ -54,7 +54,7 @@ Output, one line per speech chunk:
 
 On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--name "stand-up"` → `stand-up_…​.txt`), merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-`--speakers` takes everyone in one list; a `*` suffix marks remote people on the call. **Ctrl+Alt+1..9** by default (any app focused — the hook is global, and plain digits still type normally everywhere) switches the active speaker, and the press routes to that speaker's own channel: in-person names attribute mic audio, `*` names attribute call audio, each channel tracking its own active speaker. In the web UI, the **Settings** tab can change the modifier combination to any selection of Ctrl, Alt, Shift, and Win; the number still selects speaker slot 1..9. The choice is saved under `%LOCALAPPDATA%\oat-notes\settings.json` and applies to the next meeting. A chord for a number with no speaker yet auto-adds an in-person `Guest N` and switches to them — name them in the backfill panel afterwards; guests who never spoke are dropped silently. A press also cuts the in-flight chunk on the spot, so rapid handoffs with no pause still attribute cleanly; otherwise a chunk goes to whoever held the majority of its span. A channel with a single listed speaker never needs a key (one remote person = fully automatic).
+`--speakers` keeps the console's comma-separated interface; a `*` suffix marks remote people. In the UI, the saved roster determines stable hotkey slots. **Ctrl+Alt+1..9** by default selects a speaker in the active bank, while **Ctrl+Alt+[** and **Ctrl+Alt+]** page through larger rosters. The Settings tab can change the modifier combination. A manual press is authoritative for the current VAD turn, cuts the in-flight audio cleanly, and is the only event allowed to improve a saved voice profile. Automatic low-confidence matches are labeled `Unknown` rather than guessed.
 
 ## Architecture
 
@@ -66,6 +66,8 @@ chunker.py    state machine: split at 0.5s silence, force-split at 15s, drop bli
 transcriber.py  Transcriber ABC + faster-whisper and OpenVINO backends
 pipeline.py   capture → chunker thread → transcription worker → sink, via queues
 attribution.py  switch log + majority-overlap speaker attribution
+speaker_store.py  local SQLite speaker/group directory + embedding centroids
+speaker_id.py  bundled sherpa-onnx embeddings, enrollment, roster matching
 hotkeys.py    configurable global modifier+1..9 listener (session-scoped)
 session.py    one meeting: capture + pipeline + attribution + transcript log
 server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
@@ -75,7 +77,7 @@ Chunks carry a channel tag (`MIC`/`LOOPBACK`) and segments carry a `speaker` fie
 
 ## Local-only by design
 
-Audio, transcription, and the transcript file never leave the machine. The web UI binds to `127.0.0.1` only and rejects requests whose `Host`/`Origin` headers don't name that address (blocks DNS-rebinding and cross-site POSTs from a browser tab). The only network traffic oat-notes ever makes is the one-time HuggingFace model download — cached after that, and `--offline` disables it entirely, failing immediately if a model isn't already on disk. HF telemetry and implicit-token lookups are disabled by default.
+Captured audio, transcripts, voice embeddings, identities, groups, and recognition results never leave the machine. Profiles are stored as embeddings only—never replayable audio—under `%LOCALAPPDATA%\oat-notes\speakers.db`, outside the normal OneDrive Documents tree. Speaker inference uses a bundled ONNX model and performs no download. The web UI binds to `127.0.0.1` only and rejects requests whose `Host`/`Origin` headers don't name that address. The only permitted network traffic is the existing one-time transcription-model download; `--offline` disables that too. HF telemetry and implicit-token lookups are disabled by default.
 
 ## OpenVINO backend (NPU/GPU offload)
 

@@ -1,5 +1,7 @@
 """Pipeline threading and multi-channel routing, with no real audio or model."""
 
+import threading
+
 import numpy as np
 
 from oat_notes.clock import SessionClock
@@ -167,3 +169,72 @@ def test_mic_only_pipeline_still_works():
     pipeline.finish()
     assert len(received) == 1
     assert received[0].text.startswith("heard")
+
+
+def test_embedding_and_transcription_run_in_parallel(tmp_path):
+    from oat_notes.attribution import Speaker
+    from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
+    from oat_notes.speaker_store import SpeakerStore
+
+    barrier = threading.Barrier(2, timeout=3.0)
+
+    class BarrierEngine(SpeakerEmbeddingEngine):
+        def embed(self, samples, sample_rate):
+            barrier.wait()
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+    class BarrierTranscriber(Transcriber):
+        def transcribe(self, chunk):
+            barrier.wait()
+            return TranscriptSegment("parallel", chunk.channel, chunk.start, chunk.end)
+
+    store = SpeakerStore(tmp_path / "speakers.db")
+    saved = store.create_speaker("Alice")
+    roster = [Speaker("Alice", speaker_id=saved.speaker_id)]
+    resolver = SpeakerResolver(roster, store, BarrierEngine(), CONFIG.sample_rate)
+    received = []
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        BarrierTranscriber(),
+        lambda segment, latency: received.append(segment),
+        channels=(Channel.MIC,),
+        vad_factory=EnergyFakeVad,
+        speaker_resolver=resolver,
+    )
+    pipeline.start()
+    pipeline.manual_override(Channel.MIC, 0)
+    pipeline.frame_queue.put((Channel.MIC, 0.0, np.full(40 * WINDOW, 0.75, dtype=np.float32)))
+    pipeline.frame_queue.put(
+        (Channel.MIC, 40 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
+    )
+    pipeline.finish()
+
+    assert received[0].speaker == "Alice"
+    assert received[0].attribution == "manual"
+    assert store.profile(saved.speaker_id).state == "learning"
+
+
+def test_transcription_errors_never_log_backend_message(capsys):
+    class PrivateFailureTranscriber(Transcriber):
+        def transcribe(self, chunk):
+            raise RuntimeError("captured words must stay private")
+
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        PrivateFailureTranscriber(),
+        lambda segment, latency: None,
+        channels=(Channel.MIC,),
+        vad_factory=EnergyFakeVad,
+    )
+    pipeline.start()
+    pipeline.frame_queue.put((Channel.MIC, 0.0, speech(31)))
+    pipeline.frame_queue.put(
+        (Channel.MIC, 31 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
+    )
+    pipeline.finish()
+
+    error_log = capsys.readouterr().err
+    assert "RuntimeError" in error_log
+    assert "captured words must stay private" not in error_log

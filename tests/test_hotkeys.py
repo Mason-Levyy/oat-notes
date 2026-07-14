@@ -103,3 +103,21 @@ def test_windows_modifier_is_supported():
     listener, received = make_listener(("win", "shift"))
     press_chord(listener, FakeKey(char="5"), (WIN, SHIFT))
     assert received == [4]
+
+
+def test_brackets_page_speaker_banks():
+    switched = []
+    pages = []
+    listener = HotkeyListener(switched.append, on_page=pages.append)
+    press_chord(listener, FakeKey(char="["))
+    press_chord(listener, FakeKey(char="]"))
+    assert pages == [-1, 1]
+    assert switched == []
+
+
+def test_bracket_virtual_key_fallback():
+    pages = []
+    listener = HotkeyListener(lambda index: None, on_page=pages.append)
+    press_chord(listener, FakeKey(vk=219))
+    press_chord(listener, FakeKey(vk=221))
+    assert pages == [-1, 1]
