@@ -215,7 +215,9 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     assert store.profile(saved.speaker_id).state == "learning"
 
 
-def test_rolling_speaker_tracking_updates_without_splitting_transcript(tmp_path):
+def test_rolling_speaker_tracking_first_identification_does_not_split(tmp_path):
+    """Nothing to correct yet on a channel's very first identification, so it
+    only updates the live indicator and leaves the transcript chunk alone."""
     from oat_notes.attribution import Speaker
     from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
     from oat_notes.speaker_store import SpeakerStore
@@ -262,6 +264,87 @@ def test_rolling_speaker_tracking_updates_without_splitting_transcript(tmp_path)
     pipeline.finish()
 
     assert len(received) == 1
+    assert tracked == [(1, Channel.MIC, "auto", 1.0)]
+
+
+def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):
+    """A confirmed switch away from an already-established speaker must cut
+    the transcript immediately instead of waiting for silence or the 15s
+    force-split cap (previously the only re-check points)."""
+    import threading as _threading
+
+    from oat_notes.attribution import Speaker
+    from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
+    from oat_notes.speaker_store import SpeakerStore
+
+    class BobEngine(SpeakerEmbeddingEngine):
+        def embed(self, samples, sample_rate):
+            return np.array([0.0, 1.0], dtype=np.float32)
+
+    store = SpeakerStore(tmp_path / "speakers.db")
+    alice = store.create_speaker("Alice")
+    bob = store.create_speaker("Bob")
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
+    resolver = SpeakerResolver(
+        [
+            Speaker("Alice", speaker_id=alice.speaker_id),
+            Speaker("Bob", speaker_id=bob.speaker_id),
+        ],
+        store,
+        BobEngine(),
+        CONFIG.sample_rate,
+    )
+    received = []
+    tracked = []
+    confirmed_switch = _threading.Event()
+
+    def on_tracking(*event):
+        tracked.append(event)
+        confirmed_switch.set()
+
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        FakeTranscriber(),
+        lambda segment, latency: received.append(segment),
+        channels=(Channel.MIC,),
+        vad_factory=EnergyFakeVad,
+        speaker_resolver=resolver,
+        speaker_tracking_sink=on_tracking,
+    )
+    pipeline.start()
+    # Pin Alice as the established speaker (mirrors a hotkey press at the
+    # top of the turn) so the engine's constant Bob embedding, once
+    # confirmed by the rolling tracker, is a genuine switch to correct.
+    pipeline.manual_override(Channel.MIC, 0)
+    # 0.75, not speech()'s 1.0: amplitude >= 0.999 reads as clipped and
+    # wants_embedding() would refuse to embed a "clipped" chunk.
+    speech_block = lambda windows: np.full(windows * WINDOW, 0.75, dtype=np.float32)
+    elapsed = 0.0
+
+    def push(windows, block):
+        nonlocal elapsed
+        pipeline.frame_queue.put((Channel.MIC, elapsed, block))
+        elapsed += windows * WINDOW / CONFIG.sample_rate
+
+    # This whole block gets consumed by the chunker thread in one
+    # synchronous sweep before the tracker thread (reading a separate
+    # queue) can catch up and confirm Bob, so the split can only land
+    # after it — nothing here ends up in the post-split chunk.
+    push(100, speech_block(100))
+    assert confirmed_switch.wait(timeout=3.0)
+    # Real speech pushed after the confirmation lands in the fresh,
+    # post-split chunk the auto-split just opened.
+    push(40, speech_block(40))
+    push(SILENCE_WINDOWS, silence(SILENCE_WINDOWS))
+    pipeline.finish()
+
+    assert [segment.speaker for segment in received] == ["Alice", "Bob"]
+    first, second = received
+    assert second.start == first.end  # no audio lost at the boundary
+    assert first.attribution == "manual"
+    assert second.attribution == "auto"
     assert tracked == [(1, Channel.MIC, "auto", 1.0)]
 
 

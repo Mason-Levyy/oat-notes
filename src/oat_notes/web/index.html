@@ -247,6 +247,16 @@ body {
 .library-row .name, .setup-roster-row .name { flex: 1; min-width: 0; }
 .profile-pill { font-size: 7px; color: #6b6558; }
 .profile-pill.ready { color: var(--sprout); }
+.enrollment-status {
+  border: 2px solid var(--ink); background: var(--paper); padding: 8px;
+  margin-top: 10px; display: flex; flex-direction: column; gap: 6px;
+}
+.enrollment-status .headline { font-size: 8px; display: flex; justify-content: space-between; gap: 8px; }
+.enrollment-status .bar { height: 8px; border: 2px solid var(--ink); background: #fff; }
+.enrollment-status .bar-fill { height: 100%; background: var(--oat); transition: width 0.2s ease; }
+.enrollment-status.rejected .bar-fill { background: var(--rec); }
+.enrollment-status.done .bar-fill { background: var(--sprout); width: 100% !important; }
+.enrollment-status .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .roster-tools { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
 .roster-tools .group-picker { grid-column: 1 / -1; }
 .setup-roster-row.untrained, .setup-roster-row.learning { background: #d2d0ca; color: #68645c; }
@@ -443,6 +453,7 @@ body {
         <input type="text" id="library-new-name" placeholder="Speaker name">
         <button type="button" class="mini primary" id="library-create">ADD SPEAKER</button>
       </div>
+      <div id="enrollment-status"></div>
       <div class="library-list" id="library-list"></div>
     </div>
     <div class="settings-card">
@@ -469,6 +480,7 @@ let state = {
   hotkey_bank: 0,
   library: { speakers: [], groups: [], ready_seconds: 4.0 },
   settings: { hotkey_modifiers: ["ctrl", "alt"], hotkey_label: "Ctrl+Alt+1–9" },
+  enrollment: null,
 };
 let setupRoster = [];
 let sessionEpoch = null;
@@ -605,8 +617,55 @@ function saveGroup(group) {
   }).then((result) => applyLibraryResult(result, "GROUP SAVED"));
 }
 
+const ENROLLMENT_TERMINAL = new Set(["done", "stopped", "error"]);
+
+function enrollmentBusy() {
+  return !!(state.enrollment && !ENROLLMENT_TERMINAL.has(state.enrollment.phase));
+}
+
+function renderEnrollmentStatus() {
+  const el = $("enrollment-status");
+  const enrollment = state.enrollment;
+  if (!el) return;
+  if (!enrollment) { el.innerHTML = ""; el.className = ""; return; }
+  const terminal = ENROLLMENT_TERMINAL.has(enrollment.phase);
+  const captured = Number(enrollment.captured_seconds || 0);
+  const target = Number(enrollment.target_seconds || 1);
+  const pct = Math.min(100, Math.round((captured / target) * 100));
+  let headline;
+  if (enrollment.phase === "listening") headline = `LISTENING FOR ${enrollment.name.toUpperCase()}'S VOICE…`;
+  else if (enrollment.phase === "rejected") headline = enrollment.reason === "too loud" ? "TOO LOUD — MOVE BACK A BIT" : "TOO QUIET — KEEP TALKING";
+  else if (enrollment.phase === "captured") headline = `CAPTURING ${enrollment.name.toUpperCase()}… ${captured.toFixed(1)}s / ${target.toFixed(1)}s`;
+  else if (enrollment.phase === "done") headline = `✔ TRAINED — ${enrollment.name.toUpperCase()} (${captured.toFixed(1)}s CAPTURED)`;
+  else if (enrollment.phase === "stopped") headline = "STOPPED — NO USABLE AUDIO CAPTURED";
+  else headline = "RECORDING ERROR — TRY AGAIN";
+  el.className = `enrollment-status ${terminal ? enrollment.phase : ""}`;
+  el.innerHTML = `
+    <div class="headline pixel">${escapeHtml(headline)}</div>
+    <div class="bar"><div class="bar-fill" style="width:${terminal && enrollment.phase !== "done" ? 0 : pct}%"></div></div>
+    <div class="foot">${terminal
+      ? '<button type="button" class="mini" id="enrollment-dismiss">OK</button>'
+      : '<button type="button" class="mini danger" id="enrollment-stop">STOP</button>'}</div>`;
+  if (terminal) {
+    $("enrollment-dismiss").onclick = () => { state.enrollment = null; renderEnrollmentStatus(); renderLibrarySettings(); };
+  } else {
+    $("enrollment-stop").onclick = () => post("/api/library/speakers/record/stop", {});
+  }
+}
+
+function startRecording(speaker) {
+  post("/api/library/speakers/record/start", { id: speaker.id }).then((result) => {
+    if (result.error) {
+      $("settings-message").textContent = result.error.toUpperCase();
+      $("settings-message").className = "settings-message pixel error";
+    }
+  });
+}
+
 function renderLibrarySettings() {
-  const disabled = !!state.recording;
+  renderEnrollmentStatus();
+  const disabled = !!state.recording || enrollmentBusy();
+  const recordDisabled = disabled || state.speaker_model_status !== "ready";
   const list = $("library-list");
   list.innerHTML = "";
   librarySpeakers().forEach((speaker) => {
@@ -614,6 +673,9 @@ function renderLibrarySettings() {
     row.className = "library-row";
     row.innerHTML = `<span class="name">${escapeHtml(speaker.name)}</span>
       <span class="profile-pill ${speaker.profile_state === "ready" ? "ready" : ""}">${profileText(speaker)}</span>`;
+    const record = document.createElement("button");
+    record.type = "button"; record.className = "mini primary"; record.textContent = "RECORD"; record.disabled = recordDisabled;
+    record.onclick = () => startRecording(speaker);
     const rename = document.createElement("button");
     rename.type = "button"; rename.className = "mini"; rename.textContent = "RENAME"; rename.disabled = disabled;
     rename.onclick = () => {
@@ -633,7 +695,7 @@ function renderLibrarySettings() {
         post("/api/library/speakers/delete", { id: speaker.id }).then((r) => applyLibraryResult(r, "SPEAKER DELETED"));
       }
     };
-    row.append(rename, reset, remove);
+    row.append(record, rename, reset, remove);
     list.appendChild(row);
   });
 
@@ -800,7 +862,13 @@ function setRecording(recording) {
 }
 
 function applyState(s) {
+  const previousEnrollment = state.enrollment;
   state = Object.assign(state, s);
+  if (!state.enrollment && previousEnrollment && ENROLLMENT_TERMINAL.has(previousEnrollment.phase)) {
+    // A refetch racing the terminal SSE event shouldn't erase the
+    // TRAINED/STOPPED message before the user has a chance to dismiss it.
+    state.enrollment = previousEnrollment;
+  }
   const backend = (state.backend || "cpu").replace("faster_whisper", "CPU").replace("openvino", "NPU/OV").toUpperCase();
   $("backend-badge").textContent = state.model_status === "loading" ? `${backend} …` : backend;
   const modelReady = state.model_status === "ready";
@@ -977,6 +1045,17 @@ events.onmessage = (message) => {
     renderPlayers();
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);
+  } else if (event.type === "enrollment") {
+    state.enrollment = event;
+    renderEnrollmentStatus();
+    if (ENROLLMENT_TERMINAL.has(event.phase)) {
+      // Refresh just the library (profile_state pill) rather than the full
+      // state, so the TRAINED message stays put until dismissed.
+      fetch("/api/library").then((r) => r.json()).then((library) => {
+        state.library = library;
+        renderLibrarySettings();
+      });
+    }
   }
 };
 

@@ -13,7 +13,7 @@ class Config:
     min_speech_seconds: float = 0.25
     pre_roll_windows: int = 2
     speaker_window_seconds: float = 1.5
-    speaker_hop_seconds: float = 0.5
+    speaker_hop_seconds: float = 0.25
     speaker_confirmations: int = 2
     model_name: str = "distil-small.en"
     compute_type: str = "int8"

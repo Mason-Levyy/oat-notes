@@ -241,7 +241,7 @@ class Pipeline:
             if not resolver.wants_embedding(chunk):
                 continue
             try:
-                embedding = resolver.embed(chunk)
+                embedding = resolver.embed_for_tracking(chunk)
                 decision = resolver.resolve(chunk, embedding)
             except Exception as error:
                 print(
@@ -252,8 +252,18 @@ class Pipeline:
             with self._tracking_lock:
                 if generation != self._tracking_generations[chunk.channel]:
                     continue
-                confirmed = self._tracking_gates[chunk.channel].observe(decision)
+                gate = self._tracking_gates[chunk.channel]
+                had_current = gate.current is not None
+                confirmed = gate.observe(decision)
             if confirmed is not None and confirmed.speaker_index is not None:
+                # A change away from an already-established speaker means the
+                # in-flight transcript chunk is misattributed right now; cut
+                # it instead of waiting for a silence gap or the 15s cap.
+                # The very first identification on a channel (had_current is
+                # False) has nothing to correct, so it only updates the live
+                # indicator.
+                if had_current:
+                    self.split_channel(chunk.channel)
                 sink(
                     confirmed.speaker_index,
                     chunk.channel,

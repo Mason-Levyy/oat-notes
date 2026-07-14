@@ -1,9 +1,28 @@
 import queue
 
 from oat_notes.config import Config
+from oat_notes.enrollment import EnrollmentProgress
 from oat_notes.server import AppState, EventHub, is_trusted_request
 from oat_notes.settings import AppSettings
 from oat_notes.speaker_store import SpeakerStore
+
+
+class FakeRecorder:
+    """Stands in for VoiceEnrollmentRecorder — no real audio hardware."""
+
+    def __init__(self, store, engine, speaker_id, config, on_progress, **kwargs):
+        self.store = store
+        self.engine = engine
+        self.speaker_id = speaker_id
+        self.on_progress = on_progress
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
 
 
 def test_hub_fans_out_to_all_subscribers():
@@ -190,3 +209,89 @@ def test_speaker_model_failure_does_not_block_transcription_model(tmp_path):
     status = state.status()
     assert status["model_status"] == "ready"
     assert status["speaker_model_status"] == "error"
+
+
+def test_voice_recording_blocked_during_meeting(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    speaker = store.create_speaker("Alice")
+    state = AppState(
+        Config(), transcriber=None, speaker_store=store, embedding_engine=object()
+    )
+    state.session = object()
+    result = state.start_voice_recording({"id": speaker.speaker_id})
+    assert result == {"error": "end the meeting before recording a voice sample"}
+
+
+def test_voice_recording_requires_speaker_model(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    speaker = store.create_speaker("Alice")
+    state = AppState(Config(), transcriber=None, speaker_store=store)
+    result = state.start_voice_recording({"id": speaker.speaker_id})
+    assert result == {"error": "speaker recognition is unavailable"}
+
+
+def test_voice_recording_requires_existing_speaker(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    state = AppState(
+        Config(), transcriber=None, speaker_store=store, embedding_engine=object()
+    )
+    result = state.start_voice_recording({"id": "does-not-exist"})
+    assert result == {"error": "speaker not found"}
+
+
+def test_voice_recording_start_creates_recorder_and_blocks_double_start(tmp_path, monkeypatch):
+    monkeypatch.setattr("oat_notes.enrollment.VoiceEnrollmentRecorder", FakeRecorder)
+    store = SpeakerStore(tmp_path / "speakers.db")
+    speaker = store.create_speaker("Alice")
+    state = AppState(
+        Config(), transcriber=None, speaker_store=store, embedding_engine=object()
+    )
+
+    result = state.start_voice_recording({"id": speaker.speaker_id})
+    assert result == {"ok": True, "speaker_id": speaker.speaker_id}
+    assert state.enrollment is not None
+    assert state.enrollment.started
+
+    again = state.start_voice_recording({"id": speaker.speaker_id})
+    assert again == {"error": "a voice recording is already in progress"}
+
+
+def test_voice_recording_progress_updates_state_and_clears_on_terminal(tmp_path, monkeypatch):
+    monkeypatch.setattr("oat_notes.enrollment.VoiceEnrollmentRecorder", FakeRecorder)
+    store = SpeakerStore(tmp_path / "speakers.db")
+    speaker = store.create_speaker("Alice")
+    state = AppState(
+        Config(), transcriber=None, speaker_store=store, embedding_engine=object()
+    )
+    state.start_voice_recording({"id": speaker.speaker_id})
+    recorder = state.enrollment
+
+    recorder.on_progress(EnrollmentProgress(phase="listening", target_seconds=8.0))
+    assert state.status()["enrollment"]["phase"] == "listening"
+
+    recorder.on_progress(
+        EnrollmentProgress(phase="done", captured_seconds=8.2, target_seconds=8.0)
+    )
+    assert state.enrollment is None
+    assert state.status()["enrollment"] is None
+
+
+def test_stop_voice_recording_without_active_recording_reports_error(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    state = AppState(Config(), transcriber=None, speaker_store=store)
+    assert state.stop_voice_recording() == {"error": "no voice recording in progress"}
+
+
+def test_stop_voice_recording_stops_active_recorder(tmp_path, monkeypatch):
+    monkeypatch.setattr("oat_notes.enrollment.VoiceEnrollmentRecorder", FakeRecorder)
+    store = SpeakerStore(tmp_path / "speakers.db")
+    speaker = store.create_speaker("Alice")
+    state = AppState(
+        Config(), transcriber=None, speaker_store=store, embedding_engine=object()
+    )
+    state.start_voice_recording({"id": speaker.speaker_id})
+    recorder = state.enrollment
+
+    result = state.stop_voice_recording()
+    assert result == {"ok": True}
+    assert recorder.stopped

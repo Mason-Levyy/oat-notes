@@ -238,10 +238,50 @@ def test_speaker_change_gate_requires_two_consecutive_matches():
     bob = AttributionDecision("Bob", 1, "bob", "auto", 0.9)
     unknown = AttributionDecision("Unknown", None, None, "unknown")
 
+    assert gate.current is None
     assert gate.observe(alice) is None
     assert gate.observe(unknown) is None
     assert gate.observe(alice) is None
     assert gate.observe(alice) == alice
+    assert gate.current == 0
     assert gate.observe(alice) is None
     assert gate.observe(bob) is None
     assert gate.observe(bob) == bob
+    assert gate.current == 1
+
+
+def test_speaker_resolver_tracking_engine_avoids_shared_lock(tmp_path):
+    """embed() (turn attribution) and embed_for_tracking() (rolling
+    tracker) must not serialize on one lock when each gets its own engine
+    instance, or one hot path stalls behind the other."""
+    import threading
+
+    barrier = threading.Barrier(2, timeout=3.0)
+
+    class BarrierEngine(SpeakerEmbeddingEngine):
+        def embed(self, samples, sample_rate):
+            barrier.wait()
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+    store = SpeakerStore(tmp_path / "speakers.db")
+    roster = [Speaker("Alice")]
+    resolver = SpeakerResolver(
+        roster, store, BarrierEngine(), 16_000, tracking_engine=BarrierEngine()
+    )
+    results: dict[str, np.ndarray] = {}
+
+    def run_embed():
+        results["embed"] = resolver.embed(chunk())
+
+    def run_tracking():
+        results["tracking"] = resolver.embed_for_tracking(chunk())
+
+    embed_thread = threading.Thread(target=run_embed)
+    tracking_thread = threading.Thread(target=run_tracking)
+    embed_thread.start()
+    tracking_thread.start()
+    embed_thread.join(timeout=3.0)
+    tracking_thread.join(timeout=3.0)
+
+    assert not embed_thread.is_alive() and not tracking_thread.is_alive()
+    assert "embed" in results and "tracking" in results

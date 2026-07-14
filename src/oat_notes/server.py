@@ -64,6 +64,7 @@ class AppState:
         save_settings: Callable[[AppSettings], None] | None = None,
         speaker_store: SpeakerStore | None = None,
         embedding_engine=None,
+        tracking_embedding_engine=None,
     ) -> None:
         self.config = config
         self.transcriber = transcriber
@@ -72,6 +73,7 @@ class AppState:
         self._save_settings = save_settings
         self.speaker_store = speaker_store
         self.embedding_engine = embedding_engine
+        self.tracking_embedding_engine = tracking_embedding_engine
         self.speaker_model_status = (
             "ready" if embedding_engine is not None else "loading" if speaker_store else "unavailable"
         )
@@ -83,6 +85,8 @@ class AppState:
         self.lock = threading.Lock()
         self.session: Session | None = None
         self.awaiting_backfill: Session | None = None
+        self.enrollment = None
+        self._enrollment_event: dict | None = None
         self.roster: tuple[Speaker, ...] = ()
         self.meeting_name: str = "meeting"
         self.lines: list[dict] = []
@@ -154,6 +158,7 @@ class AppState:
                 ),
                 "lines": self.lines,
                 "last_saved": self.last_saved,
+                "enrollment": self._enrollment_event,
             }
 
     def model_ready(self, transcriber, elapsed: float) -> None:
@@ -172,9 +177,10 @@ class AppState:
             self.model_load_seconds = elapsed
         self.hub.publish({"type": "status", "recording": False})
 
-    def speaker_model_ready(self, engine) -> None:
+    def speaker_model_ready(self, engine, tracking_engine=None) -> None:
         with self.lock:
             self.embedding_engine = engine
+            self.tracking_embedding_engine = tracking_engine or engine
             self.speaker_model_status = "ready"
             self.speaker_model_error = None
         self.hub.publish({"type": "status", "recording": self.session is not None})
@@ -182,6 +188,7 @@ class AppState:
     def speaker_model_failed(self, error: Exception) -> None:
         with self.lock:
             self.embedding_engine = None
+            self.tracking_embedding_engine = None
             self.speaker_model_status = "error"
             self.speaker_model_error = f"{type(error).__name__}: {error}"
         self.hub.publish({"type": "status", "recording": self.session is not None})
@@ -265,6 +272,55 @@ class AppState:
         return self._library_mutation(
             lambda: self.speaker_store.delete_group(str(body.get("id", "")))
         )
+
+    def start_voice_recording(self, body: dict) -> dict:
+        with self.lock:
+            if self.session is not None:
+                return {"error": "end the meeting before recording a voice sample"}
+            if self.speaker_store is None or self.embedding_engine is None:
+                return {"error": "speaker recognition is unavailable"}
+            if self.enrollment is not None:
+                return {"error": "a voice recording is already in progress"}
+            speaker_id = str(body.get("id", "")).strip()
+            try:
+                name = self.speaker_store.profile(speaker_id).name
+            except KeyError:
+                return {"error": "speaker not found"}
+
+            from .enrollment import VoiceEnrollmentRecorder
+
+            def on_progress(progress) -> None:
+                terminal = progress.phase in ("done", "stopped", "error")
+                event = {
+                    "type": "enrollment",
+                    "speaker_id": speaker_id,
+                    "name": name,
+                    "phase": progress.phase,
+                    "captured_seconds": round(progress.captured_seconds, 2),
+                    "target_seconds": progress.target_seconds,
+                    "reason": progress.reason,
+                }
+                self._enrollment_event = None if terminal else event
+                if terminal:
+                    self.enrollment = None
+                self.hub.publish(event)
+
+            self.enrollment = VoiceEnrollmentRecorder(
+                self.speaker_store,
+                self.embedding_engine,
+                speaker_id,
+                self.config,
+                on_progress,
+            )
+            self.enrollment.start()
+        return {"ok": True, "speaker_id": speaker_id}
+
+    def stop_voice_recording(self) -> dict:
+        with self.lock:
+            if self.enrollment is None:
+                return {"error": "no voice recording in progress"}
+            self.enrollment.stop()
+        return {"ok": True}
 
     def start_session(self, body: dict) -> dict:
         with self.lock:
@@ -364,6 +420,7 @@ class AppState:
                     hotkey_modifiers=self.settings.hotkey_modifiers,
                     speaker_store=self.speaker_store,
                     embedding_engine=self.embedding_engine,
+                    tracking_embedding_engine=self.tracking_embedding_engine,
                 ),
                 self.transcriber,
                 SessionEvents(
@@ -585,6 +642,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.update_library_group(body))
         elif self.path == "/api/library/groups/delete":
             self._send_json(self.state.delete_library_group(body))
+        elif self.path == "/api/library/speakers/record/start":
+            self._send_json(self.state.start_voice_recording(body))
+        elif self.path == "/api/library/speakers/record/stop":
+            self._send_json(self.state.stop_voice_recording())
         elif self.path == "/api/quit":
             self._send_json({"ok": True})
             self.state.shutdown.set()
@@ -642,8 +703,20 @@ def _initialize_model(state: AppState, config: Config) -> None:
         )
         state.speaker_model_failed(error)
     else:
+        # A second extractor instance lets live speaker tracking run
+        # without queuing behind per-turn attribution on the same model
+        # session; fall back to sharing one instance if it won't load.
+        tracking_engine = engine
+        try:
+            tracking_engine = SherpaOnnxEmbeddingEngine()
+        except Exception as error:
+            print(
+                "Live speaker tracking will share the main speaker model "
+                f"(second instance failed: {type(error).__name__}: {error})",
+                file=sys.stderr,
+            )
         print("Local speaker recognition ready", flush=True)
-        state.speaker_model_ready(engine)
+        state.speaker_model_ready(engine, tracking_engine)
 
 
 def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -> None:
