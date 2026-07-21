@@ -23,6 +23,7 @@ from .types import AudioChunk, Channel
 
 MODEL_FILENAME = "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
 MIN_ENROLLMENT_SECONDS = MIN_SAMPLE_SPEECH_SECONDS
+MANUAL_ENROLLMENT_SECONDS = 3.0
 MAX_CLIPPED_RATIO = 0.01
 SOURCE_THRESHOLD = 0.60
 GLOBAL_THRESHOLD = 0.65
@@ -105,6 +106,13 @@ class AttributionDecision:
 
 
 @dataclass(frozen=True)
+class ManualSampleResult:
+    accepted: bool
+    reason: str | None = None
+    profile: SpeakerProfile | None = None
+
+
+@dataclass(frozen=True)
 class _TemporarySample:
     embedding: np.ndarray
     source: str
@@ -151,7 +159,9 @@ class SpeakerResolver:
         if chunk_quality(chunk) < 1.0 - MAX_CLIPPED_RATIO:
             return False
         if chunk.manual_speaker_index is not None:
-            return 0 <= chunk.manual_speaker_index < len(self._roster)
+            # Manual enrollment is handled by the stability-gated learner,
+            # independently from transcript attribution.
+            return False
         member_ids = [
             self._roster[index].speaker_id
             for index in self._members()
@@ -178,34 +188,12 @@ class SpeakerResolver:
         manual = chunk.manual_speaker_index
         if manual is not None and manual in members:
             speaker = self._roster[manual]
-            profile = None
-            if embedding is not None:
-                seconds = chunk_speech_seconds(chunk)
-                quality = chunk_quality(chunk)
-                if speaker.speaker_id:
-                    profile = self._store.add_sample(
-                        speaker.speaker_id,
-                        embedding,
-                        chunk.channel.value,
-                        seconds,
-                        quality,
-                    )
-                else:
-                    self._temporary.setdefault(manual, []).append(
-                        _TemporarySample(
-                            np.array(embedding, dtype=np.float32, copy=True),
-                            chunk.channel.value,
-                            seconds,
-                            quality,
-                        )
-                    )
             return AttributionDecision(
                 speaker.name,
                 manual,
                 speaker.speaker_id,
                 "manual",
                 1.0,
-                profile,
             )
 
         if len(members) == 1:
@@ -256,13 +244,82 @@ class SpeakerResolver:
 
         return AttributionDecision("Unknown", None, None, "unknown", None)
 
+    def add_manual_sample(
+        self,
+        speaker_index: int,
+        chunk: AudioChunk,
+        embedding: np.ndarray,
+    ) -> ManualSampleResult:
+        """Persist one stability-gated sample, rejecting unsafe updates."""
+        if not 0 <= speaker_index < len(self._roster):
+            return ManualSampleResult(False, "speaker_missing")
+        seconds = chunk_speech_seconds(chunk)
+        quality = chunk_quality(chunk)
+        if seconds < MANUAL_ENROLLMENT_SECONDS:
+            return ManualSampleResult(False, "too_short")
+        if quality < 1.0 - MAX_CLIPPED_RATIO:
+            return ManualSampleResult(False, "clipped")
+
+        vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        norm = float(np.linalg.norm(vector))
+        if not np.isfinite(norm) or norm <= 0:
+            return ManualSampleResult(False, "invalid_embedding")
+        vector = np.ascontiguousarray(vector / norm, dtype=np.float32)
+
+        speaker = self._roster[speaker_index]
+        if speaker.speaker_id:
+            profile = self._store.profile(speaker.speaker_id)
+            if profile.state == "ready":
+                own = self._store.profile_vector(
+                    speaker.speaker_id, chunk.channel.value
+                )
+                if own is None or own.embedding.shape != vector.shape:
+                    return ManualSampleResult(False, "inconsistent")
+                own_score = float(np.dot(vector, own.embedding))
+                threshold = SOURCE_THRESHOLD if own.source_specific else GLOBAL_THRESHOLD
+                if own_score < threshold:
+                    return ManualSampleResult(False, "inconsistent")
+                competitor_ids = [
+                    item.speaker_id
+                    for index, item in enumerate(self._roster)
+                    if index != speaker_index and item.speaker_id
+                ]
+                competitors = self._store.match_vectors(
+                    competitor_ids, chunk.channel.value
+                )
+                competitor_scores = [
+                    float(np.dot(vector, item.embedding))
+                    for item in competitors
+                    if item.embedding.shape == vector.shape
+                ]
+                if competitor_scores and own_score - max(competitor_scores) < MATCH_MARGIN:
+                    return ManualSampleResult(False, "ambiguous_profile")
+            profile = self._store.add_sample(
+                speaker.speaker_id,
+                vector,
+                chunk.channel.value,
+                seconds,
+                quality,
+            )
+            return ManualSampleResult(True, profile=profile)
+
+        self._temporary.setdefault(speaker_index, []).append(
+            _TemporarySample(
+                np.array(vector, dtype=np.float32, copy=True),
+                chunk.channel.value,
+                seconds,
+                quality,
+            )
+        )
+        return ManualSampleResult(True)
+
     def profile_status(self, index: int) -> tuple[str, float]:
         speaker = self._roster[index]
         if speaker.speaker_id:
             profile = self._store.profile(speaker.speaker_id)
             return profile.state, profile.enrollment_seconds
         seconds = sum(sample.speech_seconds for sample in self._temporary.get(index, ()))
-        state = "untrained" if seconds <= 0 else "ready" if seconds >= 4.0 else "learning"
+        state = "untrained" if seconds <= 0 else "ready" if seconds >= 5.0 else "learning"
         return state, seconds
 
     def persist_guest(self, guest_index: int, speaker_id: str) -> SpeakerProfile:

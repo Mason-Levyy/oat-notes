@@ -190,6 +190,7 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
 
     store = SpeakerStore(tmp_path / "speakers.db")
     saved = store.create_speaker("Alice")
+    store.add_sample(saved.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
     roster = [Speaker("Alice", speaker_id=saved.speaker_id)]
     resolver = SpeakerResolver(roster, store, BarrierEngine(), CONFIG.sample_rate)
     received = []
@@ -203,7 +204,6 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
         speaker_resolver=resolver,
     )
     pipeline.start()
-    pipeline.manual_override(Channel.MIC, 0)
     pipeline.frame_queue.put((Channel.MIC, 0.0, np.full(40 * WINDOW, 0.75, dtype=np.float32)))
     pipeline.frame_queue.put(
         (Channel.MIC, 40 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
@@ -211,8 +211,8 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     pipeline.finish()
 
     assert received[0].speaker == "Alice"
-    assert received[0].attribution == "manual"
-    assert store.profile(saved.speaker_id).state == "learning"
+    assert received[0].attribution == "single"
+    assert store.profile(saved.speaker_id).state == "ready"
 
 
 def test_rolling_speaker_tracking_first_identification_does_not_split(tmp_path):
@@ -229,8 +229,8 @@ def test_rolling_speaker_tracking_first_identification_does_not_split(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Alice", speaker_id=alice.speaker_id),
@@ -284,8 +284,8 @@ def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Alice", speaker_id=alice.speaker_id),
@@ -371,3 +371,108 @@ def test_transcription_errors_never_log_backend_message(capsys):
     error_log = capsys.readouterr().err
     assert "RuntimeError" in error_log
     assert "captured words must stay private" not in error_log
+
+
+def _learning_pipeline(tmp_path, channels=(Channel.MIC,)):
+    from oat_notes.attribution import Speaker
+    from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
+    from oat_notes.speaker_store import SpeakerStore
+
+    class StableEngine(SpeakerEmbeddingEngine):
+        def embed(self, samples, sample_rate):
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+    store = SpeakerStore(tmp_path / "speakers.db")
+    alice = store.create_speaker("Alice")
+    bob = store.create_speaker("Bob")
+    resolver = SpeakerResolver(
+        [
+            Speaker("Alice", speaker_id=alice.speaker_id),
+            Speaker("Bob", speaker_id=bob.speaker_id),
+        ],
+        store,
+        StableEngine(),
+        CONFIG.sample_rate,
+    )
+    updates = []
+    pipeline = Pipeline(
+        CONFIG,
+        SessionClock(),
+        FakeTranscriber(),
+        lambda segment, latency: None,
+        channels=channels,
+        vad_factory=EnergyFakeVad,
+        speaker_resolver=resolver,
+        speaker_tracking_sink=lambda *event: None,
+        profile_learning_sink=updates.append,
+    )
+    return pipeline, store, alice, bob, updates
+
+
+def _clean_speech(windows):
+    return np.full(windows * WINDOW, 0.75, dtype=np.float32)
+
+
+def test_manual_profile_learning_saves_one_three_second_source_sample(tmp_path):
+    pipeline, store, alice, _, updates = _learning_pipeline(
+        tmp_path, (Channel.MIC, Channel.LOOPBACK)
+    )
+    pipeline.start()
+    pipeline.manual_override(Channel.MIC, 0)
+    pipeline.manual_override(Channel.LOOPBACK, 0)
+    pipeline.begin_profile_learning(0, 0.0)
+    pipeline.frame_queue.put((Channel.MIC, 0.0, _clean_speech(100)))
+    pipeline.frame_queue.put((Channel.LOOPBACK, 0.0, silence(100)))
+    pipeline.finish()
+
+    assert store.profile(alice.speaker_id).enrollment_seconds == 3.0
+    assert store.profile_vector(alice.speaker_id, "mic").source_specific is True
+    assert store.profile_vector(alice.speaker_id, "loopback").source_specific is False
+    assert [event.phase for event in updates][-1] == "saved"
+    assert [event.phase for event in updates].count("saved") == 1
+
+
+def test_new_manual_selection_cancels_the_previous_profile_candidate(tmp_path):
+    pipeline, store, alice, bob, updates = _learning_pipeline(tmp_path)
+    pipeline.start()
+    pipeline.manual_override(Channel.MIC, 0)
+    pipeline.begin_profile_learning(0, 0.0)
+    pipeline.frame_queue.put((Channel.MIC, 0.0, _clean_speech(40)))
+    pipeline.manual_override(Channel.MIC, 1)
+    pipeline.begin_profile_learning(1, 1.3)
+    pipeline.frame_queue.put((Channel.MIC, 1.3, _clean_speech(100)))
+    pipeline.finish()
+
+    assert store.profile(alice.speaker_id).enrollment_seconds == 0.0
+    assert store.profile(bob.speaker_id).enrollment_seconds == 3.0
+    assert any(
+        event.phase == "saved" and event.speaker_index == 1 for event in updates
+    )
+
+
+def test_manual_profile_learning_times_out_without_three_seconds_of_speech(tmp_path):
+    pipeline, store, alice, _, updates = _learning_pipeline(tmp_path)
+    pipeline.start()
+    pipeline.begin_profile_learning(0, 0.0)
+    pipeline.frame_queue.put((Channel.MIC, 11.0, silence(1)))
+    pipeline.finish()
+
+    assert store.profile(alice.speaker_id).enrollment_seconds == 0.0
+    assert any(event.phase == "skipped" and event.reason == "timeout" for event in updates)
+
+
+def test_profile_learning_skips_an_ambiguous_active_source(tmp_path):
+    pipeline, store, alice, _, updates = _learning_pipeline(
+        tmp_path, (Channel.MIC, Channel.LOOPBACK)
+    )
+    pipeline.start()
+    pipeline.frame_queue.put((Channel.MIC, 0.0, _clean_speech(1)))
+    pipeline.frame_queue.put((Channel.LOOPBACK, 0.0, _clean_speech(1)))
+    pipeline.begin_profile_learning(0, 0.03)
+    pipeline.finish()
+
+    assert store.profile(alice.speaker_id).enrollment_seconds == 0.0
+    assert any(
+        event.phase == "skipped" and event.reason == "ambiguous_source"
+        for event in updates
+    )

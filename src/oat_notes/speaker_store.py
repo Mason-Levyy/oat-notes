@@ -19,7 +19,7 @@ from .paths import app_data_dir
 
 CURRENT_SCHEMA_VERSION = 2
 DEFAULT_MODEL_KEY = "3dspeaker-eres2net-en-voxceleb-v1"
-READY_SPEECH_SECONDS = 4.0
+READY_SPEECH_SECONDS = 5.0
 MIN_SAMPLE_SPEECH_SECONDS = 1.0
 MAX_SAMPLES_PER_SOURCE = 20
 
@@ -356,36 +356,46 @@ class SpeakerStore:
         model_key: str = DEFAULT_MODEL_KEY,
     ) -> tuple[MatchVector, ...]:
         candidates = []
+        for speaker_id in dict.fromkeys(speaker_ids):
+            profile = self.profile(speaker_id, model_key)
+            if profile.state != "ready":
+                continue
+            vector = self.profile_vector(speaker_id, source, model_key)
+            if vector is not None:
+                candidates.append(vector)
+        return tuple(candidates)
+
+    def profile_vector(
+        self,
+        speaker_id: str,
+        source: str,
+        model_key: str = DEFAULT_MODEL_KEY,
+    ) -> MatchVector | None:
+        """Return a person's centroid even while the profile is learning."""
         with self._connect() as connection:
-            for speaker_id in dict.fromkeys(speaker_ids):
-                profile = self.profile(speaker_id, model_key)
-                if profile.state != "ready":
-                    continue
-                source_rows = connection.execute(
+            source_rows = connection.execute(
+                """
+                SELECT dimension, embedding FROM voice_samples
+                WHERE speaker_id = ? AND model_key = ? AND source = ?
+                ORDER BY id
+                """,
+                (speaker_id, model_key, source),
+            ).fetchall()
+            centroid = self._centroid(source_rows)
+            source_specific = centroid is not None
+            if centroid is None:
+                rows = connection.execute(
                     """
                     SELECT dimension, embedding FROM voice_samples
-                    WHERE speaker_id = ? AND model_key = ? AND source = ?
+                    WHERE speaker_id = ? AND model_key = ?
                     ORDER BY id
                     """,
-                    (speaker_id, model_key, source),
+                    (speaker_id, model_key),
                 ).fetchall()
-                centroid = self._centroid(source_rows)
-                source_specific = centroid is not None
-                if centroid is None:
-                    rows = connection.execute(
-                        """
-                        SELECT dimension, embedding FROM voice_samples
-                        WHERE speaker_id = ? AND model_key = ?
-                        ORDER BY id
-                        """,
-                        (speaker_id, model_key),
-                    ).fetchall()
-                    centroid = self._centroid(rows)
-                if centroid is not None:
-                    candidates.append(
-                        MatchVector(speaker_id, centroid, source_specific)
-                    )
-        return tuple(candidates)
+                centroid = self._centroid(rows)
+        if centroid is None:
+            return None
+        return MatchVector(speaker_id, centroid, source_specific)
 
     def create_group(self, name: str, members: Iterable[dict]) -> SpeakerGroup:
         group_id = str(uuid.uuid4())

@@ -37,8 +37,8 @@ def test_manual_turn_enrolls_then_automatic_turn_matches(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
     roster = [
         Speaker("Alice", speaker_id=alice.speaker_id),
         Speaker("Bob", speaker_id=bob.speaker_id),
@@ -49,20 +49,24 @@ def test_manual_turn_enrolls_then_automatic_turn_matches(tmp_path):
     assert decision.name == "Bob"
     assert decision.source == "auto"
 
-    manual = resolver.resolve(
-        chunk(manual=0), np.array([1.0, 0.0], dtype=np.float32)
-    )
+    manual = resolver.resolve(chunk(manual=0), None)
     assert manual.name == "Alice"
     assert manual.source == "manual"
-    assert manual.profile.enrollment_seconds == 6.0
+    assert store.profile(alice.speaker_id).enrollment_seconds == 5.0
+
+    sample = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
+    )
+    assert sample.accepted is True
+    assert sample.profile.enrollment_seconds == 8.0
 
 
 def test_ambiguous_match_is_unknown(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     a = store.create_speaker("A")
     b = store.create_speaker("B")
-    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
-    store.add_sample(b.speaker_id, np.array([0.99, 0.01]), "mic", 4.0, 1.0)
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.99, 0.01]), "mic", 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
         store,
@@ -77,8 +81,8 @@ def test_matching_never_considers_people_outside_roster(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     roster_person = store.create_speaker("Roster")
     outsider = store.create_speaker("Outsider")
-    store.add_sample(roster_person.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
-    store.add_sample(outsider.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
+    store.add_sample(roster_person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(outsider.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Roster", speaker_id=roster_person.speaker_id),
@@ -96,12 +100,15 @@ def test_guest_embeddings_stay_temporary_until_linked(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     person = store.create_speaker("Visitor")
     resolver = SpeakerResolver([Speaker("Guest 1")], store, FakeEngine([1, 0]), 16_000)
-    resolver.resolve(chunk(manual=0), np.array([1.0, 0.0], dtype=np.float32))
-    assert resolver.profile_status(0) == ("learning", 2.0)
+    result = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
+    )
+    assert result.accepted is True
+    assert resolver.profile_status(0) == ("learning", 3.0)
     assert store.profile(person.speaker_id).enrollment_seconds == 0.0
 
     resolver.persist_guest(0, person.speaker_id)
-    assert store.profile(person.speaker_id).enrollment_seconds == 2.0
+    assert store.profile(person.speaker_id).enrollment_seconds == 3.0
 
 
 def test_enrollment_and_matching_need_no_network(tmp_path, monkeypatch):
@@ -120,10 +127,14 @@ def test_enrollment_and_matching_need_no_network(tmp_path, monkeypatch):
         FakeEngine([1.0, 0.0]),
         16_000,
     )
-    decision = resolver.resolve(
-        chunk(manual=0, seconds=4.0), np.array([1.0, 0.0], dtype=np.float32)
+    first = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
     )
-    assert decision.profile.state == "ready"
+    assert first.profile.state == "learning"
+    second = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
+    )
+    assert second.profile.state == "ready"
 
 
 def test_source_specific_and_cross_source_thresholds(tmp_path):
@@ -131,7 +142,7 @@ def test_source_specific_and_cross_source_thresholds(tmp_path):
     same_source = store.create_speaker("Same source")
     untrained = store.create_speaker("Untrained")
     vector_62 = np.array([0.62, math.sqrt(1.0 - 0.62**2)], dtype=np.float32)
-    store.add_sample(same_source.speaker_id, vector_62, "mic", 4.0, 1.0)
+    store.add_sample(same_source.speaker_id, vector_62, "mic", 5.0, 1.0)
 
     mic = SpeakerResolver(
         [
@@ -164,9 +175,9 @@ def test_matching_considers_every_rostered_person_on_either_source(tmp_path):
     mic_a = store.create_speaker("Mic A")
     mic_b = store.create_speaker("Mic B")
     system_speaker = store.create_speaker("Taylor")
-    store.add_sample(mic_a.speaker_id, np.array([0.0, 1.0]), "mic", 4.0, 1.0)
-    store.add_sample(mic_b.speaker_id, np.array([0.0, -1.0]), "mic", 4.0, 1.0)
-    store.add_sample(system_speaker.speaker_id, np.array([1.0, 0.0]), "loopback", 4.0, 1.0)
+    store.add_sample(mic_a.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(mic_b.speaker_id, np.array([0.0, -1.0]), "mic", 5.0, 1.0)
+    store.add_sample(system_speaker.speaker_id, np.array([1.0, 0.0]), "loopback", 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Mic A", speaker_id=mic_a.speaker_id),
@@ -202,7 +213,84 @@ def test_enrollment_rejects_short_or_clipped_turns(tmp_path):
         speech_seconds=2.0,
     )
     assert resolver.wants_embedding(clipped) is False
-    assert resolver.wants_embedding(chunk(manual=0, seconds=1.0)) is True
+    assert resolver.wants_embedding(chunk(manual=0, seconds=3.0)) is False
+    assert resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=2.99), np.array([1.0, 0.0], dtype=np.float32)
+    ).reason == "too_short"
+    clipped = AudioChunk(
+        samples=np.ones(48_000, dtype=np.float32),
+        channel=Channel.MIC,
+        start=0.0,
+        end=3.0,
+        manual_speaker_index=0,
+        speech_seconds=3.0,
+    )
+    assert resolver.add_manual_sample(
+        0, clipped, np.array([1.0, 0.0], dtype=np.float32)
+    ).reason == "clipped"
+
+
+def test_ready_profile_accepts_consistent_manual_sample(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    person = store.create_speaker("Local")
+    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [Speaker("Local", speaker_id=person.speaker_id)],
+        store,
+        FakeEngine([1.0, 0.0]),
+        16_000,
+    )
+
+    result = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([0.95, 0.05], dtype=np.float32)
+    )
+
+    assert result.accepted is True
+    assert result.profile.enrollment_seconds == 8.0
+
+
+def test_ready_profile_rejects_inconsistent_manual_sample(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    person = store.create_speaker("Local")
+    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [Speaker("Local", speaker_id=person.speaker_id)],
+        store,
+        FakeEngine([0.0, 1.0]),
+        16_000,
+    )
+
+    result = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([0.0, 1.0], dtype=np.float32)
+    )
+
+    assert result.accepted is False
+    assert result.reason == "inconsistent"
+    assert store.profile(person.speaker_id).enrollment_seconds == 5.0
+
+
+def test_ready_profile_rejects_sample_that_is_ambiguous_with_roster(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    alice = store.create_speaker("Alice")
+    bob = store.create_speaker("Bob")
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.99, 0.01]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [
+            Speaker("Alice", speaker_id=alice.speaker_id),
+            Speaker("Bob", speaker_id=bob.speaker_id),
+        ],
+        store,
+        FakeEngine([1.0, 0.0]),
+        16_000,
+    )
+
+    result = resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
+    )
+
+    assert result.accepted is False
+    assert result.reason == "ambiguous_profile"
 
 
 def test_rolling_speaker_buffer_checks_overlapping_windows_on_hop():

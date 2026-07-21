@@ -475,16 +475,19 @@ let state = {
   recording: false,
   speakers: [],
   actives: { mic: null, loopback: null },
+  active_speaker: null,
   elapsed: 0,
   model_status: "loading",
   hotkey_bank: 0,
-  library: { speakers: [], groups: [], ready_seconds: 4.0 },
+  library: { speakers: [], groups: [], ready_seconds: 5.0 },
   settings: { hotkey_modifiers: ["ctrl", "alt"], hotkey_label: "Ctrl+Alt+1–9" },
   enrollment: null,
+  profile_learning: null,
 };
 let setupRoster = [];
 let sessionEpoch = null;
 let tick = null;
+let profileLearningTimer = null;
 
 function post(path, body) {
   return fetch(path, {
@@ -538,7 +541,7 @@ function libraryGroups() {
 
 function profileText(speaker) {
   if (speaker.profile_state === "ready") return "READY";
-  const goal = Number((state.library || {}).ready_seconds || 4);
+  const goal = Number((state.library || {}).ready_seconds || 5);
   return `${Number(speaker.enrollment_seconds || 0).toFixed(1)} / ${goal.toFixed(1)}s`;
 }
 
@@ -766,7 +769,7 @@ function renderSettings() {
   renderLibrarySettings();
 }
 
-function addLine(line) {
+function addLine(line, preserveViewport = true) {
   $("empty").style.display = "none";
   const div = document.createElement("div");
   div.className = "line";
@@ -774,9 +777,14 @@ function addLine(line) {
   div.innerHTML = `<span class="t">[${line.time}]</span> ${who}${escapeHtml(line.text)}`;
   const screen = $("screen");
   const cursor = $("live-cursor");
-  screen.insertBefore(div, cursor);
-  const nearBottom = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 120;
-  if (nearBottom) screen.scrollTop = screen.scrollHeight;
+  const wasAtTop = screen.scrollTop < 12;
+  const previousHeight = screen.scrollHeight;
+  const anchor = cursor ? cursor.nextSibling : screen.firstChild;
+  screen.insertBefore(div, anchor);
+  if (preserveViewport) {
+    if (wasAtTop) screen.scrollTop = 0;
+    else screen.scrollTop += screen.scrollHeight - previousHeight;
+  }
 }
 
 function escapeHtml(text) {
@@ -798,13 +806,24 @@ function renderPlayers() {
     chip.type = "button";
     let cls = "chip";
     if (speaker.profile_state === "untrained" || speaker.profile_state === "learning") cls += ` ${speaker.profile_state}`;
-    if (index === state.actives.mic || index === state.actives.loopback) {
+    if (index === state.active_speaker) {
       cls += " active";
     }
     chip.className = cls;
     const bankKey = hotkeySlot - firstSlot + 1;
     const slot = `P${bankKey}`;
-    const progress = speaker.profile_state === "ready" ? "READY" : `${Number(speaker.enrollment_seconds || 0).toFixed(1)}/4.0s`;
+    const readySeconds = Number((state.library && state.library.ready_seconds) || 5.0);
+    let progress = speaker.profile_state === "ready" ? "READY" : `${Number(speaker.enrollment_seconds || 0).toFixed(1)}/${readySeconds.toFixed(1)}s`;
+    const learning = state.profile_learning;
+    if (learning && learning.speaker_index === index) {
+      if (learning.phase === "collecting") {
+        progress = `LEARN ${Number(learning.speech_seconds || 0).toFixed(1)}/${Number(learning.target_seconds || 3).toFixed(1)}s`;
+      } else if (learning.phase === "saved") {
+        progress = "SAMPLE ADDED";
+      } else if (learning.phase === "skipped") {
+        progress = "SAMPLE SKIPPED";
+      }
+    }
     chip.title = `Hotkey ${bankKey}; saved slot ${hotkeySlot + 1}`;
     chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
@@ -848,7 +867,7 @@ function setRecording(recording) {
       cursor = document.createElement("span");
       cursor.id = "live-cursor";
       cursor.className = "cursor";
-      $("screen").appendChild(cursor);
+      $("screen").insertBefore(cursor, $("screen").firstChild);
     }
     if (!tick) tick = setInterval(() => {
       if (sessionEpoch !== null) $("counter").textContent = fmt((Date.now() - sessionEpoch) / 1000);
@@ -863,11 +882,15 @@ function setRecording(recording) {
 
 function applyState(s) {
   const previousEnrollment = state.enrollment;
+  const previousProfileLearning = state.profile_learning;
   state = Object.assign(state, s);
   if (!state.enrollment && previousEnrollment && ENROLLMENT_TERMINAL.has(previousEnrollment.phase)) {
     // A refetch racing the terminal SSE event shouldn't erase the
     // TRAINED/STOPPED message before the user has a chance to dismiss it.
     state.enrollment = previousEnrollment;
+  }
+  if (!state.profile_learning && previousProfileLearning && ["saved", "skipped"].includes(previousProfileLearning.phase)) {
+    state.profile_learning = previousProfileLearning;
   }
   const backend = (state.backend || "cpu").replace("faster_whisper", "CPU").replace("openvino", "NPU/OV").toUpperCase();
   $("backend-badge").textContent = state.model_status === "loading" ? `${backend} …` : backend;
@@ -880,9 +903,16 @@ function applyState(s) {
   $("backfill").style.display = pending ? "flex" : "none";
 
   if (s.recording) sessionEpoch = Date.now() - (s.elapsed || 0) * 1000;
-  $("screen").querySelectorAll(".line").forEach((el) => el.remove());
+  const screen = $("screen");
+  const previousScrollTop = screen.scrollTop;
+  const previousScrollHeight = screen.scrollHeight;
+  const wasAtTop = previousScrollTop < 12;
+  screen.querySelectorAll(".line").forEach((el) => el.remove());
   $("empty").style.display = "";
-  (s.lines || []).forEach(addLine);
+  setRecording(!!s.recording);
+  (s.lines || []).forEach((line) => addLine(line, false));
+  if (wasAtTop) screen.scrollTop = 0;
+  else screen.scrollTop = previousScrollTop + Math.max(0, screen.scrollHeight - previousScrollHeight);
 
   if (pending) {
     renderBackfill(s.pending_backfill);
@@ -890,7 +920,6 @@ function applyState(s) {
   } else if (s.last_saved) {
     $("statusline").innerHTML = `<span class="saved">SAVED &#9654; ${escapeHtml(s.last_saved)}</span>`;
   }
-  setRecording(!!s.recording);
   if (!s.recording && !pending && state.model_status === "loading") {
     $("statusline").textContent = "LOADING TRANSCRIPTION MODEL…";
     $("empty-title").textContent = "WARMING UP";
@@ -1032,17 +1061,48 @@ $("quit-btn").onclick = () => {
 const events = new EventSource("/api/events");
 events.onmessage = (message) => {
   const event = JSON.parse(message.data);
-  if (event.type === "line") addLine(event);
+  if (event.type === "line") {
+    addLine(event);
+    if (Object.prototype.hasOwnProperty.call(event, "active_speaker")) {
+      state.active_speaker = event.active_speaker;
+      renderPlayers();
+    }
+  }
   else if (event.type === "speaker") {
     if (event.channel) state.actives[event.channel] = event.index;
     else {
       state.actives.mic = event.index;
       state.actives.loopback = event.index;
     }
+    state.active_speaker = Object.prototype.hasOwnProperty.call(event, "active_index")
+      ? event.active_index
+      : event.index;
     renderPlayers();
   } else if (event.type === "hotkey_bank") {
     state.hotkey_bank = event.bank;
     renderPlayers();
+  } else if (event.type === "profile_learning") {
+    clearTimeout(profileLearningTimer);
+    state.profile_learning = event;
+    if (event.phase === "saved" && state.speakers[event.speaker_index]) {
+      const speaker = state.speakers[event.speaker_index];
+      speaker.profile_state = event.profile_state || speaker.profile_state;
+      speaker.enrollment_seconds = Number(event.enrollment_seconds || speaker.enrollment_seconds || 0);
+      const librarySpeaker = librarySpeakers().find((item) => item.id && item.id === speaker.id);
+      if (librarySpeaker) {
+        librarySpeaker.profile_state = speaker.profile_state;
+        librarySpeaker.enrollment_seconds = speaker.enrollment_seconds;
+      }
+    }
+    renderPlayers();
+    if (["saved", "skipped"].includes(event.phase)) {
+      profileLearningTimer = setTimeout(() => {
+        if (state.profile_learning === event) {
+          state.profile_learning = null;
+          renderPlayers();
+        }
+      }, 2500);
+    }
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);
   } else if (event.type === "enrollment") {
