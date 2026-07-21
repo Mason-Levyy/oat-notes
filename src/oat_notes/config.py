@@ -15,6 +15,8 @@ class Config:
     speaker_window_seconds: float = 1.5
     speaker_hop_seconds: float = 0.25
     speaker_confirmations: int = 2
+    manual_enrollment_seconds: float = 3.0
+    manual_enrollment_timeout_seconds: float = 10.0
     model_name: str = "distil-small.en"
     compute_type: str = "int8"
     language: str = "en"

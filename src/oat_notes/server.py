@@ -135,6 +135,12 @@ class AppState:
                     "mic": actives[Channel.MIC],
                     "loopback": actives[Channel.LOOPBACK],
                 },
+                "active_speaker": (
+                    self.session.current_speaker if recording else None
+                ),
+                "profile_learning": (
+                    self.session.profile_learning if recording else None
+                ),
                 "pending_backfill": pending_guests,
                 "meeting_name": self.meeting_name,
                 "elapsed": self.session.elapsed() if recording else 0.0,
@@ -154,7 +160,7 @@ class AppState:
                 "library": (
                     self.speaker_store.library()
                     if self.speaker_store is not None
-                    else {"speakers": [], "groups": [], "ready_seconds": 4.0}
+                    else {"speakers": [], "groups": [], "ready_seconds": 5.0}
                 ),
                 "lines": self.lines,
                 "last_saved": self.last_saved,
@@ -360,12 +366,19 @@ class AppState:
             self.last_saved = None
 
             def on_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
+                session = self.session
                 line = {
                     "time": format_timestamp(segment.start),
                     "label": label,
                     "text": segment.text,
                     "channel": segment.channel.value,
                     "speaker_id": segment.speaker_id,
+                    "speaker_index": segment.speaker_index,
+                    "active_speaker": (
+                        session.current_speaker
+                        if session is not None
+                        else segment.speaker_index
+                    ),
                     "attribution": segment.attribution,
                     "confidence": segment.confidence,
                 }
@@ -395,10 +408,14 @@ class AppState:
                 source: str,
                 confidence: float | None,
             ) -> None:
+                session = self.session
                 self.hub.publish(
                     {
                         "type": "speaker",
                         "index": index,
+                        "active_index": (
+                            session.current_speaker if session is not None else index
+                        ),
                         "channel": channel.value,
                         "source": source,
                         "confidence": confidence,
@@ -408,6 +425,9 @@ class AppState:
 
             def on_hotkey_bank(bank: int) -> None:
                 self.hub.publish({"type": "hotkey_bank", "bank": bank})
+
+            def on_profile_learning(update) -> None:
+                self.hub.publish({"type": "profile_learning", **update.to_dict()})
 
             self.awaiting_backfill = None
             self.session = Session(
@@ -428,6 +448,7 @@ class AppState:
                     on_speaker=on_speaker,
                     on_attribution=on_attribution,
                     on_hotkey_bank=on_hotkey_bank,
+                    on_profile_learning=on_profile_learning,
                 ),
             )
             self.session.start()
@@ -581,7 +602,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(
                 self.state.speaker_store.library()
                 if self.state.speaker_store is not None
-                else {"speakers": [], "groups": [], "ready_seconds": 4.0}
+                else {"speakers": [], "groups": [], "ready_seconds": 5.0}
             )
         elif self.path == "/api/events":
             self._serve_events()

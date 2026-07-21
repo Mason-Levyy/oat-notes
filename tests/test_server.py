@@ -59,6 +59,7 @@ def test_idle_status_shape():
     assert status["model_error"] is None
     assert status["settings"]["hotkey_modifiers"] == ["ctrl", "alt"]
     assert status["last_saved"] is None
+    assert status["active_speaker"] is None
 
 
 def test_model_ready_updates_status_and_notifies_clients():

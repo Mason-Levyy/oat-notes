@@ -14,7 +14,7 @@ from .clock import SessionClock
 from .config import Config
 from .hotkeys import HotkeyListener
 from .output import CHANNEL_LABELS, MeetingLog
-from .pipeline import Pipeline
+from .pipeline import Pipeline, ProfileLearningUpdate
 from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
 from .speaker_store import SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
@@ -49,6 +49,7 @@ class SessionEvents:
         lambda index, channel, source, confidence: None
     )
     on_hotkey_bank: Callable[[int], None] = lambda bank: None
+    on_profile_learning: Callable[[ProfileLearningUpdate], None] = lambda update: None
 
 
 class Session:
@@ -95,6 +96,12 @@ class Session:
             Channel.MIC: None,
             Channel.LOOPBACK: None,
         }
+        # ``active`` remains channel-specific for attribution, but the UI needs
+        # one unambiguous person to highlight.  Start with nobody highlighted
+        # until a manual selection or a live speaker match arrives.
+        self.current_speaker: int | None = None
+        self._current_speaker_channel: Channel | None = None
+        self.profile_learning: dict | None = None
         self._manual_override_pending = {
             Channel.MIC: False,
             Channel.LOOPBACK: False,
@@ -130,6 +137,7 @@ class Session:
             attributor=self._attributor,
             speaker_resolver=self._speaker_resolver,
             speaker_tracking_sink=self._handle_tracking_attribution,
+            profile_learning_sink=self._handle_profile_learning,
         )
 
         self.captures = [
@@ -181,6 +189,8 @@ class Session:
         """Select a person for either audio source and cut in-flight chunks."""
         if not 0 <= index < len(self.roster):
             return
+        self.current_speaker = index
+        self._current_speaker_channel = None
         timestamp = self.clock.now()
         for channel in self.channels:
             self._attributor.log_for(channel).record(timestamp, index)
@@ -190,6 +200,8 @@ class Session:
                 self._pipeline.manual_override(channel, index)
             else:
                 self._pipeline.split_channel(channel)
+        if self._speaker_resolver is not None:
+            self._pipeline.begin_profile_learning(index, timestamp)
         self._events.on_speaker(index)
 
     def switch_hotkey(self, offset: int) -> None:
@@ -297,6 +309,8 @@ class Session:
         pending_manual = self._manual_override_pending.get(segment.channel, False)
         if segment.attribution == "manual" and segment.speaker_index is not None:
             self.active[segment.channel] = segment.speaker_index
+            self.current_speaker = segment.speaker_index
+            self._current_speaker_channel = segment.channel
             self._events.on_attribution(
                 segment.speaker_index,
                 segment.channel,
@@ -309,6 +323,9 @@ class Session:
             and not pending_manual
         ):
             self.active[segment.channel] = None
+            if self._current_speaker_channel == segment.channel:
+                self.current_speaker = None
+                self._current_speaker_channel = None
             self._events.on_attribution(
                 None, segment.channel, "unknown", segment.confidence
             )
@@ -318,6 +335,8 @@ class Session:
             and not pending_manual
         ):
             self.active[segment.channel] = segment.speaker_index
+            self.current_speaker = segment.speaker_index
+            self._current_speaker_channel = segment.channel
             self._events.on_attribution(
                 segment.speaker_index,
                 segment.channel,
@@ -348,4 +367,10 @@ class Session:
         if self._manual_override_pending.get(channel, False):
             return
         self.active[channel] = index
+        self.current_speaker = index
+        self._current_speaker_channel = channel
         self._events.on_attribution(index, channel, source, confidence)
+
+    def _handle_profile_learning(self, update: ProfileLearningUpdate) -> None:
+        self.profile_learning = update.to_dict() if update.phase == "collecting" else None
+        self._events.on_profile_learning(update)

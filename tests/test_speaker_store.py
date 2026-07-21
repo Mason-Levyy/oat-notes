@@ -17,11 +17,10 @@ def test_speaker_profiles_persist_without_audio(tmp_path):
 
     store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 2.0, 1.0)
     profile = store.add_sample(
-        speaker.speaker_id, np.array([0.9, 0.1]), "mic", 2.0, 1.0
+        speaker.speaker_id, np.array([0.9, 0.1]), "mic", 3.0, 1.0
     )
     assert profile.state == "ready"
-    assert SpeakerStore(path).profile(speaker.speaker_id).enrollment_seconds == 4.0
-
+    assert SpeakerStore(path).profile(speaker.speaker_id).enrollment_seconds == 5.0
     with sqlite3.connect(path) as connection:
         columns = {
             row[1] for row in connection.execute("PRAGMA table_info(voice_samples)")
@@ -29,6 +28,17 @@ def test_speaker_profiles_persist_without_audio(tmp_path):
     assert "audio" not in columns
     assert "embedding" in columns
 
+
+def test_profile_becomes_ready_at_five_seconds(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    speaker = store.create_speaker("Threshold")
+
+    assert store.add_sample(
+        speaker.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0
+    ).state == "learning"
+    assert store.add_sample(
+        speaker.speaker_id, np.array([1.0, 0.0]), "mic", 1.0, 1.0
+    ).state == "ready"
 
 def test_speaker_names_are_case_insensitively_unique(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
@@ -95,7 +105,7 @@ def test_groups_round_trip_order(tmp_path):
 def test_match_vectors_prefer_same_source_then_fall_back_global(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     speaker = store.create_speaker("A")
-    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
+    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
 
     mic = store.match_vectors([speaker.speaker_id], "mic")[0]
     loopback = store.match_vectors([speaker.speaker_id], "loopback")[0]
@@ -107,7 +117,7 @@ def test_schema_is_versioned_and_delete_cascades(tmp_path):
     path = tmp_path / "speakers.db"
     store = SpeakerStore(path)
     speaker = store.create_speaker("Temporary")
-    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0)
+    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
     store.create_group(
         "Temporary group",
         [{"speaker_id": speaker.speaker_id}],

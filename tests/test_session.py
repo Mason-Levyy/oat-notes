@@ -52,6 +52,8 @@ def test_selecting_person_applies_to_both_audio_sources():
     session.roster = [Speaker("Alex"), Speaker("Taylor")]
     session.channels = (Channel.MIC, Channel.LOOPBACK)
     session.active = {Channel.MIC: 0, Channel.LOOPBACK: 0}
+    session.current_speaker = None
+    session._current_speaker_channel = None
     session.clock = SimpleNamespace(now=lambda: 4.0)
     recorded = []
     session._attributor = SimpleNamespace(
@@ -73,12 +75,15 @@ def test_selecting_person_applies_to_both_audio_sources():
     ]
     assert split == [Channel.MIC, Channel.LOOPBACK]
     assert session.active == {Channel.MIC: 1, Channel.LOOPBACK: 1}
+    assert session.current_speaker == 1
     assert selected == [1]
 
 
 def test_delayed_old_attribution_cannot_override_manual_selection():
     session = bare_session()
     session.active = {Channel.MIC: 1, Channel.LOOPBACK: None}
+    session.current_speaker = 1
+    session._current_speaker_channel = None
     session._manual_override_pending = {
         Channel.MIC: True,
         Channel.LOOPBACK: False,
@@ -114,12 +119,15 @@ def test_delayed_old_attribution_cannot_override_manual_selection():
     )
     session._handle_segment(selected_turn, 0.1)
     assert attributed[-1][:3] == (1, Channel.MIC, "manual")
+    assert session.current_speaker == 1
     assert session._manual_override_pending[Channel.MIC] is False
 
 
 def test_rolling_attribution_updates_active_but_defers_to_manual_selection():
     session = bare_session()
     session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
+    session.current_speaker = 0
+    session._current_speaker_channel = Channel.MIC
     session._manual_override_pending = {
         Channel.MIC: False,
         Channel.LOOPBACK: False,
@@ -129,9 +137,44 @@ def test_rolling_attribution_updates_active_but_defers_to_manual_selection():
 
     session._handle_tracking_attribution(1, Channel.MIC, "auto", 0.91)
     assert session.active[Channel.MIC] == 1
+    assert session.current_speaker == 1
     assert attributed == [(1, Channel.MIC, "auto", 0.91)]
 
     session._manual_override_pending[Channel.MIC] = True
     session._handle_tracking_attribution(0, Channel.MIC, "auto", 0.95)
     assert session.active[Channel.MIC] == 1
+    assert session.current_speaker == 1
     assert len(attributed) == 1
+
+
+def test_unknown_on_other_channel_does_not_clear_current_speaker():
+    session = bare_session()
+    session.active = {Channel.MIC: 1, Channel.LOOPBACK: 0}
+    session.current_speaker = 1
+    session._current_speaker_channel = Channel.MIC
+    session._manual_override_pending = {
+        Channel.MIC: False,
+        Channel.LOOPBACK: False,
+    }
+    attributed = []
+    session._events = SimpleNamespace(
+        on_attribution=lambda *args: attributed.append(args),
+        on_segment=lambda *args: None,
+    )
+    session.log = SimpleNamespace(add=lambda segment: None)
+    session._label_channels = False
+
+    session._handle_segment(
+        TranscriptSegment(
+            "other channel ended",
+            Channel.LOOPBACK,
+            0.0,
+            1.0,
+            attribution="unknown",
+        ),
+        0.1,
+    )
+
+    assert session.active[Channel.LOOPBACK] is None
+    assert session.current_speaker == 1
+    assert attributed[-1][:3] == (None, Channel.LOOPBACK, "unknown")
