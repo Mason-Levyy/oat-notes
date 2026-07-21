@@ -4,6 +4,68 @@ Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captur
 
 Live mic + system-audio loopback → timestamped transcript with speaker labels, in the console or a local 8-bit web UI. On a Zoom/Teams call, other participants are captured from the loopback of your output device — no mic pickup needed. Wear headphones to prevent the mic from capturing the same speech and producing duplicate lines.
 
+## First-time setup
+
+This guide is for a development checkout on Windows 10 or 11. You need
+[Git](https://git-scm.com/downloads/win) to clone the project and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) to manage the
+runtime. You do not need to install Python separately: the project pins
+Python 3.12 and uv installs it when needed.
+
+1. Clone the project and enter its folder:
+
+   ```powershell
+   git clone https://github.com/Mason-Levyy/oat-notes.git
+   cd oat-notes
+   ```
+
+2. Install the pinned Python version and application dependencies:
+
+   ```powershell
+   uv sync
+   ```
+
+   To use Intel OpenVINO acceleration (NPU or GPU), install that optional
+   extra instead:
+
+   ```powershell
+   uv sync --extra openvino
+   ```
+
+3. Start the local meeting UI:
+
+   ```powershell
+   uv run oat-notes --ui
+   ```
+
+   Open `http://127.0.0.1:8737` if the browser does not open automatically.
+   The first start downloads the transcription model (a few hundred MB), so
+   wait for the model to report ready before starting a meeting.
+
+4. In the UI, name the meeting, add people or a saved group to the roster, and
+   select **START MEETING**. Use a headset during calls: your microphone is
+   recorded together with system-audio loopback, and headphones prevent the
+   microphone from duplicating other participants' speech.
+
+5. Select a speaker by clicking their roster row or using **Ctrl+Alt+1** through
+   **Ctrl+Alt+9**. End the meeting to write the transcript. Development runs
+   save to `./transcripts` by default; the installed app saves to
+   `Documents\Oat Notes`.
+
+### Choose audio devices
+
+The default command listens to the default microphone and default output-device
+loopback. To inspect or override those choices, use:
+
+```powershell
+uv run oat-notes --list-devices
+uv run oat-notes --device-index 5 --loopback-index 10
+uv run oat-notes --no-loopback
+```
+
+`--no-loopback` records only the microphone. This is useful for in-person
+meetings or when a virtual audio device is already mixing all sources.
+
 ## Web UI
 
 ```
@@ -13,16 +75,6 @@ uv run oat-notes --ui
 Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until they have five seconds of usable enrollment speech. A manual speaker press starts a one-time, source-specific profile sample: it waits for three seconds of detected speech within ten seconds, then saves one quality-checked embedding. Voice embedding and transcription run locally in parallel on separate model instances; ready profiles are checked in overlapping 1.5-second windows about every 0.25 seconds, with two consecutive matches required before the live speaker changes. Once a change is confirmed, the transcript cuts to the new speaker immediately rather than waiting for a pause or the 15-second chunk cap.
 
 The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order but stay editable per meeting. Someone unexpected joins? Click `+ GUEST`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
-
-## Setup
-
-Requires [uv](https://docs.astral.sh/uv/) (Python 3.12 is pinned and auto-installed):
-
-```
-uv sync
-```
-
-The first run downloads `distil-small.en` (a few hundred MB) to the HuggingFace cache.
 
 ## Usage
 
@@ -102,8 +154,24 @@ Compiled OpenVINO models are cached under `%LOCALAPPDATA%\oat-notes\openvino-cac
 
 ## Installed Windows app
 
-```
+To produce an installable Windows build, first complete the development setup
+above and install [Inno Setup 6](https://jrsoftware.org/isinfo.php). Then run:
+
+```powershell
 uv sync --extra openvino
+uv run pytest
+.\scripts\build_installer.ps1
+```
+
+The script runs the test suite again by default, builds the application, and
+then writes the installer to `dist\installer\OatNotes-Setup.exe`. Run that
+installer to add the Start menu shortcut, uninstaller, and optional desktop
+shortcut. It installs per-user under `%LOCALAPPDATA%\Programs\Oat Notes`, so
+no administrator prompt is needed.
+
+For a faster unpacked build while iterating on the application, run:
+
+```powershell
 .\scripts\build_app.ps1
 ```
 
@@ -114,16 +182,10 @@ every launch. Double-clicking `oat-notes.exe` starts the UI first, then loads
 and warms OpenVINO in the background. The START button enables when the model
 is ready.
 
-For a Start menu shortcut, uninstaller, and optional desktop shortcut, install
-[Inno Setup 6](https://jrsoftware.org/isinfo.php) and run:
-
-```
-.\scripts\build_installer.ps1
-```
-
-The installer is written to `dist\installer\OatNotes-Setup.exe` and installs
-per-user under `%LOCALAPPDATA%\Programs\Oat Notes`, so it does not require an
-administrator prompt. Installed launches save transcripts under
+To upgrade an existing installation, close Oat Notes and run the newly built
+installer again. Do not delete `%LOCALAPPDATA%\oat-notes\speakers.db`: it holds
+the local speaker directory and embeddings and is preserved across upgrades.
+Installed launches save transcripts under
 `Documents\Oat Notes`; windowed-app logs live under
 `%LOCALAPPDATA%\oat-notes\logs`. Model weights and compiled OpenVINO caches
 remain in `%LOCALAPPDATA%\oat-notes` and survive application upgrades.
