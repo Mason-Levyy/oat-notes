@@ -476,3 +476,28 @@ def test_profile_learning_skips_an_ambiguous_active_source(tmp_path):
         event.phase == "skipped" and event.reason == "ambiguous_source"
         for event in updates
     )
+
+
+def test_cancel_profile_learning_stops_the_in_progress_capture(tmp_path):
+    pipeline, store, alice, _, updates = _learning_pipeline(tmp_path)
+    pipeline.start()
+    pipeline.begin_profile_learning(0, 0.0)
+    pipeline.frame_queue.put((Channel.MIC, 0.0, _clean_speech(10)))
+    pipeline.cancel_profile_learning()
+    # More speech after cancelling shouldn't resurrect the cancelled capture.
+    pipeline.frame_queue.put((Channel.MIC, 10.0, _clean_speech(100)))
+    pipeline.finish()
+
+    assert store.profile(alice.speaker_id).enrollment_seconds == 0.0
+    assert any(
+        event.phase == "skipped" and event.reason == "cancelled" for event in updates
+    )
+
+
+def test_cancel_profile_learning_without_a_candidate_is_a_no_op(tmp_path):
+    pipeline, _, _, _, updates = _learning_pipeline(tmp_path)
+    pipeline.start()
+    pipeline.cancel_profile_learning()
+    pipeline.finish()
+
+    assert updates == []

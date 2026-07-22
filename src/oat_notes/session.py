@@ -13,7 +13,7 @@ from .capture import AudioCapture, find_default_loopback
 from .clock import SessionClock
 from .config import Config
 from .hotkeys import HotkeyListener
-from .output import CHANNEL_LABELS, MeetingLog
+from .output import CHANNEL_LABELS, MeetingLog, format_timestamp
 from .pipeline import Pipeline, ProfileLearningUpdate
 from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
 from .speaker_store import SpeakerProfile, SpeakerStore
@@ -50,6 +50,7 @@ class SessionEvents:
     )
     on_hotkey_bank: Callable[[int], None] = lambda bank: None
     on_profile_learning: Callable[[ProfileLearningUpdate], None] = lambda update: None
+    on_note: Callable[[dict], None] = lambda note: None
 
 
 class Session:
@@ -187,7 +188,7 @@ class Session:
 
     def switch_speaker(self, index: int) -> None:
         """Select a person for either audio source and cut in-flight chunks."""
-        if not 0 <= index < len(self.roster):
+        if not 0 <= index < len(self.roster) or not self.roster[index].active:
             return
         self.current_speaker = index
         self._current_speaker_channel = None
@@ -210,7 +211,7 @@ class Session:
             (
                 item
                 for item, speaker in enumerate(self.roster)
-                if speaker.hotkey_slot == slot
+                if speaker.hotkey_slot == slot and speaker.active
             ),
             None,
         )
@@ -248,6 +249,56 @@ class Session:
         self.roster.append(guest)
         self.guest_indices.append(index)
         return index
+
+    def add_speaker(self, name: str, speaker_id: str | None = None) -> int:
+        """Add a known person to the live roster without switching to them."""
+        used = {speaker.hotkey_slot for speaker in self.roster}
+        start = self.hotkey_bank * 9
+        slot = next((item for item in range(start, start + 9) if item not in used), None)
+        if slot is None:
+            slot = max((item for item in used if item is not None), default=-1) + 1
+        speaker = Speaker(name, speaker_id=speaker_id, hotkey_slot=slot)
+        index = self._attributor.add(speaker)
+        self.roster.append(speaker)
+        return index
+
+    def remove_speaker(self, index: int) -> str | None:
+        """Deactivate a roster member who hasn't spoken yet — including one
+        that's currently "active" because it was just created (a mis-clicked
+        Guest) or manually selected but never actually spoke.
+
+        Returns an error message, or ``None`` on success. Roster position is
+        never reused for a different person mid-session — segments, hotkey
+        state, and in-flight pipeline threads all reference it by index — so
+        removal only flips ``active`` rather than shrinking the list.
+        """
+        if not 0 <= index < len(self.roster):
+            return "speaker not found"
+        speaker = self.roster[index]
+        if not speaker.active:
+            return "speaker already removed"
+        if self.profile_learning and self.profile_learning.get("speaker_index") == index:
+            return "a voice sample is being captured for this speaker"
+        if speaker.name in self.log.speakers_with_lines():
+            return "speaker has already spoken"
+        self.roster[index] = replace(speaker, active=False)
+        if self.current_speaker == index:
+            self.current_speaker = None
+            self._current_speaker_channel = None
+        for channel, active_index in list(self.active.items()):
+            if active_index == index:
+                self.active[channel] = None
+        return None
+
+    def cancel_profile_learning(self) -> None:
+        self._pipeline.cancel_profile_learning()
+
+    def add_note(self, text: str) -> dict:
+        timestamp = self.clock.now()
+        self.log.add_note(timestamp, text)
+        note = {"time": format_timestamp(timestamp), "text": text}
+        self._events.on_note(note)
+        return note
 
     def profile_status(self, index: int) -> tuple[str, float]:
         if self._speaker_resolver is None:

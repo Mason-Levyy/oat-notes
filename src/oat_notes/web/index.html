@@ -307,6 +307,43 @@ body {
 .chip.learning { border-style: dashed; }
 .chip .progress { font-size: 7px; margin-left: auto; }
 .chip .progress + .dot { margin-left: 0; }
+.chip-row { display: flex; gap: 7px; align-items: stretch; }
+.chip-row .chip { flex: 1; width: auto; }
+.chip-row .mini { flex: none; }
+#live-add-row { margin-top: 2px; }
+
+/* ---------- notes sidebar ---------- */
+.notes-tab {
+  position: fixed; top: 50%; right: 0; z-index: 30;
+  transform: translateY(-50%) rotate(90deg); transform-origin: right top;
+  font-family: "Pixel", Consolas, monospace; font-size: 9px;
+  border: 3px solid var(--ink); border-bottom: none;
+  background: var(--oat); padding: 9px 16px; cursor: pointer;
+  box-shadow: -3px 3px 0 var(--ink);
+}
+.notes-tab[aria-expanded="true"] { background: var(--oat-dark); }
+.notes-drawer {
+  position: fixed; inset: 0 0 0 auto; width: min(320px, 86vw); z-index: 25;
+  background: var(--paper); border-left: 3px solid var(--ink);
+  box-shadow: -6px 0 12px rgba(0, 0, 0, 0.2);
+  transform: translateX(100%); transition: transform 0.2s ease;
+  padding: 18px; display: flex; flex-direction: column; gap: 12px;
+}
+.notes-drawer.open { transform: translateX(0); }
+.notes-header { font-size: 11px; }
+.notes-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.notes-entry { font-size: 12px; border-bottom: 1px solid #d8d3c6; padding-bottom: 6px; }
+.notes-entry .t {
+  color: var(--oat-dark); font-family: "Pixel", Consolas, monospace;
+  font-size: 8px; display: block; margin-bottom: 3px;
+}
+#notes-form { display: flex; flex-direction: column; gap: 8px; }
+#notes-input {
+  border: 3px solid var(--ink); background: #fff; font-family: Consolas, monospace;
+  font-size: 13px; padding: 8px; resize: vertical;
+}
+#notes-input:disabled { background: #d2d0ca; color: #6b6558; }
+#notes-hint { font-size: 8px; }
 
 /* ---------- screen ---------- */
 .statusline { font-size: 8px; min-height: 14px; }
@@ -353,6 +390,16 @@ body {
 </style>
 </head>
 <body>
+<button type="button" class="notes-tab pixel" id="notes-tab" aria-expanded="false" aria-controls="notes-drawer">NOTES</button>
+<aside class="notes-drawer" id="notes-drawer" aria-hidden="true">
+  <div class="notes-header pixel">MEETING NOTES</div>
+  <div class="notes-list" id="notes-list"></div>
+  <form id="notes-form">
+    <textarea id="notes-input" rows="3" placeholder="Jot a note…" disabled></textarea>
+    <button type="submit" class="btn start" id="notes-submit" disabled>+ NOTE</button>
+    <div class="hint pixel" id="notes-hint">START A MEETING TO ADD TIMESTAMPED NOTES</div>
+  </form>
+</aside>
 <div class="console">
   <header class="header">
     <div class="sprite" aria-hidden="true"></div>
@@ -403,12 +450,18 @@ body {
         <div class="rec-row pixel"><span class="rec-dot"></span> REC</div>
         <div class="counter pixel" id="counter">00:00:00</div>
         <div class="players" id="players"></div>
+        <div class="compact-row" id="live-add-row">
+          <input type="text" id="live-person-search" list="live-person-options" aria-label="Add a person to the meeting" placeholder="Add person">
+          <datalist id="live-person-options"></datalist>
+          <button type="button" class="mini primary" id="live-add-btn">+ ADD</button>
+        </div>
         <div class="bank-row" id="bank-row">
           <button type="button" class="mini" id="bank-prev">[ PREV</button>
           <span class="pixel" id="bank-label">SLOTS 1–9</span>
           <button type="button" class="mini" id="bank-next">NEXT ]</button>
         </div>
         <button class="btn stop" id="stop-btn" style="display:block">&#9632; END MEETING</button>
+        <button type="button" class="mini danger" id="discard-btn" style="width:100%">SKIP SAVE (DISCARD)</button>
       </div>
 
       <div class="live" id="backfill">
@@ -796,10 +849,22 @@ function escapeHtml(text) {
 function renderPlayers() {
   const players = $("players");
   players.innerHTML = "";
+  const present = new Set(
+    state.speakers.filter((speaker) => !speaker.removed && speaker.id).map((speaker) => speaker.id)
+  );
+  const liveOptions = $("live-person-options");
+  if (liveOptions) {
+    liveOptions.innerHTML = librarySpeakers()
+      .filter((speaker) => !present.has(speaker.id))
+      .map((speaker) => `<option value="${escapeHtml(speaker.name)}"></option>`)
+      .join("");
+  }
   const bank = Number(state.hotkey_bank || 0);
   const firstSlot = bank * 9;
   $("bank-label").textContent = `SLOTS ${firstSlot + 1}–${firstSlot + 9}`;
+  const learning = state.profile_learning;
   state.speakers.forEach((speaker, index) => {
+    if (speaker.removed) return;
     const hotkeySlot = Number.isInteger(speaker.hotkey_slot) ? speaker.hotkey_slot : index;
     if (hotkeySlot < firstSlot || hotkeySlot >= firstSlot + 9) return;
     const chip = document.createElement("button");
@@ -814,8 +879,8 @@ function renderPlayers() {
     const slot = `P${bankKey}`;
     const readySeconds = Number((state.library && state.library.ready_seconds) || 5.0);
     let progress = speaker.profile_state === "ready" ? "READY" : `${Number(speaker.enrollment_seconds || 0).toFixed(1)}/${readySeconds.toFixed(1)}s`;
-    const learning = state.profile_learning;
-    if (learning && learning.speaker_index === index) {
+    const isLearning = learning && learning.speaker_index === index;
+    if (isLearning) {
       if (learning.phase === "collecting") {
         progress = `LEARN ${Number(learning.speech_seconds || 0).toFixed(1)}/${Number(learning.target_seconds || 3).toFixed(1)}s`;
       } else if (learning.phase === "saved") {
@@ -827,7 +892,32 @@ function renderPlayers() {
     chip.title = `Hotkey ${bankKey}; saved slot ${hotkeySlot + 1}`;
     chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
-    players.appendChild(chip);
+
+    const row = document.createElement("div");
+    row.className = "chip-row";
+    row.appendChild(chip);
+    if (isLearning && learning.phase === "collecting") {
+      const skip = document.createElement("button");
+      skip.type = "button";
+      skip.className = "mini primary";
+      skip.textContent = "SKIP";
+      skip.title = "Cancel the in-progress voice sample";
+      skip.onclick = () => post("/api/profile_learning/cancel", {});
+      row.appendChild(skip);
+    }
+    if (!speaker.spoken) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "mini danger";
+      remove.textContent = "×";
+      remove.title = `Remove ${speaker.name} (hasn't spoken yet)`;
+      remove.onclick = () => post("/api/roster/remove", { index }).then((result) => {
+        if (result.error) $("statusline").textContent = result.error.toUpperCase();
+        else applyState(result);
+      });
+      row.appendChild(remove);
+    }
+    players.appendChild(row);
   });
   addGhost(players);
 }
@@ -934,6 +1024,7 @@ function applyState(s) {
   }
   if (s.recording) renderPlayers();
   renderSettings();
+  renderNotes();
 }
 
 $("setup").onsubmit = (event) => {
@@ -959,6 +1050,11 @@ $("setup").onsubmit = (event) => {
 
 $("stop-btn").onclick = () => post("/api/stop").then(applyState);
 
+$("discard-btn").onclick = () => {
+  if (!window.confirm("Discard this meeting without saving the transcript? This can't be undone.")) return;
+  post("/api/stop", { discard: true }).then(applyState);
+};
+
 $("finalize-btn").onclick = () => {
   const renames = {};
   const guestProfiles = {};
@@ -970,6 +1066,23 @@ $("finalize-btn").onclick = () => {
   });
   post("/api/finalize", { renames, guest_profiles: guestProfiles }).then(applyState);
 };
+
+function attachTabComplete(input, getNames) {
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const value = input.value.trim();
+    if (!value) return;
+    const lower = value.toLowerCase();
+    const match = getNames().find((name) => name.toLowerCase().startsWith(lower));
+    if (match && match.toLowerCase() !== lower) {
+      event.preventDefault();
+      input.value = match;
+    }
+  });
+}
+
+attachTabComplete($("person-search"), () => librarySpeakers().map((speaker) => speaker.name));
+attachTabComplete($("live-person-search"), () => librarySpeakers().map((speaker) => speaker.name));
 
 $("add-person-btn").onclick = () => {
   const query = $("person-search").value.trim().toLowerCase();
@@ -1024,6 +1137,63 @@ $("group-create").onclick = () => {
 
 $("bank-prev").onclick = () => post("/api/hotkey_bank", { direction: -1 }).then(applyState);
 $("bank-next").onclick = () => post("/api/hotkey_bank", { direction: 1 }).then(applyState);
+
+$("live-add-btn").onclick = () => {
+  const query = $("live-person-search").value.trim();
+  if (!query) return;
+  const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === query.toLowerCase());
+  const payload = speaker ? { speaker_id: speaker.id } : { name: query };
+  post("/api/roster/add", payload).then((result) => {
+    if (result.error) {
+      $("statusline").textContent = result.error.toUpperCase();
+      return;
+    }
+    applyState(result);
+    $("live-person-search").value = "";
+  });
+};
+
+$("notes-tab").onclick = () => {
+  const drawer = $("notes-drawer");
+  const open = !drawer.classList.contains("open");
+  drawer.classList.toggle("open", open);
+  drawer.setAttribute("aria-hidden", String(!open));
+  $("notes-tab").setAttribute("aria-expanded", String(open));
+  if (open) $("notes-input").focus();
+};
+
+function addNoteEntry(note) {
+  const div = document.createElement("div");
+  div.className = "notes-entry";
+  div.innerHTML = `<span class="t">[${note.time}]</span>${escapeHtml(note.text)}`;
+  const list = $("notes-list");
+  list.appendChild(div);
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderNotes() {
+  const list = $("notes-list");
+  list.innerHTML = "";
+  (state.notes || []).forEach(addNoteEntry);
+  $("notes-input").disabled = !state.recording;
+  $("notes-submit").disabled = !state.recording;
+  $("notes-hint").style.display = state.recording ? "none" : "block";
+}
+
+$("notes-form").onsubmit = (event) => {
+  event.preventDefault();
+  const input = $("notes-input");
+  const text = input.value.trim();
+  if (!text) return;
+  post("/api/notes/add", { text }).then((result) => {
+    if (result.error) {
+      $("notes-hint").textContent = result.error.toUpperCase();
+      $("notes-hint").style.display = "block";
+      return;
+    }
+    input.value = "";
+  });
+};
 
 $("tab-meeting").onclick = () => openTab("meeting");
 $("tab-settings").onclick = () => openTab("settings");
@@ -1103,6 +1273,8 @@ events.onmessage = (message) => {
         }
       }, 2500);
     }
+  } else if (event.type === "note") {
+    addNoteEntry(event);
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);
   } else if (event.type === "enrollment") {

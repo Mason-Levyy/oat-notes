@@ -90,6 +90,7 @@ class AppState:
         self.roster: tuple[Speaker, ...] = ()
         self.meeting_name: str = "meeting"
         self.lines: list[dict] = []
+        self.notes: list[dict] = []
         self.last_saved: str | None = None
         self.shutdown = threading.Event()
 
@@ -119,13 +120,21 @@ class AppState:
                         enrollment_seconds = profile.enrollment_seconds
                     except KeyError:
                         pass
+                spoken = bool(
+                    recording
+                    and self.session is not None
+                    and speaker.name in self.session.log.speakers_with_lines()
+                )
                 speakers.append(
                     {
                         "id": speaker.speaker_id,
+                        "index": index,
                         "name": speaker.name,
                         "hotkey_slot": speaker.hotkey_slot,
                         "profile_state": profile_state,
                         "enrollment_seconds": round(enrollment_seconds, 2),
+                        "removed": not speaker.active,
+                        "spoken": spoken,
                     }
                 )
             return {
@@ -163,6 +172,7 @@ class AppState:
                     else {"speakers": [], "groups": [], "ready_seconds": 5.0}
                 ),
                 "lines": self.lines,
+                "notes": self.notes,
                 "last_saved": self.last_saved,
                 "enrollment": self._enrollment_event,
             }
@@ -363,6 +373,7 @@ class AppState:
             self.roster = tuple(roster)
             self.meeting_name = str(body.get("name") or "meeting").strip() or "meeting"
             self.lines = []
+            self.notes = []
             self.last_saved = None
 
             def on_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
@@ -429,6 +440,10 @@ class AppState:
             def on_profile_learning(update) -> None:
                 self.hub.publish({"type": "profile_learning", **update.to_dict()})
 
+            def on_note(note: dict) -> None:
+                self.notes.append(note)
+                self.hub.publish({"type": "note", **note})
+
             self.awaiting_backfill = None
             self.session = Session(
                 self.config,
@@ -449,23 +464,30 @@ class AppState:
                     on_attribution=on_attribution,
                     on_hotkey_bank=on_hotkey_bank,
                     on_profile_learning=on_profile_learning,
+                    on_note=on_note,
                 ),
             )
             self.session.start()
         self.hub.publish({"type": "status", "recording": True})
         return self.status()
 
-    def stop_session(self) -> dict:
+    def stop_session(self, discard: bool = False) -> dict:
         with self.lock:
             if self.session is None:
                 return {"error": "not recording"}
             session = self.session
             self.session = None
         session.stop()
-        needs_backfill = bool(_guests_with_lines(session)) and not session.log.is_empty
+        needs_backfill = (
+            not discard
+            and bool(_guests_with_lines(session))
+            and not session.log.is_empty
+        )
         with self.lock:
             if needs_backfill:
                 self.awaiting_backfill = session
+            elif discard:
+                self.last_saved = None
             else:
                 saved = session.save()
                 self.last_saved = str(saved) if saved else None
@@ -519,6 +541,59 @@ class AppState:
             session.add_guest()
             self.roster = tuple(session.roster)
         self.hub.publish({"type": "status", "recording": True})
+        return self.status()
+
+    def add_roster_speaker(self, body: dict) -> dict:
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            speaker_id = str(body.get("speaker_id") or "").strip() or None
+            name = str(body.get("name", "")).strip()
+            if speaker_id and self.speaker_store is not None:
+                try:
+                    name = self.speaker_store.profile(speaker_id).name
+                except KeyError:
+                    return {"error": "speaker not found"}
+            if not name:
+                return {"error": "a name is required"}
+            session.add_speaker(name, speaker_id)
+            self.roster = tuple(session.roster)
+        self.hub.publish({"type": "status", "recording": True})
+        return self.status()
+
+    def remove_roster_speaker(self, body: dict) -> dict:
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            index = body.get("index")
+            if not isinstance(index, int):
+                return {"error": "index must be an integer"}
+            error = session.remove_speaker(index)
+            if error:
+                return {"error": error}
+            self.roster = tuple(session.roster)
+        self.hub.publish({"type": "status", "recording": True})
+        return self.status()
+
+    def cancel_profile_learning(self) -> dict:
+        with self.lock:
+            session = self.session
+        if session is None:
+            return {"error": "not recording"}
+        session.cancel_profile_learning()
+        return self.status()
+
+    def add_note(self, body: dict) -> dict:
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            text = str(body.get("text", "")).strip()
+            if not text:
+                return {"error": "note text is required"}
+            session.add_note(text)
         return self.status()
 
     def switch_speaker(self, index: int) -> dict:
@@ -625,7 +700,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/start":
             self._send_json(self.state.start_session(body))
         elif self.path == "/api/stop":
-            self._send_json(self.state.stop_session())
+            self._send_json(self.state.stop_session(discard=bool(body.get("discard"))))
         elif self.path == "/api/switch":
             index = body.get("index")
             if not isinstance(index, int):
@@ -636,6 +711,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.switch_speaker(index))
         elif self.path == "/api/add_guest":
             self._send_json(self.state.add_guest(body))
+        elif self.path == "/api/roster/add":
+            self._send_json(self.state.add_roster_speaker(body))
+        elif self.path == "/api/roster/remove":
+            self._send_json(self.state.remove_roster_speaker(body))
+        elif self.path == "/api/profile_learning/cancel":
+            self._send_json(self.state.cancel_profile_learning())
+        elif self.path == "/api/notes/add":
+            self._send_json(self.state.add_note(body))
         elif self.path == "/api/hotkey_bank":
             direction = body.get("direction")
             if direction not in (-1, 1):

@@ -13,6 +13,7 @@ class Speaker:
     name: str
     speaker_id: str | None = None
     hotkey_slot: int | None = None
+    active: bool = True
 
 
 def parse_speakers(text: str) -> tuple[Speaker, ...]:

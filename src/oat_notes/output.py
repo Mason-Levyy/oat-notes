@@ -40,9 +40,13 @@ class MeetingLog:
     def __init__(self, label_channels: bool) -> None:
         self._label_channels = label_channels
         self._segments: list[TranscriptSegment] = []
+        self._notes: list[tuple[float, str]] = []
 
     def add(self, segment: TranscriptSegment) -> None:
         self._segments.append(segment)
+
+    def add_note(self, timestamp: float, text: str) -> None:
+        self._notes.append((timestamp, text))
 
     def speakers_with_lines(self) -> set[str]:
         return {
@@ -59,7 +63,7 @@ class MeetingLog:
 
     @property
     def is_empty(self) -> bool:
-        return not self._segments
+        return not self._segments and not self._notes
 
     def save(
         self, directory: Path, started_at: datetime, name: str = "meeting"
@@ -67,7 +71,14 @@ class MeetingLog:
         directory.mkdir(parents=True, exist_ok=True)
         stem = f"{slugify(name)}_{started_at:%Y-%m-%d_%H%M}"
         path = directory / f"{stem}.txt"
-        ordered = sorted(self._segments, key=lambda segment: segment.start)
-        lines = [line_for(segment, self._label_channels) for segment in ordered]
+        entries = [
+            (segment.start, line_for(segment, self._label_channels))
+            for segment in self._segments
+        ] + [
+            (timestamp, f"[{format_timestamp(timestamp)}] NOTE: {text}")
+            for timestamp, text in self._notes
+        ]
+        entries.sort(key=lambda entry: entry[0])
+        lines = [line for _, line in entries]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return path

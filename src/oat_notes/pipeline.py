@@ -69,6 +69,11 @@ class _BeginProfileLearning:
     selected_at: float
 
 
+@dataclass(frozen=True)
+class _CancelProfileLearning:
+    pass
+
+
 @dataclass
 class _ProfileCandidate:
     generation: int
@@ -258,6 +263,42 @@ class Pipeline:
                     reason="busy",
                 )
             )
+
+    def cancel_profile_learning(self) -> None:
+        """Cancel the in-flight manual sample capture, if any, right now.
+
+        Routed through ``frame_queue`` — like ``begin_profile_learning`` and
+        ``manual_override`` — so it's ordered relative to any audio already
+        queued instead of racing the chunker thread from the caller's own
+        thread.
+        """
+        try:
+            self.frame_queue.put_nowait(_CancelProfileLearning())
+        except queue.Full:
+            pass
+
+    def _cancel_profile_learning(self) -> None:
+        update = None
+        resume = None
+        with self._learning_lock:
+            candidate = self._profile_candidate
+            if candidate is None:
+                return
+            self._profile_candidate = None
+            if candidate.source is not None:
+                self._learning_blocked_channels.discard(candidate.source)
+                resume = (candidate.source, candidate.speaker_index)
+            update = ProfileLearningUpdate(
+                "skipped",
+                candidate.speaker_index,
+                candidate.source,
+                candidate.speech_seconds,
+                self._config.manual_enrollment_seconds,
+                reason="cancelled",
+            )
+        self._emit_profile_learning(update)
+        if resume is not None:
+            self._reset_tracking(*resume)
 
     def _reset_tracking(self, channel: Channel, speaker_index: int) -> None:
         if self._tracking_queue is None:
@@ -531,6 +572,9 @@ class Pipeline:
                 return
             if isinstance(block, _BeginProfileLearning):
                 self._begin_profile_learning(block)
+                continue
+            if isinstance(block, _CancelProfileLearning):
+                self._cancel_profile_learning()
                 continue
             if isinstance(block, _Split):
                 forced = self._chunkers[block.channel].split()
