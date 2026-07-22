@@ -1,10 +1,34 @@
 import queue
+from pathlib import Path
+from types import SimpleNamespace
 
+from oat_notes.attribution import Speaker
 from oat_notes.config import Config
 from oat_notes.enrollment import EnrollmentProgress
 from oat_notes.server import AppState, EventHub, is_trusted_request
 from oat_notes.settings import AppSettings
 from oat_notes.speaker_store import SpeakerStore
+
+
+class FakeSession:
+    """Stands in for Session — no real audio hardware or transcriber."""
+
+    def __init__(self, guest_has_spoken: bool = True):
+        self.stopped = False
+        self.saved_calls = []
+        self.roster = [Speaker("Guest 1")]
+        self.guest_indices = [0]
+        self.log = SimpleNamespace(
+            is_empty=False,
+            speakers_with_lines=lambda: {"Guest 1"} if guest_has_spoken else set(),
+        )
+
+    def stop(self):
+        self.stopped = True
+
+    def save(self, renames=None):
+        self.saved_calls.append(renames)
+        return Path("fake.txt")
 
 
 class FakeRecorder:
@@ -120,6 +144,33 @@ def test_settings_cannot_change_during_meeting():
 def test_stop_without_session_reports_error():
     state = AppState(Config(), transcriber=None)
     assert state.stop_session() == {"error": "not recording"}
+
+
+def test_stop_with_discard_skips_save_and_backfill():
+    state = AppState(Config(), transcriber=None)
+    session = FakeSession(guest_has_spoken=True)
+    state.session = session
+
+    status = state.stop_session(discard=True)
+
+    assert session.stopped is True
+    assert session.saved_calls == []
+    assert state.awaiting_backfill is None
+    assert state.last_saved is None
+    assert status["recording"] is False
+    assert status["pending_backfill"] is None
+
+
+def test_stop_without_discard_still_offers_backfill_for_a_guest_who_spoke():
+    state = AppState(Config(), transcriber=None)
+    session = FakeSession(guest_has_spoken=True)
+    state.session = session
+
+    status = state.stop_session(discard=False)
+
+    assert session.saved_calls == []
+    assert state.awaiting_backfill is session
+    assert status["pending_backfill"] == ["Guest 1"]
 
 
 def test_switch_without_session_is_harmless():

@@ -28,6 +28,125 @@ def test_hotkey_banks_can_page_forward_without_a_roster():
     assert session.hotkey_bank == 0
 
 
+def test_switch_hotkey_creates_a_new_guest_when_the_slot_holder_was_removed():
+    session = bare_session()
+    session.hotkey_bank = 0
+    session.roster = [Speaker("Guest 1", hotkey_slot=4, active=False)]
+    created = []
+    switched = []
+
+    def create_guest(hotkey_slot):
+        created.append(hotkey_slot)
+        session.roster.append(Speaker("Guest 2", hotkey_slot=hotkey_slot))
+        return len(session.roster) - 1
+
+    session._create_guest = create_guest
+    session.switch_speaker = switched.append
+    session.switch_hotkey(4)
+
+    assert created == [4]
+    assert switched == [1]
+
+
+def test_switch_speaker_ignores_a_removed_person():
+    session = bare_session()
+    session.roster = [Speaker("Alex", hotkey_slot=0, active=False)]
+    session.current_speaker = None
+    session.switch_speaker(0)
+    assert session.current_speaker is None
+
+
+def test_add_speaker_appends_with_next_free_hotkey_slot_without_switching():
+    session = bare_session()
+    session.roster = [Speaker("Alex", hotkey_slot=0)]
+    session._attributor = SimpleNamespace(add=lambda speaker: len(session.roster))
+
+    index = session.add_speaker("Jordan", speaker_id="sp-1")
+
+    assert index == 1
+    assert session.roster[1] == Speaker("Jordan", speaker_id="sp-1", hotkey_slot=1)
+
+
+def test_remove_speaker_rejects_out_of_range_or_spoken():
+    session = bare_session()
+    session.roster = [Speaker("Alex", hotkey_slot=0), Speaker("Sam", hotkey_slot=1)]
+    session.current_speaker = 0
+    session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
+    session.profile_learning = None
+    session.log = SimpleNamespace(speakers_with_lines=lambda: {"Sam"})
+
+    assert session.remove_speaker(5) == "speaker not found"
+    assert session.remove_speaker(1) == "speaker has already spoken"
+
+
+def test_remove_speaker_allows_removing_a_mistakenly_created_active_guest():
+    # A freshly created Guest is switched to immediately, but they haven't
+    # actually spoken — removing them (undoing the mis-click) must still
+    # work, and must clear the now-stale active/current-speaker pointers.
+    session = bare_session()
+    session.roster = [Speaker("Alex", hotkey_slot=0), Speaker("Guest 1", hotkey_slot=1)]
+    session.current_speaker = 1
+    session._current_speaker_channel = Channel.MIC
+    session.active = {Channel.MIC: 1, Channel.LOOPBACK: 1}
+    session.profile_learning = None
+    session.log = SimpleNamespace(speakers_with_lines=lambda: set())
+
+    assert session.remove_speaker(1) is None
+    assert session.roster[1].active is False
+    assert session.current_speaker is None
+    assert session._current_speaker_channel is None
+    assert session.active == {Channel.MIC: None, Channel.LOOPBACK: None}
+
+
+def test_remove_speaker_blocks_while_sample_capture_in_progress():
+    session = bare_session()
+    session.roster = [Speaker("Alex", hotkey_slot=0), Speaker("Sam", hotkey_slot=1)]
+    session.current_speaker = 0
+    session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
+    session.profile_learning = {"speaker_index": 1, "phase": "collecting"}
+    session.log = SimpleNamespace(speakers_with_lines=lambda: set())
+
+    assert session.remove_speaker(1) == "a voice sample is being captured for this speaker"
+
+
+def test_remove_speaker_succeeds_once_then_reports_already_removed():
+    session = bare_session()
+    session.roster = [Speaker("Alex", hotkey_slot=0), Speaker("Sam", hotkey_slot=1)]
+    session.current_speaker = 0
+    session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
+    session.profile_learning = None
+    session.log = SimpleNamespace(speakers_with_lines=lambda: set())
+
+    assert session.remove_speaker(1) is None
+    assert session.roster[1].active is False
+    assert session.remove_speaker(1) == "speaker already removed"
+
+
+def test_cancel_profile_learning_delegates_to_pipeline():
+    session = bare_session()
+    calls = []
+    session._pipeline = SimpleNamespace(cancel_profile_learning=lambda: calls.append(True))
+
+    session.cancel_profile_learning()
+
+    assert calls == [True]
+
+
+def test_add_note_timestamps_and_fires_event():
+    session = bare_session()
+    session.clock = SimpleNamespace(now=lambda: 75.0)
+    notes = []
+    session.log = SimpleNamespace(add_note=lambda ts, text: notes.append((ts, text)))
+    fired = []
+    session._events = SimpleNamespace(on_note=fired.append)
+
+    note = session.add_note("check the budget numbers")
+
+    assert notes == [(75.0, "check the budget numbers")]
+    assert note == {"time": "00:01:15", "text": "check the budget numbers"}
+    assert fired == [note]
+
+
 def test_empty_hotkey_slot_creates_guest_at_exact_slot():
     session = bare_session()
     session.hotkey_bank = 3

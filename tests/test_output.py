@@ -92,3 +92,27 @@ def test_meeting_log_empty(tmp_path):
     assert log.is_empty
     log.add(segment("something", 1.0))
     assert not log.is_empty
+
+
+def test_meeting_log_empty_considers_notes_too():
+    log = MeetingLog(label_channels=False)
+    assert log.is_empty
+    log.add_note(1.0, "action item")
+    assert not log.is_empty
+
+
+def test_meeting_log_merges_notes_with_transcript_by_timestamp(tmp_path):
+    log = MeetingLog(label_channels=False)
+    log.add(segment("first", 3.0))
+    log.add_note(10.0, "follow up with finance")
+    log.add(segment("third", 20.0))
+    log.add_note(1.0, "kickoff")
+
+    path = log.save(tmp_path, datetime(2026, 7, 9, 14, 30))
+
+    assert path.read_text(encoding="utf-8") == (
+        "[00:00:01] NOTE: kickoff\n"
+        "[00:00:03] first\n"
+        "[00:00:10] NOTE: follow up with finance\n"
+        "[00:00:20] third\n"
+    )
