@@ -57,6 +57,13 @@ def test_multiple_switches_within_chunk():
     assert log.attribute(0.0, 10.0) == 0
 
 
+def test_rename_updates_future_attribution():
+    attributor = make_attributor((Speaker("Guest 1"), Speaker("Dev")))
+    attributor.rename(0, "Sarah")
+    assert attributor.for_chunk(chunk(0, 5)) == "Sarah"
+    attributor.rename(9, "ignored")  # out of range is a no-op, not an error
+
+
 def test_single_speaker_is_attributed_on_either_source():
     roster = parse_speakers("Priya")
     attributor = make_attributor(roster)

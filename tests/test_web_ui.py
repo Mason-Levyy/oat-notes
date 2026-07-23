@@ -37,6 +37,16 @@ def test_cleanup_updates_lines_in_place_with_a_toggle():
     assert "div.title = event.original" in HTML
 
 
+def test_chips_offer_mid_meeting_rename():
+    assert '"/api/roster/rename"' in HTML
+    assert "Speaker name" in HTML  # the rename prompt
+
+
+def test_recovered_transcripts_are_surfaced_in_the_status_line():
+    assert "s.recovered" in HTML
+    assert "RECOVERED" in HTML
+
+
 def test_nearest_guess_speakers_are_flagged_in_the_live_transcript():
     assert 'line.attribution === "nearest"' in HTML
     assert "who guess" in HTML
