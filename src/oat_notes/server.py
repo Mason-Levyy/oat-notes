@@ -223,6 +223,12 @@ class AppState:
             self.cleanup_error = None
         self.hub.publish({"type": "status", "recording": self.session is not None})
 
+    def cleaner_downloading(self) -> None:
+        with self.lock:
+            self.cleanup_status = "downloading"
+            self.cleanup_error = None
+        self.hub.publish({"type": "status", "recording": self.session is not None})
+
     def cleaner_unavailable(self, reason: str) -> None:
         with self.lock:
             self.cleaner = None
@@ -905,11 +911,19 @@ def _initialize_model(state: AppState, config: Config) -> None:
         return
     try:
         from .cleanup import TranscriptCleaner
+        from .transcriber import openvino_model_cached
 
-        print(
-            f"Loading transcript cleanup model ({config.cleanup_model})…",
-            flush=True,
-        )
+        if not config.offline and not openvino_model_cached(config.cleanup_model):
+            print(
+                f"Downloading transcript cleanup model ({config.cleanup_model})…",
+                flush=True,
+            )
+            state.cleaner_downloading()
+        else:
+            print(
+                f"Loading transcript cleanup model ({config.cleanup_model})…",
+                flush=True,
+            )
         cleaner = TranscriptCleaner(config)
         cleaner.warm_up()
     except ImportError:

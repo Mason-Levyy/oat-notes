@@ -47,6 +47,11 @@ def test_recovered_transcripts_are_surfaced_in_the_status_line():
     assert "RECOVERED" in HTML
 
 
+def test_cleanup_download_state_is_shown_to_the_user():
+    assert "downloading:" in HTML
+    assert "Downloading cleanup model" in HTML
+
+
 def test_nearest_guess_speakers_are_flagged_in_the_live_transcript():
     assert 'line.attribution === "nearest"' in HTML
     assert "who guess" in HTML
