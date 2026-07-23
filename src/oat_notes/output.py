@@ -41,8 +41,24 @@ class MeetingLog:
         self._label_channels = label_channels
         self._segments: list[TranscriptSegment] = []
 
-    def add(self, segment: TranscriptSegment) -> None:
+    def add(self, segment: TranscriptSegment) -> int:
+        """Append a segment and return its line id for later cleanup."""
         self._segments.append(segment)
+        return len(self._segments) - 1
+
+    def apply_cleanup(self, results: dict[int, str | None]) -> None:
+        """Rewrite (or drop, for ``None``) lines by id. Call only after the
+        pipeline and cleanup worker have finished — same single-threaded
+        window as ``save``."""
+        kept: list[TranscriptSegment] = []
+        for index, segment in enumerate(self._segments):
+            if index in results:
+                text = results[index]
+                if text is None:
+                    continue
+                segment = replace(segment, text=text)
+            kept.append(segment)
+        self._segments = kept
 
     def speakers_with_lines(self) -> set[str]:
         return {

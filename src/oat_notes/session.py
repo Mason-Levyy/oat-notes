@@ -10,6 +10,7 @@ from typing import Callable
 
 from .attribution import Attributor, Speaker, SwitchLog
 from .capture import AudioCapture, find_default_loopback
+from .cleanup import CleanupWorker, LineCleaner
 from .clock import SessionClock
 from .config import Config
 from .hotkeys import HotkeyListener
@@ -35,14 +36,18 @@ class SessionOptions:
     speaker_store: SpeakerStore | None = None
     embedding_engine: SpeakerEmbeddingEngine | None = None
     tracking_embedding_engine: SpeakerEmbeddingEngine | None = None
+    cleaner: LineCleaner | None = None
 
 
 @dataclass(frozen=True)
 class SessionEvents:
     """Callbacks fire on pipeline/hotkey threads — keep them quick."""
 
-    on_segment: Callable[[TranscriptSegment, str, float], None] = (
-        lambda segment, label, latency: None
+    on_segment: Callable[[TranscriptSegment, str, float, int], None] = (
+        lambda segment, label, latency, line_id: None
+    )
+    on_line_cleaned: Callable[[int, "str | None"], None] = (
+        lambda line_id, text: None
     )
     on_speaker: Callable[[int], None] = lambda index: None
     on_attribution: Callable[[int | None, Channel, str, float | None], None] = (
@@ -128,6 +133,15 @@ class Session:
         )
 
         self.log = MeetingLog(label_channels=self._label_channels)
+        self._cleanup = (
+            CleanupWorker(
+                options.cleaner,
+                config.cleanup_delay_seconds,
+                self._handle_line_cleaned,
+            )
+            if options.cleaner is not None
+            else None
+        )
         self._pipeline = Pipeline(
             config,
             self.clock,
@@ -181,6 +195,8 @@ class Session:
     def start(self) -> None:
         if self._hotkeys is not None:
             self._hotkeys.start()
+        if self._cleanup is not None:
+            self._cleanup.start()
         self._pipeline.start()
         for capture in self.captures:
             capture.start()
@@ -287,12 +303,16 @@ class Session:
         for capture in self.captures:
             capture.stop()
         self._pipeline.finish()
+        if self._cleanup is not None:
+            self._cleanup.finish()
         self._pa.terminate()
 
     def save(self, renames: dict[str, str] | None = None) -> Path | None:
         """Apply guest-name backfills and write the transcript file."""
         if self._saved or not self._options.save_file or self.log.is_empty:
             return None
+        if self._cleanup is not None:
+            self.log.apply_cleanup(self._cleanup.results())
         if renames:
             self.log.rename(
                 {old: new.strip() for old, new in renames.items() if new.strip()}
@@ -347,14 +367,16 @@ class Session:
             self._manual_override_pending[segment.channel] = False
         if not segment.text:
             return
-        self.log.add(segment)
+        line_id = self.log.add(segment)
+        if self._cleanup is not None:
+            self._cleanup.submit(line_id, segment.text)
         if segment.speaker:
             label = segment.speaker
         elif self._label_channels:
             label = CHANNEL_LABELS[segment.channel]
         else:
             label = ""
-        self._events.on_segment(segment, label, latency)
+        self._events.on_segment(segment, label, latency, line_id)
 
     def _handle_tracking_attribution(
         self,
@@ -374,3 +396,7 @@ class Session:
     def _handle_profile_learning(self, update: ProfileLearningUpdate) -> None:
         self.profile_learning = update.to_dict() if update.phase == "collecting" else None
         self._events.on_profile_learning(update)
+
+    def _handle_line_cleaned(self, line_id: int, text: str | None) -> None:
+        """Fires on the cleanup worker thread — forward only."""
+        self._events.on_line_cleaned(line_id, text)
