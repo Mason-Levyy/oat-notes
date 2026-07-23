@@ -17,6 +17,30 @@ class Transcriber(ABC):
     def transcribe(self, chunk: AudioChunk) -> TranscriptSegment: ...
 
 
+def resolve_openvino_model(source: str, offline: bool) -> str:
+    """Local directory or HF repo id; repos land as plain files under
+    %LOCALAPPDATA% because the HF cache's symlinks need Developer Mode."""
+    if Path(source).is_dir():
+        return source
+    target = (
+        Path(os.environ["LOCALAPPDATA"])
+        / "oat-notes"
+        / "models"
+        / source.replace("/", "--")
+    )
+    if (target / "config.json").exists():
+        return str(target)
+    if offline:
+        raise RuntimeError(
+            f"model {source!r} is not cached locally and --offline forbids"
+            " downloading it"
+        )
+    print(f"downloading {source}…", file=sys.stderr)
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(source, local_dir=target)
+
+
 class FasterWhisperTranscriber(Transcriber):
     def __init__(self, config: Config) -> None:
         from faster_whisper import WhisperModel
@@ -68,7 +92,7 @@ class OpenVinoTranscriber(Transcriber):
                 " uv sync --extra openvino"
             ) from error
 
-        model_dir = self._resolve_model(config.openvino_model, config.offline)
+        model_dir = resolve_openvino_model(config.openvino_model, config.offline)
         self.device = config.openvino_device
         cache_dir = (
             Path(os.environ["LOCALAPPDATA"])
@@ -89,30 +113,6 @@ class OpenVinoTranscriber(Transcriber):
             )
             self.device = "CPU"
             self._pipeline = openvino_genai.WhisperPipeline(model_dir, device="CPU")
-
-    @staticmethod
-    def _resolve_model(source: str, offline: bool) -> str:
-        """Local directory or HF repo id; repos land as plain files under
-        %LOCALAPPDATA% because the HF cache's symlinks need Developer Mode."""
-        if Path(source).is_dir():
-            return source
-        target = (
-            Path(os.environ["LOCALAPPDATA"])
-            / "oat-notes"
-            / "models"
-            / source.replace("/", "--")
-        )
-        if (target / "config.json").exists():
-            return str(target)
-        if offline:
-            raise RuntimeError(
-                f"model {source!r} is not cached locally and --offline forbids"
-                " downloading it"
-            )
-        print(f"downloading {source}…", file=sys.stderr)
-        from huggingface_hub import snapshot_download
-
-        return snapshot_download(source, local_dir=target)
 
     def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:
         result = self._pipeline.generate(chunk.samples)

@@ -28,6 +28,21 @@ def test_transcript_prepends_newest_lines_and_preserves_scrolled_reading():
     assert "$(\"screen\").insertBefore(cursor, $(\"screen\").firstChild);" in HTML
 
 
+def test_cleanup_updates_lines_in_place_with_a_toggle():
+    assert 'event.type === "line_update"' in HTML
+    assert 'event.type === "line_drop"' in HTML
+    assert "div.dataset.lineId = line.id" in HTML
+    assert 'id="cleanup"' in HTML
+    assert 'cleanup: $("cleanup").checked' in HTML
+    assert "div.title = event.original" in HTML
+
+
+def test_nearest_guess_speakers_are_flagged_in_the_live_transcript():
+    assert 'line.attribution === "nearest"' in HTML
+    assert "who guess" in HTML
+    assert ".line .who.guess" in HTML
+
+
 def test_profile_learning_feedback_uses_the_new_three_and_five_second_rules():
     assert "profile_learning: null" in HTML
     assert "LEARN ${Number(learning.speech_seconds || 0).toFixed(1)}" in HTML
