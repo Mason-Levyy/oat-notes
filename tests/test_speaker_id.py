@@ -77,6 +77,60 @@ def test_ambiguous_match_is_unknown(tmp_path):
     assert decision.source == "unknown"
 
 
+def test_nearest_fallback_assigns_closest_in_call_below_threshold(tmp_path):
+    # Best match (0.50) is below the confident bar but clearly closest — it
+    # should be a "nearest" guess rather than "Unknown".
+    store = SpeakerStore(tmp_path / "speakers.db")
+    a = store.create_speaker("A")
+    b = store.create_speaker("B")
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
+        store,
+        FakeEngine([0.5, 0.1]),
+        16_000,
+    )
+    decision = resolver.resolve(chunk(), np.array([0.5, 0.1], dtype=np.float32))
+    assert decision.source == "nearest"
+    assert decision.name == "A"
+    assert math.isclose(decision.confidence, 0.5, abs_tol=1e-6)
+
+
+def test_weak_match_below_the_nearest_floor_stays_unknown(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    a = store.create_speaker("A")
+    b = store.create_speaker("B")
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
+        store,
+        FakeEngine([0.3, 0.1]),
+        16_000,
+    )
+    decision = resolver.resolve(chunk(), np.array([0.3, 0.1], dtype=np.float32))
+    assert decision.source == "unknown"
+
+
+def test_near_tie_below_threshold_is_left_unknown_not_guessed(tmp_path):
+    # Two enrolled people are almost equally close and neither clears the
+    # confident bar — a coin flip is worse than "Unknown", so stay unknown.
+    store = SpeakerStore(tmp_path / "speakers.db")
+    a = store.create_speaker("A")
+    b = store.create_speaker("B")
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
+        store,
+        FakeEngine([0.5, 0.49]),
+        16_000,
+    )
+    decision = resolver.resolve(chunk(), np.array([0.5, 0.49], dtype=np.float32))
+    assert decision.source == "unknown"
+
+
 def test_matching_never_considers_people_outside_roster(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     roster_person = store.create_speaker("Roster")
@@ -167,7 +221,10 @@ def test_source_specific_and_cross_source_thresholds(tmp_path):
     decision = cross_source.resolve(
         chunk(channel=Channel.LOOPBACK), np.array([1.0, 0.0], dtype=np.float32)
     )
-    assert decision.source == "unknown"
+    # 0.62 clears the source-specific bar (0.60) but not the stricter
+    # cross-source bar (0.65), so it never becomes a confident "auto" match.
+    # It's now offered as a lower-confidence "nearest" guess instead of unknown.
+    assert decision.source == "nearest"
 
 
 def test_matching_considers_every_rostered_person_on_either_source(tmp_path):

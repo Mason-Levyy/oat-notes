@@ -9,6 +9,7 @@ def bare_session():
     session = Session.__new__(Session)
     session.hotkey_bank = 0
     session.roster = []
+    session._cleanup = None
     session._events = SimpleNamespace(on_hotkey_bank=lambda bank: None)
     return session
 

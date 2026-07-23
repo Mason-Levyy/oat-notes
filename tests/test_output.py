@@ -87,6 +87,22 @@ def test_speakers_with_lines():
     assert log.speakers_with_lines() == {"Mason", "Guest 1"}
 
 
+def test_apply_cleanup_rewrites_and_drops_lines(tmp_path):
+    log = MeetingLog(label_channels=False)
+    first = log.add(segment("um, hello there", 1.0, speaker="Mason"))
+    second = log.add(segment("asdfjkl noise", 2.0))
+    third = log.add(segment("unchanged", 3.0))
+    assert (first, second, third) == (0, 1, 2)
+
+    log.apply_cleanup({first: "hello there", second: None})
+
+    path = log.save(tmp_path, datetime(2026, 7, 9, 14, 30))
+    content = path.read_text(encoding="utf-8")
+    assert "Mason: hello there\n" in content
+    assert "asdfjkl" not in content
+    assert "unchanged" in content
+
+
 def test_meeting_log_empty(tmp_path):
     log = MeetingLog(label_channels=False)
     assert log.is_empty

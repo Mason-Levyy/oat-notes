@@ -117,6 +117,25 @@ def test_settings_cannot_change_during_meeting():
     assert response == {"error": "end the meeting before changing hotkeys"}
 
 
+def test_cleanup_status_lifecycle():
+    state = AppState(Config(), transcriber=None)
+    assert state.status()["cleanup_status"] == "loading"
+
+    state.cleaner_unavailable("disabled")
+    assert state.status()["cleanup_status"] == "unavailable"
+    assert state.status()["cleanup_error"] == "disabled"
+
+    cleaner = object()
+    state.cleaner_ready(cleaner)
+    assert state.status()["cleanup_status"] == "ready"
+    assert state.cleaner is cleaner
+
+    state.cleaner_failed(RuntimeError("bad model"))
+    assert state.status()["cleanup_status"] == "error"
+    assert "RuntimeError" in state.status()["cleanup_error"]
+    assert state.cleaner is None
+
+
 def test_stop_without_session_reports_error():
     state = AppState(Config(), transcriber=None)
     assert state.stop_session() == {"error": "not recording"}

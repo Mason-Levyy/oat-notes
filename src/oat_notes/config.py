@@ -23,6 +23,10 @@ class Config:
     backend: str = "faster_whisper"
     openvino_model: str = "OpenVINO/whisper-small.en-int8-ov"
     openvino_device: str = "NPU"
+    cleanup_enabled: bool = True
+    cleanup_model: str = "OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov"
+    cleanup_device: str = "CPU"
+    cleanup_delay_seconds: float = 4.0
     offline: bool = False
     debug: bool = False
 

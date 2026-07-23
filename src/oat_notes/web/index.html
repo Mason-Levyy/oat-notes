@@ -334,6 +334,12 @@ body {
 .line { word-wrap: break-word; }
 .line .t { color: var(--screen-dim); }
 .line .who { color: var(--screen-hi); font-weight: bold; }
+.line .who.guess { font-weight: normal; font-style: italic; opacity: 0.75; }
+.line.cleaned { animation: cleanflash 1.2s ease-out 1; }
+@keyframes cleanflash {
+  0% { color: var(--screen-hi); }
+  100% { color: inherit; }
+}
 .cursor {
   display: inline-block; width: 9px; height: 16px;
   background: var(--screen-mid); vertical-align: text-bottom;
@@ -396,6 +402,12 @@ body {
           <span class="box"></span>
           CAPTURE SYSTEM AUDIO
         </label>
+        <label class="check" style="margin-bottom:6px">
+          <input type="checkbox" id="cleanup" checked>
+          <span class="box"></span>
+          CLEAN TRANSCRIPT (AI)
+        </label>
+        <div class="hint" id="cleanup-hint" style="margin-bottom:16px;display:none"></div>
         <button type="submit" class="btn start" id="start-btn">&#9654; START MEETING</button>
       </form>
 
@@ -483,6 +495,7 @@ let state = {
   settings: { hotkey_modifiers: ["ctrl", "alt"], hotkey_label: "Ctrl+Alt+1–9" },
   enrollment: null,
   profile_learning: null,
+  cleanup_status: "loading",
 };
 let setupRoster = [];
 let sessionEpoch = null;
@@ -769,12 +782,23 @@ function renderSettings() {
   renderLibrarySettings();
 }
 
+function lineHtml(line) {
+  let who = "";
+  if (line.label) {
+    const guess = line.attribution === "nearest";
+    const cls = guess ? "who guess" : "who";
+    const title = guess ? ' title="best-guess speaker (low confidence)"' : "";
+    who = `<span class="${cls}"${title}>${escapeHtml(line.label)}${guess ? "?" : ""}:</span> `;
+  }
+  return `<span class="t">[${line.time}]</span> ${who}${escapeHtml(line.text)}`;
+}
+
 function addLine(line, preserveViewport = true) {
   $("empty").style.display = "none";
   const div = document.createElement("div");
   div.className = "line";
-  const who = line.label ? `<span class="who">${escapeHtml(line.label)}:</span> ` : "";
-  div.innerHTML = `<span class="t">[${line.time}]</span> ${who}${escapeHtml(line.text)}`;
+  if (line.id !== undefined && line.id !== null) div.dataset.lineId = line.id;
+  div.innerHTML = lineHtml(line);
   const screen = $("screen");
   const cursor = $("live-cursor");
   const wasAtTop = screen.scrollTop < 12;
@@ -897,6 +921,15 @@ function applyState(s) {
   const modelReady = state.model_status === "ready";
   $("start-btn").disabled = !modelReady;
   $("start-btn").innerHTML = modelReady ? "&#9654; START MEETING" : "LOADING MODEL…";
+  const cleanupReady = state.cleanup_status === "ready";
+  $("cleanup").disabled = !cleanupReady;
+  const cleanupHint = $("cleanup-hint");
+  cleanupHint.style.display = cleanupReady ? "none" : "block";
+  if (!cleanupReady) {
+    cleanupHint.textContent = state.cleanup_status === "loading"
+      ? "Cleanup model loading…"
+      : "Cleanup model unavailable — install the openvino extra.";
+  }
   const pending = !s.recording && Array.isArray(s.pending_backfill);
   $("setup").style.display = s.recording || pending ? "none" : "block";
   $("live").style.display = s.recording ? "flex" : "none";
@@ -948,6 +981,7 @@ $("setup").onsubmit = (event) => {
     name: $("mname").value.trim(),
     speakers,
     loopback: $("loopback").checked,
+    cleanup: $("cleanup").checked && !$("cleanup").disabled,
   }).then((result) => {
     if (result.error) {
       $("statusline").textContent = result.error.toUpperCase();
@@ -1067,6 +1101,20 @@ events.onmessage = (message) => {
       state.active_speaker = event.active_speaker;
       renderPlayers();
     }
+  }
+  else if (event.type === "line_update") {
+    const div = $("screen").querySelector(`.line[data-line-id="${event.id}"]`);
+    if (div) {
+      div.innerHTML = lineHtml(event);
+      div.title = event.original || "";
+      div.classList.remove("cleaned");
+      void div.offsetWidth; // restart the flash animation
+      div.classList.add("cleaned");
+    }
+  }
+  else if (event.type === "line_drop") {
+    const div = $("screen").querySelector(`.line[data-line-id="${event.id}"]`);
+    if (div) div.remove();
   }
   else if (event.type === "speaker") {
     if (event.channel) state.actives[event.channel] = event.index;
