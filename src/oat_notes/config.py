@@ -26,7 +26,9 @@ class Config:
     cleanup_enabled: bool = True
     cleanup_model: str = "OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov"
     cleanup_device: str = "CPU"
-    cleanup_delay_seconds: float = 4.0
+    cleanup_context_before: int = 2
+    cleanup_context_after: int = 2
+    cleanup_max_wait_seconds: float = 15.0
     offline: bool = False
     debug: bool = False
 

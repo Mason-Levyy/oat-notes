@@ -137,8 +137,10 @@ class Session:
         self._cleanup = (
             CleanupWorker(
                 options.cleaner,
-                config.cleanup_delay_seconds,
                 self._handle_line_cleaned,
+                context_before=config.cleanup_context_before,
+                context_after=config.cleanup_context_after,
+                max_wait_seconds=config.cleanup_max_wait_seconds,
             )
             if options.cleaner is not None
             else None
