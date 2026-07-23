@@ -28,6 +28,12 @@ MAX_CLIPPED_RATIO = 0.01
 SOURCE_THRESHOLD = 0.60
 GLOBAL_THRESHOLD = 0.65
 MATCH_MARGIN = 0.05
+# Fallback tier: when no enrolled voice clears the confident bar above, the
+# closest in-call profile is still a better answer than "Unknown". It's
+# assigned as a lower-confidence guess (source "nearest") provided it clears
+# this floor and isn't a near-tie between two people.
+NEAREST_THRESHOLD = 0.45
+NEAREST_MARGIN = 0.02
 
 
 def chunk_speech_seconds(chunk: AudioChunk) -> float:
@@ -223,22 +229,33 @@ class SpeakerResolver:
                 best_score, best = scores[0]
                 threshold = SOURCE_THRESHOLD if best.source_specific else GLOBAL_THRESHOLD
                 margin = best_score - scores[1][0] if len(scores) > 1 else 1.0
-                if best_score >= threshold and margin >= MATCH_MARGIN:
-                    index = next(
-                        (
-                            item
-                            for item in members
-                            if self._roster[item].speaker_id == best.speaker_id
-                        ),
-                        None,
-                    )
-                    if index is not None:
-                        speaker = self._roster[index]
+                index = next(
+                    (
+                        item
+                        for item in members
+                        if self._roster[item].speaker_id == best.speaker_id
+                    ),
+                    None,
+                )
+                if index is not None:
+                    speaker = self._roster[index]
+                    if best_score >= threshold and margin >= MATCH_MARGIN:
                         return AttributionDecision(
                             speaker.name,
                             index,
                             speaker.speaker_id,
                             "auto",
+                            best_score,
+                        )
+                    # Confident match failed, but the closest in-call voice is
+                    # still a reasonable guess — assign it rather than leaving
+                    # the turn unknown, unless it's a near-tie with someone else.
+                    if best_score >= NEAREST_THRESHOLD and margin >= NEAREST_MARGIN:
+                        return AttributionDecision(
+                            speaker.name,
+                            index,
+                            speaker.speaker_id,
+                            "nearest",
                             best_score,
                         )
 

@@ -42,8 +42,24 @@ class MeetingLog:
         self._segments: list[TranscriptSegment] = []
         self._notes: list[tuple[float, str]] = []
 
-    def add(self, segment: TranscriptSegment) -> None:
+    def add(self, segment: TranscriptSegment) -> int:
+        """Append a segment and return its line id for later cleanup."""
         self._segments.append(segment)
+        return len(self._segments) - 1
+
+    def apply_cleanup(self, results: dict[int, str | None]) -> None:
+        """Rewrite (or drop, for ``None``) lines by id. Call only after the
+        pipeline and cleanup worker have finished — same single-threaded
+        window as ``save``."""
+        kept: list[TranscriptSegment] = []
+        for index, segment in enumerate(self._segments):
+            if index in results:
+                text = results[index]
+                if text is None:
+                    continue
+                segment = replace(segment, text=text)
+            kept.append(segment)
+        self._segments = kept
 
     def add_note(self, timestamp: float, text: str) -> None:
         self._notes.append((timestamp, text))

@@ -78,6 +78,9 @@ class AppState:
             "ready" if embedding_engine is not None else "loading" if speaker_store else "unavailable"
         )
         self.speaker_model_error: str | None = None
+        self.cleaner = None
+        self.cleanup_status = "loading"
+        self.cleanup_error: str | None = None
         self.model_status = "ready" if transcriber is not None else "loading"
         self.model_error: str | None = None
         self.model_load_seconds: float | None = None
@@ -166,6 +169,8 @@ class AppState:
                 "hotkey_bank": self.session.hotkey_bank if recording else 0,
                 "speaker_model_status": self.speaker_model_status,
                 "speaker_model_error": self.speaker_model_error,
+                "cleanup_status": self.cleanup_status,
+                "cleanup_error": self.cleanup_error,
                 "library": (
                     self.speaker_store.library()
                     if self.speaker_store is not None
@@ -207,6 +212,27 @@ class AppState:
             self.tracking_embedding_engine = None
             self.speaker_model_status = "error"
             self.speaker_model_error = f"{type(error).__name__}: {error}"
+        self.hub.publish({"type": "status", "recording": self.session is not None})
+
+    def cleaner_ready(self, cleaner) -> None:
+        with self.lock:
+            self.cleaner = cleaner
+            self.cleanup_status = "ready"
+            self.cleanup_error = None
+        self.hub.publish({"type": "status", "recording": self.session is not None})
+
+    def cleaner_unavailable(self, reason: str) -> None:
+        with self.lock:
+            self.cleaner = None
+            self.cleanup_status = "unavailable"
+            self.cleanup_error = reason
+        self.hub.publish({"type": "status", "recording": self.session is not None})
+
+    def cleaner_failed(self, error: Exception) -> None:
+        with self.lock:
+            self.cleaner = None
+            self.cleanup_status = "error"
+            self.cleanup_error = f"{type(error).__name__}: {error}"
         self.hub.publish({"type": "status", "recording": self.session is not None})
 
     def update_settings(self, body: dict) -> dict:
@@ -376,9 +402,12 @@ class AppState:
             self.notes = []
             self.last_saved = None
 
-            def on_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
+            def on_segment(
+                segment: TranscriptSegment, label: str, latency: float, line_id: int
+            ) -> None:
                 session = self.session
                 line = {
+                    "id": line_id,
                     "time": format_timestamp(segment.start),
                     "label": label,
                     "text": segment.text,
@@ -395,6 +424,21 @@ class AppState:
                 }
                 self.lines.append(line)
                 self.hub.publish({"type": "line", **line})
+
+            def on_line_cleaned(line_id: int, text: str | None) -> None:
+                for position, line in enumerate(self.lines):
+                    if line.get("id") != line_id:
+                        continue
+                    if text is None:
+                        del self.lines[position]
+                        self.hub.publish({"type": "line_drop", "id": line_id})
+                    else:
+                        original = line["text"]
+                        line["text"] = text
+                        self.hub.publish(
+                            {"type": "line_update", **line, "original": original}
+                        )
+                    return
 
             def on_speaker(index: int) -> None:
                 # Reads the live session roster without the state lock —
@@ -456,10 +500,14 @@ class AppState:
                     speaker_store=self.speaker_store,
                     embedding_engine=self.embedding_engine,
                     tracking_embedding_engine=self.tracking_embedding_engine,
+                    cleaner=(
+                        self.cleaner if bool(body.get("cleanup", True)) else None
+                    ),
                 ),
                 self.transcriber,
                 SessionEvents(
                     on_segment=on_segment,
+                    on_line_cleaned=on_line_cleaned,
                     on_speaker=on_speaker,
                     on_attribution=on_attribution,
                     on_hotkey_bank=on_hotkey_bank,
@@ -821,6 +869,35 @@ def _initialize_model(state: AppState, config: Config) -> None:
             )
         print("Local speaker recognition ready", flush=True)
         state.speaker_model_ready(engine, tracking_engine)
+
+    if not config.cleanup_enabled:
+        state.cleaner_unavailable("disabled")
+        return
+    try:
+        from .cleanup import TranscriptCleaner
+
+        print(
+            f"Loading transcript cleanup model ({config.cleanup_model})…",
+            flush=True,
+        )
+        cleaner = TranscriptCleaner(config)
+        cleaner.warm_up()
+    except ImportError:
+        print(
+            "Transcript cleanup unavailable: install the openvino extra"
+            " (uv sync --extra openvino)",
+            file=sys.stderr,
+        )
+        state.cleaner_unavailable("openvino extra not installed")
+    except Exception as error:
+        print(
+            f"Transcript cleanup unavailable: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        state.cleaner_failed(error)
+    else:
+        print("Transcript cleanup ready", flush=True)
+        state.cleaner_ready(cleaner)
 
 
 def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -> None:

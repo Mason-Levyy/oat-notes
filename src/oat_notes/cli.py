@@ -87,6 +87,26 @@ def main() -> None:
         help="OpenVINO model dir or HF repo (default: OpenVINO/whisper-small.en-int8-ov)",
     )
     parser.add_argument(
+        "--cleanup-model",
+        default=None,
+        metavar="DIR_OR_REPO",
+        help=(
+            "OpenVINO LLM dir or HF repo for delayed transcript cleanup"
+            " (default: OpenVINO/Qwen2.5-1.5B-Instruct-int4-ov)"
+        ),
+    )
+    parser.add_argument(
+        "--cleanup-device",
+        default=None,
+        metavar="DEVICE",
+        help="OpenVINO device for the cleanup model: CPU (default), GPU, or NPU",
+    )
+    parser.add_argument(
+        "--no-cleanup",
+        action="store_true",
+        help="don't load the transcript cleanup model",
+    )
+    parser.add_argument(
         "--wav",
         metavar="PATH",
         default=None,
@@ -126,6 +146,12 @@ def main() -> None:
         config_overrides["openvino_device"] = args.ov_device
     if args.ov_model:
         config_overrides["openvino_model"] = args.ov_model
+    if args.cleanup_model:
+        config_overrides["cleanup_model"] = args.cleanup_model
+    if args.cleanup_device:
+        config_overrides["cleanup_device"] = args.cleanup_device
+    if args.no_cleanup:
+        config_overrides["cleanup_enabled"] = False
     config = Config(**config_overrides)
 
     if args.ui:
@@ -188,7 +214,9 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     warm_up(config, transcriber)
     roster = parse_speakers(args.speakers or "")
 
-    def print_segment(segment: TranscriptSegment, label: str, latency: float) -> None:
+    def print_segment(
+        segment: TranscriptSegment, label: str, latency: float, line_id: int = 0
+    ) -> None:
         prefix = f"{label}: " if label else ""
         line = f"[{format_timestamp(segment.start)}] {prefix}{segment.text}"
         if config.debug:
