@@ -323,6 +323,30 @@ class Session:
                 self.active[channel] = None
         return None
 
+    def rename_speaker(self, index: int, name: str) -> str | None:
+        """Rename a roster member mid-meeting (e.g. name a Guest once you
+        know who they are). Renames past lines and, for an enrolled speaker,
+        keeps the saved library profile name in sync. Returns an error
+        message or ``None`` on success."""
+        name = name.strip()
+        if not 0 <= index < len(self.roster):
+            return "speaker not found"
+        if not name:
+            return "a name is required"
+        speaker = self.roster[index]
+        old = speaker.name
+        if old == name:
+            return None
+        self.roster[index] = replace(speaker, name=name)
+        self._attributor.rename(index, name)
+        self.log.rename({old: name})
+        if speaker.speaker_id and self._options.speaker_store is not None:
+            try:
+                self._options.speaker_store.rename_speaker(speaker.speaker_id, name)
+            except (KeyError, ValueError):
+                pass
+        return None
+
     def cancel_profile_learning(self) -> None:
         self._pipeline.cancel_profile_learning()
 

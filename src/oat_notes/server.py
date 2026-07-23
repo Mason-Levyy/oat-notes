@@ -628,6 +628,31 @@ class AppState:
         self.hub.publish({"type": "status", "recording": True})
         return self.status()
 
+    def rename_roster_speaker(self, body: dict) -> dict:
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            index = body.get("index")
+            if not isinstance(index, int):
+                return {"error": "index must be an integer"}
+            old = (
+                session.roster[index].name
+                if 0 <= index < len(session.roster)
+                else None
+            )
+            error = session.rename_speaker(index, str(body.get("name", "")))
+            if error:
+                return {"error": error}
+            new_name = session.roster[index].name
+            if old is not None and old != new_name:
+                for line in self.lines:
+                    if line.get("label") == old:
+                        line["label"] = new_name
+            self.roster = tuple(session.roster)
+        self.hub.publish({"type": "status", "recording": True})
+        return self.status()
+
     def cancel_profile_learning(self) -> dict:
         with self.lock:
             session = self.session
@@ -766,6 +791,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.add_roster_speaker(body))
         elif self.path == "/api/roster/remove":
             self._send_json(self.state.remove_roster_speaker(body))
+        elif self.path == "/api/roster/rename":
+            self._send_json(self.state.rename_roster_speaker(body))
         elif self.path == "/api/profile_learning/cancel":
             self._send_json(self.state.cancel_profile_learning())
         elif self.path == "/api/notes/add":

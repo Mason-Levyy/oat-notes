@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .types import AudioChunk, Channel
 
@@ -83,6 +83,11 @@ class Attributor:
         self._roster.append(speaker)
         index = len(self._roster) - 1
         return index
+
+    def rename(self, index: int, name: str) -> None:
+        """Rename a roster member in place (mid-session naming of a guest)."""
+        if 0 <= index < len(self._roster):
+            self._roster[index] = replace(self._roster[index], name=name)
 
     def log_for(self, channel: Channel) -> SwitchLog:
         return self._logs[channel]

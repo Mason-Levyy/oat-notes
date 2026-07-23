@@ -133,6 +133,49 @@ def test_cancel_profile_learning_delegates_to_pipeline():
     assert calls == [True]
 
 
+def _rename_session(roster):
+    session = bare_session()
+    session.roster = list(roster)
+    session.renamed = []
+    session.log_renames = []
+    session._attributor = SimpleNamespace(
+        rename=lambda i, n: session.renamed.append((i, n))
+    )
+    session.log = SimpleNamespace(rename=lambda mapping: session.log_renames.append(mapping))
+    session._options = SimpleNamespace(speaker_store=None)
+    return session
+
+
+def test_rename_speaker_renames_roster_attributor_and_past_lines():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)])
+
+    assert session.rename_speaker(0, "  Sarah  ") is None
+    assert session.roster[0].name == "Sarah"
+    assert session.renamed == [(0, "Sarah")]
+    assert session.log_renames == [{"Guest 1": "Sarah"}]
+
+
+def test_rename_speaker_validates_index_and_name():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)])
+    assert session.rename_speaker(5, "Sarah") == "speaker not found"
+    assert session.rename_speaker(0, "   ") == "a name is required"
+    assert session.rename_speaker(0, "Guest 1") is None  # unchanged is a no-op
+    assert session.log_renames == []
+
+
+def test_rename_speaker_syncs_the_library_profile_for_an_enrolled_speaker():
+    session = _rename_session([Speaker("Bob", speaker_id="sp-bob", hotkey_slot=0)])
+    store_calls = []
+    session._options = SimpleNamespace(
+        speaker_store=SimpleNamespace(
+            rename_speaker=lambda sid, name: store_calls.append((sid, name))
+        )
+    )
+
+    assert session.rename_speaker(0, "Bobby") is None
+    assert store_calls == [("sp-bob", "Bobby")]
+
+
 def test_add_note_timestamps_and_fires_event():
     session = bare_session()
     session.clock = SimpleNamespace(now=lambda: 75.0)

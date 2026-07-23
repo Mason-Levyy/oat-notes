@@ -929,6 +929,20 @@ function renderPlayers() {
       skip.onclick = () => post("/api/profile_learning/cancel", {});
       row.appendChild(skip);
     }
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "mini";
+    rename.textContent = "✎";
+    rename.title = `Rename ${speaker.name}`;
+    rename.onclick = () => {
+      const name = window.prompt("Speaker name", speaker.name);
+      if (!name || !name.trim()) return;
+      post("/api/roster/rename", { index, name: name.trim() }).then((result) => {
+        if (result.error) $("statusline").textContent = result.error.toUpperCase();
+        else applyState(result);
+      });
+    };
+    row.appendChild(rename);
     if (!speaker.spoken) {
       const remove = document.createElement("button");
       remove.type = "button";
