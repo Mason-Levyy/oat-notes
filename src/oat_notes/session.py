@@ -14,7 +14,13 @@ from .cleanup import CleanupWorker, LineCleaner
 from .clock import SessionClock
 from .config import Config
 from .hotkeys import HotkeyListener
-from .output import CHANNEL_LABELS, MeetingLog, format_timestamp
+from .output import (
+    CHANNEL_LABELS,
+    MeetingLog,
+    TranscriptJournal,
+    format_timestamp,
+    journal_path_for,
+)
 from .pipeline import Pipeline, ProfileLearningUpdate
 from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
 from .speaker_store import SpeakerProfile, SpeakerStore
@@ -133,7 +139,16 @@ class Session:
             else None
         )
 
-        self.log = MeetingLog(label_channels=self._label_channels)
+        journal = (
+            TranscriptJournal(
+                journal_path_for(
+                    options.out_dir, self._started_at, options.meeting_name
+                )
+            )
+            if options.save_file
+            else None
+        )
+        self.log = MeetingLog(label_channels=self._label_channels, journal=journal)
         self._cleanup = (
             CleanupWorker(
                 options.cleaner,
@@ -359,6 +374,11 @@ class Session:
         if self._cleanup is not None:
             self._cleanup.finish()
         self._pa.terminate()
+
+    def discard(self) -> None:
+        """Drop the meeting without saving — remove its crash-safety journal
+        so it isn't recovered on the next launch."""
+        self.log.discard_journal()
 
     def save(self, renames: dict[str, str] | None = None) -> Path | None:
         """Apply guest-name backfills and write the transcript file."""
