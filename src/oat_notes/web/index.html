@@ -1030,9 +1030,13 @@ function applyState(s) {
   const cleanupHint = $("cleanup-hint");
   cleanupHint.style.display = cleanupReady ? "none" : "block";
   if (!cleanupReady) {
-    cleanupHint.textContent = state.cleanup_status === "loading"
-      ? "Cleanup model loading…"
-      : "Cleanup model unavailable — install the openvino extra.";
+    const cleanupHints = {
+      loading: "Cleanup model loading…",
+      downloading: "Downloading cleanup model (first run, ~1 GB)…",
+      unavailable: "Cleanup model unavailable — install the openvino extra.",
+      error: "Cleanup model failed to load — see the log.",
+    };
+    cleanupHint.textContent = cleanupHints[state.cleanup_status] || cleanupHints.unavailable;
   }
   const pending = !s.recording && Array.isArray(s.pending_backfill);
   $("setup").style.display = s.recording || pending ? "none" : "block";
