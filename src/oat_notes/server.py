@@ -18,7 +18,7 @@ from typing import Callable
 
 from .attribution import Speaker
 from .config import Config
-from .output import format_timestamp
+from .output import format_timestamp, recover_journals
 from .settings import AppSettings, SettingsStore
 from .speaker_store import SpeakerStore
 from .types import Channel, TranscriptSegment
@@ -95,6 +95,7 @@ class AppState:
         self.lines: list[dict] = []
         self.notes: list[dict] = []
         self.last_saved: str | None = None
+        self.recovered: list[str] = []
         self.shutdown = threading.Event()
 
     def status(self) -> dict:
@@ -179,6 +180,7 @@ class AppState:
                 "lines": self.lines,
                 "notes": self.notes,
                 "last_saved": self.last_saved,
+                "recovered": self.recovered,
                 "enrollment": self._enrollment_event,
             }
 
@@ -535,6 +537,7 @@ class AppState:
             if needs_backfill:
                 self.awaiting_backfill = session
             elif discard:
+                session.discard()
                 self.last_saved = None
             else:
                 saved = session.save()
@@ -912,6 +915,11 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
         save_settings=settings_store.save,
         speaker_store=speaker_store,
     )
+    recovered = recover_journals(args.out_dir)
+    if recovered:
+        state.recovered = [str(path) for path in recovered]
+        for path in recovered:
+            print(f"Recovered an unsaved transcript from a previous run: {path}", flush=True)
     Handler.state = state
     Handler.port = args.port
     url = f"http://127.0.0.1:{args.port}"

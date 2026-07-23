@@ -15,6 +15,7 @@ class FakeSession:
 
     def __init__(self, guest_has_spoken: bool = True):
         self.stopped = False
+        self.discarded = False
         self.saved_calls = []
         self.roster = [Speaker("Guest 1")]
         self.guest_indices = [0]
@@ -25,6 +26,9 @@ class FakeSession:
 
     def stop(self):
         self.stopped = True
+
+    def discard(self):
+        self.discarded = True
 
     def save(self, renames=None):
         self.saved_calls.append(renames)
@@ -83,6 +87,7 @@ def test_idle_status_shape():
     assert status["model_error"] is None
     assert status["settings"]["hotkey_modifiers"] == ["ctrl", "alt"]
     assert status["last_saved"] is None
+    assert status["recovered"] == []
     assert status["active_speaker"] is None
 
 
@@ -173,6 +178,7 @@ def test_stop_with_discard_skips_save_and_backfill():
     status = state.stop_session(discard=True)
 
     assert session.stopped is True
+    assert session.discarded is True  # journal dropped, not recoverable
     assert session.saved_calls == []
     assert state.awaiting_backfill is None
     assert state.last_saved is None

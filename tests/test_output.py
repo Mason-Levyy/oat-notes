@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from oat_notes.output import MeetingLog, format_timestamp, line_for
+from oat_notes.output import (
+    JOURNAL_SUFFIX,
+    MeetingLog,
+    TranscriptJournal,
+    format_timestamp,
+    journal_path_for,
+    line_for,
+    recover_journals,
+)
 from oat_notes.types import Channel, TranscriptSegment
 
 
@@ -132,3 +140,51 @@ def test_meeting_log_merges_notes_with_transcript_by_timestamp(tmp_path):
         "[00:00:10] NOTE: follow up with finance\n"
         "[00:00:20] third\n"
     )
+
+
+def test_journal_flushes_lines_and_notes_as_they_land(tmp_path):
+    path = journal_path_for(tmp_path, datetime(2026, 7, 9, 14, 30), "Stand-up")
+    assert path.name == f"stand-up_2026-07-09_1430{JOURNAL_SUFFIX}"
+    log = MeetingLog(label_channels=False, journal=TranscriptJournal(path))
+    log.add(segment("hello", 5.0, speaker="Mason"))
+    log.add_note(6.0, "ship it")
+
+    # Readable mid-meeting — the crash-safety guarantee.
+    assert path.read_text(encoding="utf-8") == (
+        "[00:00:05] Mason: hello\n[00:00:06] NOTE: ship it\n"
+    )
+
+
+def test_save_removes_the_journal(tmp_path):
+    path = journal_path_for(tmp_path, datetime(2026, 7, 9, 14, 30), "meeting")
+    log = MeetingLog(label_channels=False, journal=TranscriptJournal(path))
+    log.add(segment("hello", 1.0))
+    assert path.exists()
+
+    log.save(tmp_path, datetime(2026, 7, 9, 14, 30), "meeting")
+    assert not path.exists()  # transcript persisted, journal redundant
+
+
+def test_discard_journal_removes_it_without_saving(tmp_path):
+    path = journal_path_for(tmp_path, datetime(2026, 7, 9, 14, 30), "meeting")
+    log = MeetingLog(label_channels=False, journal=TranscriptJournal(path))
+    log.add(segment("hello", 1.0))
+    assert path.exists()
+
+    log.discard_journal()
+    assert not path.exists()
+
+
+def test_recover_journals_promotes_orphans_and_clears_empties(tmp_path):
+    live = journal_path_for(tmp_path, datetime(2026, 7, 9, 14, 30), "crashed")
+    TranscriptJournal(live).append("[00:00:01] Mason: unsaved words")
+    empty = tmp_path / f"empty_2026-07-09_1200{JOURNAL_SUFFIX}"
+    empty.write_text("", encoding="utf-8")
+
+    recovered = recover_journals(tmp_path)
+
+    assert recovered == [tmp_path / "crashed_2026-07-09_1430_recovered.txt"]
+    assert recovered[0].read_text(encoding="utf-8") == "[00:00:01] Mason: unsaved words\n"
+    assert not live.exists()
+    assert not empty.exists()  # empty journal just cleaned up
+    assert recover_journals(tmp_path) == []  # nothing left to recover

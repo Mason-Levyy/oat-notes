@@ -1042,6 +1042,10 @@ function applyState(s) {
     $("statusline").innerHTML = "NAME YOUR GUESTS, THEN SAVE";
   } else if (s.last_saved) {
     $("statusline").innerHTML = `<span class="saved">SAVED &#9654; ${escapeHtml(s.last_saved)}</span>`;
+  } else if (Array.isArray(s.recovered) && s.recovered.length) {
+    const count = s.recovered.length;
+    $("statusline").innerHTML =
+      `<span class="saved">RECOVERED ${count} UNSAVED TRANSCRIPT${count > 1 ? "S" : ""} &#9654; ${escapeHtml(s.recovered[s.recovered.length - 1])}</span>`;
   }
   if (!s.recording && !pending && state.model_status === "loading") {
     $("statusline").textContent = "LOADING TRANSCRIPTION MODEL…";
