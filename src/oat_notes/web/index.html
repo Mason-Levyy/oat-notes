@@ -146,7 +146,9 @@ body {
   font-size: 9px;
 }
 .tab:last-child { border-right: 0; }
-.tab.active { background: var(--oat); }
+/* Ink inversion marks a selected state; the orange accent is reserved for the
+   one action worth taking on a surface (START MEETING, SAVE HOTKEY, RECORD). */
+.tab.active { background: var(--ink); color: var(--paper); }
 .tab:focus-visible { outline: 3px solid var(--ink); outline-offset: -3px; }
 
 /* ---------- layout ---------- */
@@ -208,7 +210,7 @@ body {
 .settings-card h2 { font-size: 12px; margin-bottom: 12px; }
 .modifier-grid {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px; margin: 20px 0;
+  gap: 10px; margin: 20px 0 8px;
 }
 .modifier-option { cursor: pointer; }
 .modifier-option input { position: absolute; opacity: 0; }
@@ -217,12 +219,14 @@ body {
   text-align: center; background: var(--paper); font-size: 9px;
 }
 .modifier-option input:checked + span {
-  background: var(--oat); box-shadow: 3px 3px 0 var(--ink);
+  background: var(--ink); color: var(--paper); box-shadow: 3px 3px 0 var(--ink);
 }
 .modifier-option input:focus-visible + span { outline: 3px solid var(--sprout); }
+/* Sits flush under the modifier grid so the toggles and their result read as
+   one control rather than two stacked boxes. */
 .hotkey-preview {
   border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
-  padding: 18px; margin-bottom: 18px; text-align: center; font-size: 12px;
+  padding: 11px; margin-bottom: 18px; text-align: center; font-size: 11px;
 }
 .settings-message { min-height: 18px; margin-top: 14px; font-size: 8px; }
 .settings-message.error { color: var(--rec); }
@@ -237,8 +241,34 @@ body {
   border: 2px solid var(--ink); background: var(--paper); cursor: pointer;
   font-family: "Pixel", Consolas, monospace; font-size: 7px; padding: 7px;
 }
-.mini.primary { background: var(--oat-light); }
+.mini.primary { background: var(--oat); }
 .mini.danger { color: var(--rec); }
+.mini:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- disclosure help ---------- */
+.help { margin-top: 10px; }
+.help summary {
+  font-size: 7px; cursor: pointer; color: #6b6558;
+  font-family: "Pixel", Consolas, monospace; list-style: none;
+}
+.help summary::-webkit-details-marker { display: none; }
+.help summary::before { content: "[?] "; }
+.help summary:focus-visible { outline: 2px solid var(--oat); }
+.help[open] summary { margin-bottom: 5px; }
+.help .hint { margin-top: 0; }
+
+/* ---------- list filter ---------- */
+.list-filter {
+  width: 100%; margin-top: 10px; border: 2px solid var(--ink); background: #fff;
+  font-family: Consolas, monospace; padding: 7px;
+}
+.list-empty { font-size: 8px; color: #6b6558; margin-top: 12px; }
+
+/* ---------- library row overflow ---------- */
+.library-row { flex-wrap: wrap; }
+.library-row .row-actions { display: none; width: 100%; gap: 7px; padding-top: 8px; }
+.library-row.open .row-actions { display: flex; }
+.library-row .row-actions .mini { flex: 1; }
 .library-list, .group-list, .setup-roster { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
 .library-row, .setup-roster-row {
   border: 2px solid var(--ink); padding: 8px; background: var(--paper);
@@ -257,13 +287,77 @@ body {
 .enrollment-status.rejected .bar-fill { background: var(--rec); }
 .enrollment-status.done .bar-fill { background: var(--sprout); width: 100% !important; }
 .enrollment-status .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.roster-tools { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px; }
-.roster-tools .group-picker { grid-column: 1 / -1; }
+.roster-tools { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .setup-roster-row.untrained, .setup-roster-row.learning { background: #d2d0ca; color: #68645c; }
+
+/* ---------- group loader ---------- */
+.row-btn {
+  width: 100%; text-align: left; cursor: pointer;
+  border: 2px solid var(--ink); background: #fff; padding: 10px;
+  font-family: "Pixel", Consolas, monospace; font-size: 8px;
+  display: flex; gap: 8px; align-items: center;
+}
+.row-btn::before { content: "[+]"; flex: none; }
+.row-btn[aria-expanded="true"]::before { content: "[-]"; }
+.row-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.row-btn:focus-visible { outline: 3px solid var(--oat); outline-offset: 2px; }
+
+/* ---------- option lists (groups + person search) ---------- */
+.options { display: flex; flex-direction: column; gap: 6px; }
+.options[hidden] { display: none; }
+.option {
+  width: 100%; text-align: left; cursor: pointer;
+  border: 2px solid var(--ink); background: var(--paper); padding: 9px 10px;
+  font-family: Consolas, monospace; font-size: 14px;
+  display: flex; gap: 8px; align-items: center;
+}
+.option .count, .option .profile-pill { margin-left: auto; flex: none; }
+.option.active { background: var(--ink); color: var(--paper); }
+.option.active .count, .option.active .profile-pill { color: var(--paper); }
+.option.create { font-family: "Pixel", Consolas, monospace; font-size: 8px; }
+.combo { position: relative; }
+.options-empty { font-size: 12px; color: #6b6558; padding: 4px 2px; }
+
+/* ---------- roster rows ---------- */
+.setup-roster-row[draggable="true"] { cursor: grab; }
+.setup-roster-row.dragging { opacity: 0.4; }
+.setup-roster-row.drop-target { box-shadow: inset 0 3px 0 var(--oat); }
+/* The bundled pixel font has no grip glyph, so the dots are drawn in CSS. */
+.grip {
+  width: 12px; height: 18px; flex: none; padding: 0;
+  border: 0; background: transparent; cursor: grab; position: relative;
+}
+.grip::before {
+  content: ""; position: absolute; left: 2px; top: 4px;
+  width: 2px; height: 2px; background: #6b6558;
+  box-shadow: 0 4px #6b6558, 0 8px #6b6558,
+              4px 0 #6b6558, 4px 4px #6b6558, 4px 8px #6b6558;
+}
+.grip:focus-visible { outline: 2px solid var(--oat); }
+
+/* ---------- capture options ---------- */
+.check-row { display: flex; gap: 16px; align-items: center; }
+/* Groups collapse by default so a page of them stays scannable; the summary
+   carries the name and member count, which is what you scan for. */
 .group-card { border: 2px dashed var(--ink); padding: 10px; margin-top: 10px; }
-.group-card h3 { font-size: 8px; margin-bottom: 7px; }
+/* display:flex drops the native disclosure marker, so draw our own. */
+.group-card > summary {
+  font-family: "Pixel", Consolas, monospace; font-size: 8px; cursor: pointer;
+  display: flex; gap: 8px; align-items: center; list-style: none;
+}
+.group-card > summary::-webkit-details-marker { display: none; }
+.group-card > summary::before { content: "[+]"; flex: none; }
+.group-card[open] > summary::before { content: "[-]"; }
+.group-card > summary .count { margin-left: auto; color: #6b6558; font-size: 7px; }
+.group-card > summary:focus-visible { outline: 2px solid var(--oat); }
+.group-card .group-body { margin-top: 10px; }
+.section-label {
+  font-family: "Pixel", Consolas, monospace; font-size: 7px; color: #6b6558;
+  border-top: 2px solid var(--ink); padding-top: 7px; margin-top: 10px;
+}
 .group-member { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 .group-member .name { flex: 1; }
+.group-member .slot { font-size: 7px; color: #6b6558; flex: none; }
 .bank-row { display: flex; gap: 8px; align-items: center; }
 .bank-row .pixel { flex: 1; text-align: center; font-size: 8px; }
 
@@ -285,10 +379,12 @@ body {
   padding: 10px;
   font-family: "Pixel", Consolas, monospace;
   font-size: 9px;
+  line-height: 1.6;
   cursor: pointer;
   text-align: left;
   width: 100%;
 }
+.chip .label { flex: 1; min-width: 0; }
 .chip:focus-visible { outline: 3px solid var(--oat); }
 .chip .slot { font-size: 8px; color: #6b6558; flex: none; }
 .chip .dot { width: 10px; height: 10px; margin-left: auto; flex: none; visibility: hidden; }
@@ -305,7 +401,7 @@ body {
 .chip.ghost:hover { border-style: solid; background: #fff; color: var(--ink); }
 .chip.untrained, .chip.learning { background: #c9c7c1; color: #66625b; }
 .chip.learning { border-style: dashed; }
-.chip .progress { font-size: 7px; margin-left: auto; }
+.chip .progress { font-size: 7px; margin-left: auto; flex: none; white-space: nowrap; }
 .chip .progress + .dot { margin-left: 0; }
 .chip-row { display: flex; gap: 7px; align-items: stretch; }
 .chip-row .chip { flex: 1; width: auto; }
@@ -318,10 +414,10 @@ body {
   transform: translateY(-50%) rotate(90deg); transform-origin: right top;
   font-family: "Pixel", Consolas, monospace; font-size: 9px;
   border: 3px solid var(--ink); border-bottom: none;
-  background: var(--oat); padding: 9px 16px; cursor: pointer;
+  background: #fff; padding: 9px 16px; cursor: pointer;
   box-shadow: -3px 3px 0 var(--ink);
 }
-.notes-tab[aria-expanded="true"] { background: var(--oat-dark); }
+.notes-tab[aria-expanded="true"] { background: var(--ink); color: var(--paper); }
 .notes-drawer {
   position: fixed; inset: 0 0 0 auto; width: min(320px, 86vw); z-index: 25;
   background: var(--paper); border-left: 3px solid var(--ink);
@@ -426,34 +522,41 @@ body {
       <form id="setup" autocomplete="off">
         <div class="field" style="margin-bottom:16px">
           <label class="pixel" for="mname">MEETING NAME</label>
-          <input type="text" id="mname" placeholder="stand-up">
-          <div class="hint">Names the transcript file.</div>
+          <input type="text" id="mname" placeholder="stand-up" title="Names the transcript file">
         </div>
         <div class="field" style="margin-bottom:16px">
-          <label class="pixel">SPEAKERS</label>
+          <label class="pixel" for="person-search">SPEAKERS</label>
           <div class="roster-tools">
-            <select id="group-select" class="group-picker" aria-label="Choose a saved group"></select>
-            <input type="text" id="person-search" list="person-options" aria-label="Search saved speakers" placeholder="Search saved people">
-            <datalist id="person-options"></datalist>
-            <button type="button" class="mini primary" id="add-person-btn">+ PERSON</button>
-          </div>
-          <div class="compact-row">
-            <input type="text" id="new-person-name" placeholder="New speaker name">
-            <button type="button" class="mini" id="create-person-btn">CREATE</button>
+            <div>
+              <button type="button" class="row-btn" id="group-select" aria-expanded="false" aria-controls="group-options">LOAD A SAVED GROUP</button>
+              <div class="options" id="group-options" role="listbox" aria-label="Saved groups" hidden style="margin-top:8px"></div>
+            </div>
+            <div class="combo">
+              <input type="text" id="person-search" role="combobox" autocomplete="off"
+                     aria-expanded="false" aria-controls="person-results" aria-autocomplete="list"
+                     aria-label="Search saved people, or type a new name to create one"
+                     placeholder="Search or add a person">
+              <div class="options" id="person-results" role="listbox" aria-label="Matching people" hidden style="margin-top:8px"></div>
+            </div>
           </div>
           <div class="setup-roster" id="setup-roster"></div>
-          <div class="hint">Choose a group to fill the roster, then add any extra people. Order sets hotkey slots. <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches; brackets change banks.</div>
+          <details class="help">
+            <summary class="pixel">HOW THE ROSTER WORKS</summary>
+            <div class="hint">Load a group to fill the roster, then search to add anyone else — a name that isn't saved yet is created for you. Drag a row to reorder it, or focus its grip and press Alt+Up / Alt+Down. Order sets hotkey slots: <span id="hotkey-hint">Ctrl+Alt+1–9</span> switches speakers, and brackets change banks. <b>Capture system audio</b> records your output device alongside the microphone. <b>Clean transcript (AI)</b> tidies wording with a local language model.</div>
+          </details>
         </div>
-        <label class="check" style="margin-bottom:16px">
-          <input type="checkbox" id="loopback" checked>
-          <span class="box"></span>
-          CAPTURE SYSTEM AUDIO
-        </label>
-        <label class="check" style="margin-bottom:6px">
-          <input type="checkbox" id="cleanup" checked>
-          <span class="box"></span>
-          CLEAN TRANSCRIPT (AI)
-        </label>
+        <div class="check-row" style="margin-bottom:16px">
+          <label class="check" title="Record your output device's loopback alongside the microphone">
+            <input type="checkbox" id="loopback" checked>
+            <span class="box"></span>
+            SYSTEM AUDIO
+          </label>
+          <label class="check" title="Tidy transcript wording with a local language model">
+            <input type="checkbox" id="cleanup" checked>
+            <span class="box"></span>
+            CLEAN (AI)
+          </label>
+        </div>
         <div class="hint" id="cleanup-hint" style="margin-bottom:16px;display:none"></div>
         <button type="submit" class="btn start" id="start-btn">&#9654; START MEETING</button>
       </form>
@@ -465,7 +568,7 @@ body {
         <div class="compact-row" id="live-add-row">
           <input type="text" id="live-person-search" list="live-person-options" aria-label="Add a person to the meeting" placeholder="Add person">
           <datalist id="live-person-options"></datalist>
-          <button type="button" class="mini primary" id="live-add-btn">+ ADD</button>
+          <button type="button" class="mini" id="live-add-btn">+ ADD</button>
         </div>
         <div class="bank-row" id="bank-row">
           <button type="button" class="mini" id="bank-prev">[ PREV</button>
@@ -516,8 +619,9 @@ body {
       <p>Profiles stay on this machine. Only voice embeddings are saved; captured audio is never retained.</p>
       <div class="compact-row">
         <input type="text" id="library-new-name" placeholder="Speaker name">
-        <button type="button" class="mini primary" id="library-create">ADD SPEAKER</button>
+        <button type="button" class="mini" id="library-create">ADD SPEAKER</button>
       </div>
+      <input type="text" id="library-search" class="list-filter" placeholder="Filter speakers…" aria-label="Filter the speaker list" style="display:none">
       <div id="enrollment-status"></div>
       <div class="library-list" id="library-list"></div>
     </div>
@@ -526,7 +630,7 @@ body {
       <p>Save recurring rosters with their normal order.</p>
       <div class="compact-row">
         <input type="text" id="group-new-name" placeholder="Group name">
-        <button type="button" class="mini primary" id="group-create">ADD GROUP</button>
+        <button type="button" class="mini" id="group-create">ADD GROUP</button>
       </div>
       <div class="group-list" id="group-list"></div>
     </div>
@@ -554,6 +658,14 @@ let setupRoster = [];
 let sessionEpoch = null;
 let tick = null;
 let profileLearningTimer = null;
+let rosterFocus = null;
+let hotkeyDirty = false;
+let dragIndex = null;
+let groupOptionsOpen = false;
+let personResults = [];
+let personActive = -1;
+const openGroups = new Set();
+const LIBRARY_FILTER_THRESHOLD = 6;
 
 function post(path, body) {
   return fetch(path, {
@@ -584,7 +696,8 @@ function hotkeyLabel(modifiers) {
 }
 
 function updateHotkeyPreview() {
-  $("hotkey-preview").textContent = hotkeyLabel(selectedModifiers()).toUpperCase();
+  const label = hotkeyLabel(selectedModifiers()).toUpperCase();
+  $("hotkey-preview").textContent = hotkeyDirty ? `${label} — UNSAVED` : label;
 }
 
 function openTab(name) {
@@ -622,15 +735,18 @@ function addRosterSpeaker(speaker) {
   renderSetupRoster();
 }
 
+function moveRosterEntry(from, to) {
+  if (to < 0 || to >= setupRoster.length) return;
+  const [moved] = setupRoster.splice(from, 1);
+  setupRoster.splice(to, 0, moved);
+  // Follow the row so repeated presses keep walking a speaker up the list.
+  rosterFocus = { action: "grip", index: to };
+  renderSetupRoster();
+}
+
 function renderSetupRoster() {
   const people = librarySpeakers();
-  $("person-options").innerHTML = people.map((speaker) =>
-    `<option value="${escapeHtml(speaker.name)}">${profileText(speaker)}</option>`
-  ).join("");
-  const groups = libraryGroups();
-  $("group-select").innerHTML = groups.length
-    ? '<option value="">SELECT GROUP TO FILL ROSTER</option>' + groups.map((group) => `<option value="${group.id}">${escapeHtml(group.name)}</option>`).join("")
-    : '<option value="">NO SAVED GROUPS</option>';
+  renderGroupOptions();
 
   const container = $("setup-roster");
   container.innerHTML = "";
@@ -643,25 +759,63 @@ function renderSetupRoster() {
     }
     const row = document.createElement("div");
     row.className = `setup-roster-row ${entry.profile_state || "untrained"}`;
-    row.innerHTML = `<span class="pixel">${index + 1}</span><span class="name">${escapeHtml(entry.name)}</span>
-      <span class="profile-pill ${entry.profile_state === "ready" ? "ready" : ""}">${profileText(entry)}</span>`;
-    [["↑", -1], ["↓", 1]].forEach(([label, delta]) => {
-      const button = document.createElement("button");
-      button.type = "button"; button.className = "mini"; button.textContent = label;
-      button.onclick = () => {
-        const target = index + delta;
-        if (target < 0 || target >= setupRoster.length) return;
-        [setupRoster[index], setupRoster[target]] = [setupRoster[target], setupRoster[index]];
-        renderSetupRoster();
-      };
-      row.appendChild(button);
-    });
+    row.draggable = true;
+    row.ondragstart = (event) => {
+      dragIndex = index;
+      row.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    };
+    row.ondragover = (event) => {
+      if (dragIndex === null || dragIndex === index) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      row.classList.add("drop-target");
+    };
+    row.ondragleave = () => row.classList.remove("drop-target");
+    row.ondrop = (event) => {
+      event.preventDefault();
+      row.classList.remove("drop-target");
+      if (dragIndex === null || dragIndex === index) return;
+      const from = dragIndex;
+      dragIndex = null;
+      moveRosterEntry(from, index);
+    };
+    row.ondragend = () => { dragIndex = null; row.classList.remove("dragging"); };
+
+    // Dragging is the visible affordance; Alt+Arrow keeps the ordering — and so
+    // the hotkey slots it assigns — reachable without a mouse.
+    const grip = document.createElement("button");
+    grip.type = "button"; grip.className = "grip"; grip.dataset.rosterAction = "grip";
+    grip.title = `Reorder ${entry.name}`;
+    grip.setAttribute("aria-label",
+      `Reorder ${entry.name}, position ${index + 1} of ${setupRoster.length}. Press Alt+Up or Alt+Down to move.`);
+    grip.onkeydown = (event) => {
+      if (!event.altKey) return;
+      const delta = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+      if (!delta) return;
+      event.preventDefault();
+      moveRosterEntry(index, index + delta);
+    };
+    row.appendChild(grip);
+    row.insertAdjacentHTML("beforeend",
+      `<span class="pixel">${index + 1}</span><span class="name">${escapeHtml(entry.name)}</span>
+      <span class="profile-pill ${entry.profile_state === "ready" ? "ready" : ""}">${profileText(entry)}</span>`);
     const remove = document.createElement("button");
     remove.type = "button"; remove.className = "mini danger"; remove.textContent = "×";
+    remove.title = `Remove ${entry.name} from this meeting`;
+    remove.setAttribute("aria-label", remove.title);
     remove.onclick = () => { setupRoster.splice(index, 1); renderSetupRoster(); };
     row.appendChild(remove);
     container.appendChild(row);
   });
+  if (rosterFocus) {
+    const rows = container.querySelectorAll(".setup-roster-row");
+    const button = rows[rosterFocus.index]
+      && rows[rosterFocus.index].querySelector(`[data-roster-action="${rosterFocus.action}"]`);
+    if (button && !button.disabled) button.focus();
+    rosterFocus = null;
+  }
 }
 
 function applyLibraryResult(result, message) {
@@ -737,13 +891,36 @@ function renderLibrarySettings() {
   const recordDisabled = disabled || state.speaker_model_status !== "ready";
   const list = $("library-list");
   list.innerHTML = "";
-  librarySpeakers().forEach((speaker) => {
+  const people = librarySpeakers();
+  const filterInput = $("library-search");
+  // A filter box is only worth its space once the list stops fitting on screen.
+  filterInput.style.display = people.length > LIBRARY_FILTER_THRESHOLD ? "block" : "none";
+  const needle = people.length > LIBRARY_FILTER_THRESHOLD
+    ? filterInput.value.trim().toLowerCase()
+    : "";
+  const visible = needle
+    ? people.filter((speaker) => speaker.name.toLowerCase().includes(needle))
+    : people;
+  if (!visible.length) {
+    const empty = document.createElement("div");
+    empty.className = "list-empty pixel";
+    empty.textContent = people.length ? `NO SPEAKER MATCHES "${needle.toUpperCase()}"` : "NO SAVED SPEAKERS YET";
+    list.appendChild(empty);
+  }
+  visible.forEach((speaker) => {
     const row = document.createElement("div");
     row.className = "library-row";
     row.innerHTML = `<span class="name">${escapeHtml(speaker.name)}</span>
       <span class="profile-pill ${speaker.profile_state === "ready" ? "ready" : ""}">${profileText(speaker)}</span>`;
     const record = document.createElement("button");
-    record.type = "button"; record.className = "mini primary"; record.textContent = "RECORD"; record.disabled = recordDisabled;
+    record.type = "button"; record.textContent = "RECORD"; record.disabled = recordDisabled;
+    // Filled only where a profile is still missing, so the accent marks the
+    // rows that need work instead of every row in the list.
+    const trained = speaker.profile_state === "ready";
+    record.className = trained ? "mini" : "mini primary";
+    record.title = trained
+      ? `Add another voice sample for ${speaker.name}`
+      : `Record ${speaker.name}'s voice profile`;
     record.onclick = () => startRecording(speaker);
     const rename = document.createElement("button");
     rename.type = "button"; rename.className = "mini"; rename.textContent = "RENAME"; rename.disabled = disabled;
@@ -764,53 +941,113 @@ function renderLibrarySettings() {
         post("/api/library/speakers/delete", { id: speaker.id }).then((r) => applyLibraryResult(r, "SPEAKER DELETED"));
       }
     };
-    row.append(record, rename, reset, remove);
+    // RECORD is the routine action and stays in reach; the rest — including the
+    // destructive ones — sit behind a deliberate second click.
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    actions.append(rename, reset, remove);
+    const more = document.createElement("button");
+    more.type = "button"; more.className = "mini"; more.textContent = "⋯";
+    more.setAttribute("aria-expanded", "false");
+    more.title = `More actions for ${speaker.name}`;
+    more.setAttribute("aria-label", more.title);
+    more.onclick = () => {
+      const open = !row.classList.contains("open");
+      row.classList.toggle("open", open);
+      more.setAttribute("aria-expanded", String(open));
+    };
+    row.append(record, more, actions);
     list.appendChild(row);
   });
 
   const groupList = $("group-list");
   groupList.innerHTML = "";
   libraryGroups().forEach((group) => {
-    const card = document.createElement("div");
+    const card = document.createElement("details");
     card.className = "group-card";
+    // Editing a group re-renders the whole list; remember which cards the user
+    // had opened so their card doesn't slam shut mid-edit.
+    card.open = openGroups.has(group.id);
+    card.ontoggle = () => {
+      if (card.open) openGroups.add(group.id);
+      else openGroups.delete(group.id);
+    };
+    const summary = document.createElement("summary");
+    const count = group.members.length;
+    summary.innerHTML = `<span>${escapeHtml(group.name.toUpperCase())}</span>
+      <span class="count">${count} MEMBER${count === 1 ? "" : "S"}</span>`;
+    card.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "group-body";
+    const nameLabel = document.createElement("div");
+    nameLabel.className = "section-label"; nameLabel.style.borderTop = "0"; nameLabel.style.paddingTop = "0"; nameLabel.style.marginTop = "0";
+    nameLabel.textContent = "NAME";
     const title = document.createElement("input");
     title.type = "text"; title.value = group.name; title.disabled = disabled;
+    title.style.width = "100%"; title.style.border = "2px solid var(--ink)";
+    title.style.padding = "7px"; title.style.marginTop = "5px";
+    title.style.fontFamily = "Consolas, monospace"; title.style.background = "#fff";
+    title.setAttribute("aria-label", `Rename group ${group.name}`);
     title.onchange = () => { group.name = title.value.trim() || group.name; saveGroup(group); };
-    card.appendChild(title);
+    body.append(nameLabel, title);
+
+    const membersLabel = document.createElement("div");
+    membersLabel.className = "section-label";
+    membersLabel.textContent = "MEMBERS — ORDER SETS HOTKEY SLOTS";
+    body.appendChild(membersLabel);
     group.members.forEach((member, index) => {
       const row = document.createElement("div");
       row.className = "group-member";
-      row.innerHTML = `<span class="name">${escapeHtml(member.name)}</span>`;
-      [["↑", -1], ["↓", 1]].forEach(([label, delta]) => {
-        const button = document.createElement("button"); button.type = "button"; button.className = "mini"; button.textContent = label; button.disabled = disabled;
+      row.innerHTML = `<span class="slot pixel">${index + 1}</span><span class="name">${escapeHtml(member.name)}</span>`;
+      [["↑", -1, "up"], ["↓", 1, "down"]].forEach(([label, delta, word]) => {
+        const target = index + delta;
+        const button = document.createElement("button"); button.type = "button"; button.className = "mini"; button.textContent = label;
+        button.title = `Move ${member.name} ${word} to slot ${target + 1}`;
+        button.setAttribute("aria-label", button.title);
+        button.disabled = disabled || target < 0 || target >= group.members.length;
         button.onclick = () => {
-          const target = index + delta;
-          if (target < 0 || target >= group.members.length) return;
           [group.members[index], group.members[target]] = [group.members[target], group.members[index]];
           saveGroup(group);
         };
         row.appendChild(button);
       });
       const remove = document.createElement("button"); remove.type = "button"; remove.className = "mini danger"; remove.textContent = "×"; remove.disabled = disabled;
+      remove.title = `Remove ${member.name} from ${group.name}`;
+      remove.setAttribute("aria-label", remove.title);
       remove.onclick = () => { group.members.splice(index, 1); saveGroup(group); };
       row.appendChild(remove);
-      card.appendChild(row);
+      body.appendChild(row);
     });
     const addRow = document.createElement("div"); addRow.className = "compact-row";
     const select = document.createElement("select");
+    select.setAttribute("aria-label", `Choose someone to add to ${group.name}`);
     librarySpeakers().filter((speaker) => !group.members.some((member) => member.speaker_id === speaker.id)).forEach((speaker) => {
       const option = document.createElement("option"); option.value = speaker.id; option.textContent = speaker.name; select.appendChild(option);
     });
-    const add = document.createElement("button"); add.type = "button"; add.className = "mini"; add.textContent = "+ MEMBER"; add.disabled = disabled || !select.options.length;
+    if (!select.options.length) {
+      const option = document.createElement("option"); option.textContent = "EVERYONE IS ALREADY A MEMBER"; select.appendChild(option);
+    }
+    const add = document.createElement("button"); add.type = "button"; add.className = "mini"; add.textContent = "+ MEMBER";
+    add.disabled = disabled || !librarySpeakers().some((speaker) => !group.members.some((member) => member.speaker_id === speaker.id));
     add.onclick = () => {
       const speaker = librarySpeakers().find((item) => item.id === select.value);
       if (!speaker) return;
       group.members.push({ speaker_id: speaker.id, name: speaker.name });
       saveGroup(group);
     };
+    addRow.append(select, add);
+    body.appendChild(addRow);
+
+    const dangerLabel = document.createElement("div");
+    dangerLabel.className = "section-label";
+    dangerLabel.textContent = "REMOVE";
     const del = document.createElement("button"); del.type = "button"; del.className = "mini danger"; del.textContent = "DELETE GROUP"; del.disabled = disabled;
+    del.style.marginTop = "6px";
     del.onclick = () => { if (window.confirm(`Delete group ${group.name}?`)) post("/api/library/groups/delete", { id: group.id }).then((r) => applyLibraryResult(r, "GROUP DELETED")); };
-    addRow.append(select, add, del); card.appendChild(addRow); groupList.appendChild(card);
+    body.append(dangerLabel, del);
+    card.appendChild(body);
+    groupList.appendChild(card);
   });
   renderSetupRoster();
 }
@@ -818,9 +1055,14 @@ function renderLibrarySettings() {
 function renderSettings() {
   const settings = state.settings || { hotkey_modifiers: ["ctrl", "alt"] };
   const selected = new Set(settings.hotkey_modifiers || []);
-  $("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
-    input.checked = selected.has(input.value);
-  });
+  // A `status` event lands on every library mutation and enrollment, and each
+  // one re-runs applyState. Re-syncing the boxes then would silently revert a
+  // selection the user is still editing, so they'd save the old combination.
+  if (!hotkeyDirty) {
+    $("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
+      input.checked = selected.has(input.value);
+    });
+  }
   updateHotkeyPreview();
   $("hotkey-hint").textContent = settings.hotkey_label || hotkeyLabel([...selected]);
   $("settings-save").disabled = !!state.recording;
@@ -914,7 +1156,7 @@ function renderPlayers() {
       }
     }
     chip.title = `Hotkey ${bankKey}; saved slot ${hotkeySlot + 1}`;
-    chip.innerHTML = `<span class="slot">${slot}</span> ${escapeHtml(speaker.name.toUpperCase())} <span class="progress">${progress}</span><span class="dot"></span>`;
+    chip.innerHTML = `<span class="slot">${slot}</span><span class="label">${escapeHtml(speaker.name.toUpperCase())}</span><span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
 
     const row = document.createElement("div");
@@ -923,7 +1165,7 @@ function renderPlayers() {
     if (isLearning && learning.phase === "collecting") {
       const skip = document.createElement("button");
       skip.type = "button";
-      skip.className = "mini primary";
+      skip.className = "mini";
       skip.textContent = "SKIP";
       skip.title = "Cancel the in-progress voice sample";
       skip.onclick = () => post("/api/profile_learning/cancel", {});
@@ -932,8 +1174,10 @@ function renderPlayers() {
     const rename = document.createElement("button");
     rename.type = "button";
     rename.className = "mini";
-    rename.textContent = "✎";
+    // The bundled pixel font has no ✎ glyph, so it fell back to a stray mark.
+    rename.textContent = "EDIT";
     rename.title = `Rename ${speaker.name}`;
+    rename.setAttribute("aria-label", rename.title);
     rename.onclick = () => {
       const name = window.prompt("Speaker name", speaker.name);
       if (!name || !name.trim()) return;
@@ -949,6 +1193,7 @@ function renderPlayers() {
       remove.className = "mini danger";
       remove.textContent = "×";
       remove.title = `Remove ${speaker.name} (hasn't spoken yet)`;
+      remove.setAttribute("aria-label", remove.title);
       remove.onclick = () => post("/api/roster/remove", { index }).then((result) => {
         if (result.error) $("statusline").textContent = result.error.toUpperCase();
         else applyState(result);
@@ -1137,19 +1382,25 @@ function attachTabComplete(input, getNames) {
   });
 }
 
-attachTabComplete($("person-search"), () => librarySpeakers().map((speaker) => speaker.name));
+// The setup search has its own arrow-key result list; the live field still uses
+// a datalist, so Tab-completion earns its keep there.
 attachTabComplete($("live-person-search"), () => librarySpeakers().map((speaker) => speaker.name));
 
-$("add-person-btn").onclick = () => {
-  const query = $("person-search").value.trim().toLowerCase();
-  const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === query);
-  addRosterSpeaker(speaker);
-  if (speaker) $("person-search").value = "";
-};
+function matchingSpeaker(query) {
+  const lower = query.trim().toLowerCase();
+  if (!lower) return null;
+  return librarySpeakers().find((item) => item.name.toLowerCase() === lower) || null;
+}
 
-$("group-select").onchange = () => {
-  const group = libraryGroups().find((item) => item.id === $("group-select").value);
-  if (!group) return;
+/* ---------- saved-group loader ---------- */
+
+function setGroupOptionsOpen(open) {
+  groupOptionsOpen = open && libraryGroups().length > 0;
+  $("group-options").hidden = !groupOptionsOpen;
+  $("group-select").setAttribute("aria-expanded", String(groupOptionsOpen));
+}
+
+function loadGroup(group) {
   setupRoster = [];
   group.members.forEach((member) => {
     const speaker = librarySpeakers().find((item) => item.id === member.speaker_id);
@@ -1161,19 +1412,140 @@ $("group-select").onchange = () => {
       enrollment_seconds: speaker.enrollment_seconds || 0,
     });
   });
+  setGroupOptionsOpen(false);
   renderSetupRoster();
-};
+}
 
-$("create-person-btn").onclick = () => {
-  const name = $("new-person-name").value.trim();
-  if (!name) return;
-  post("/api/library/speakers/create", { name }).then((result) => {
-    if (!applyLibraryResult(result, "SPEAKER CREATED")) return;
-    const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === name.toLowerCase());
-    addRosterSpeaker(speaker);
-    $("new-person-name").value = "";
+function renderGroupOptions() {
+  const groups = libraryGroups();
+  const button = $("group-select");
+  button.disabled = !groups.length;
+  button.textContent = groups.length ? "LOAD A SAVED GROUP" : "NO SAVED GROUPS";
+  const panel = $("group-options");
+  panel.innerHTML = "";
+  groups.forEach((group) => {
+    const option = document.createElement("button");
+    option.type = "button"; option.className = "option"; option.setAttribute("role", "option");
+    const count = group.members.length;
+    option.innerHTML = `<span>${escapeHtml(group.name)}</span>
+      <span class="count pixel">${count} MEMBER${count === 1 ? "" : "S"}</span>`;
+    option.onclick = () => loadGroup(group);
+    panel.appendChild(option);
   });
-};
+  if (!groups.length) setGroupOptionsOpen(false);
+}
+
+$("group-select").onclick = () => setGroupOptionsOpen(!groupOptionsOpen);
+
+/* ---------- person search combobox ---------- */
+
+function closePersonResults() {
+  personResults = [];
+  personActive = -1;
+  $("person-results").hidden = true;
+  $("person-search").setAttribute("aria-expanded", "false");
+}
+
+function paintPersonActive() {
+  const panel = $("person-results");
+  panel.querySelectorAll(".option").forEach((option, index) => {
+    option.classList.toggle("active", index === personActive);
+  });
+  const current = panel.querySelectorAll(".option")[personActive];
+  if (current) $("person-search").setAttribute("aria-activedescendant", current.id);
+}
+
+// Searching for a saved person and naming a brand-new one are the same decision,
+// so both live in one list: matches first, "create" as the last resort.
+function renderPersonResults() {
+  const input = $("person-search");
+  const panel = $("person-results");
+  const query = input.value.trim();
+  const lower = query.toLowerCase();
+  const onRoster = new Set(setupRoster.map((entry) => entry.speaker_id));
+  const matches = librarySpeakers().filter(
+    (speaker) => !onRoster.has(speaker.id) && (!lower || speaker.name.toLowerCase().includes(lower))
+  );
+  personResults = matches.slice(0, 8).map((speaker) => ({ type: "speaker", speaker }));
+  if (query && !matchingSpeaker(query)) personResults.push({ type: "create", name: query });
+
+  panel.innerHTML = "";
+  if (!personResults.length) {
+    const empty = document.createElement("div");
+    empty.className = "options-empty";
+    empty.textContent = query ? "Already in this meeting." : "No saved people yet — type a name to create one.";
+    panel.appendChild(empty);
+  }
+  personResults.forEach((choice, index) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.id = `person-result-${index}`;
+    option.setAttribute("role", "option");
+    if (choice.type === "create") {
+      option.className = "option create";
+      option.textContent = `+ CREATE "${choice.name.toUpperCase()}"`;
+    } else {
+      option.className = "option";
+      option.innerHTML = `<span>${escapeHtml(choice.speaker.name)}</span>
+        <span class="profile-pill ${choice.speaker.profile_state === "ready" ? "ready" : ""}">${profileText(choice.speaker)}</span>`;
+    }
+    option.onclick = () => commitChoice(choice);
+    panel.appendChild(option);
+  });
+  personActive = personResults.length ? 0 : -1;
+  panel.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  paintPersonActive();
+}
+
+function commitChoice(choice) {
+  const finish = (speaker) => {
+    addRosterSpeaker(speaker);
+    $("person-search").value = "";
+    closePersonResults();
+  };
+  if (choice.type === "speaker") { finish(choice.speaker); return; }
+  post("/api/library/speakers/create", { name: choice.name }).then((result) => {
+    if (!applyLibraryResult(result, "SPEAKER CREATED")) return;
+    finish(matchingSpeaker(choice.name));
+  });
+}
+
+$("person-search").oninput = renderPersonResults;
+$("person-search").onfocus = renderPersonResults;
+$("person-search").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (!personResults.length) return;
+    event.preventDefault();
+    const delta = event.key === "ArrowDown" ? 1 : -1;
+    personActive = (personActive + delta + personResults.length) % personResults.length;
+    paintPersonActive();
+    return;
+  }
+  if (event.key === "Escape") { closePersonResults(); return; }
+  if (event.key !== "Enter") return;
+  // The field lives inside the setup form; Enter must add a person, not start
+  // the meeting.
+  event.preventDefault();
+  const choice = personResults[personActive] || personResults[0];
+  if (choice) commitChoice(choice);
+});
+
+document.addEventListener("click", (event) => {
+  if (!$("group-select").contains(event.target) && !$("group-options").contains(event.target)) {
+    setGroupOptionsOpen(false);
+  }
+  if (!$("person-search").contains(event.target) && !$("person-results").contains(event.target)) {
+    closePersonResults();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  setGroupOptionsOpen(false);
+  closePersonResults();
+});
+
+$("library-search").oninput = renderLibrarySettings;
 
 $("library-create").onclick = () => {
   const name = $("library-new-name").value.trim();
@@ -1255,7 +1627,7 @@ $("tab-meeting").onclick = () => openTab("meeting");
 $("tab-settings").onclick = () => openTab("settings");
 
 $("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
-  input.onchange = updateHotkeyPreview;
+  input.onchange = () => { hotkeyDirty = true; updateHotkeyPreview(); };
 });
 
 $("settings-form").onsubmit = (event) => {
@@ -1273,6 +1645,8 @@ $("settings-form").onsubmit = (event) => {
       message.className = "settings-message pixel error";
       return;
     }
+    // Clear before applyState so renderSettings re-syncs from the saved value.
+    hotkeyDirty = false;
     applyState(result);
     message.textContent = `SAVED — ${result.settings.hotkey_label}`;
     message.className = "settings-message pixel saved";
