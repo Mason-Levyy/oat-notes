@@ -416,9 +416,9 @@ def test_saving_dictation_settings_rebinds_the_chord():
 def test_partial_update_keeps_the_other_card_intact():
     state = dictation_state(save_settings=lambda settings: None)
     state.update_settings({"hotkey_modifiers": ["alt", "shift"]})
-    state.update_settings({"dictation_injection": "type"})
+    state.update_settings({"dictation_spoken_punctuation": True})
     assert state.settings.hotkey_modifiers == ("alt", "shift")
-    assert state.settings.dictation_injection == "type"
+    assert state.settings.dictation_spoken_punctuation is True
 
 
 def test_dictation_settings_may_change_during_a_meeting():
@@ -432,9 +432,9 @@ def test_dictation_settings_may_change_during_a_meeting():
     state.session.channels = ()
     state.session.hotkey_bank = 0
     state.session.elapsed = lambda: 0.0
-    response = state.update_settings({"dictation_signature": "Mason"})
+    response = state.update_settings({"dictation_spoken_punctuation": True})
     assert "error" not in response
-    assert state.settings.dictation_signature == "Mason"
+    assert state.settings.dictation_spoken_punctuation is True
 
 
 def test_speaker_hotkey_still_locked_during_a_meeting():
@@ -487,10 +487,10 @@ def test_settings_map_onto_dictation_options():
             dictation_modifiers=("alt", "win"),
             dictation_tap_ms=250,
             dictation_vocabulary=(("levya", "Mason"),),
-            dictation_signature="Mason",
+            dictation_spoken_punctuation=True,
         )
     )
     assert options.modifiers == ("alt", "win")
     assert options.tap_seconds == 0.25
     assert options.vocabulary == (("levya", "Mason"),)
-    assert options.signature == "Mason"
+    assert options.spoken_punctuation is True

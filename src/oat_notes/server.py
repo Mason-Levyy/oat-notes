@@ -36,12 +36,10 @@ def dictation_options(settings: AppSettings) -> DictationOptions:
         email_modifiers=settings.dictation_email_modifiers,
         replay_modifiers=settings.dictation_replay_modifiers,
         tap_seconds=settings.dictation_tap_ms / 1000.0,
-        injection=settings.dictation_injection,
         restore_clipboard=settings.dictation_restore_clipboard,
         email_detection=settings.dictation_email_detection,
         spoken_punctuation=settings.dictation_spoken_punctuation,
         vocabulary=settings.dictation_vocabulary,
-        signature=settings.dictation_signature,
     )
 
 
