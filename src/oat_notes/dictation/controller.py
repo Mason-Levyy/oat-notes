@@ -52,13 +52,11 @@ class DictationOptions:
     email_modifiers: tuple[str, ...] = ("ctrl", "shift", "win")
     replay_modifiers: tuple[str, ...] = ("ctrl", "alt")
     tap_seconds: float = 0.4
-    injection: str = inject.PASTE
     restore_clipboard: bool = True
     device_index: int | None = None
     email_detection: bool = True
     spoken_punctuation: bool = False
     vocabulary: tuple[tuple[str, str], ...] = ()
-    signature: str = ""
 
 
 @dataclass
@@ -117,7 +115,6 @@ class DictationController:
             force_email=force_email,
             vocabulary=self.options.vocabulary,
             spoken_punctuation=self.options.spoken_punctuation,
-            signature=self.options.signature,
             detect=self.options.email_detection,
         )
 
@@ -263,7 +260,6 @@ class DictationController:
             return
         inject.inject(
             self.last_text,
-            method=self.options.injection,
             hwnd=command.hwnd,
             restore_clipboard=self.options.restore_clipboard,
         )
@@ -327,7 +323,6 @@ class DictationController:
         self._remember(text, mode)
         inject.inject(
             text,
-            method=self.options.injection,
             hwnd=self._target_hwnd,
             restore_clipboard=self.options.restore_clipboard,
         )

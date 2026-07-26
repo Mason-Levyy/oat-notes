@@ -18,7 +18,6 @@ MODIFIER_LABELS = {
     "win": "Win",
 }
 
-INJECTIONS = ("paste", "type")
 DIGIT_KEY = "digit"
 REPLAY_KEY = "z"
 MIN_TAP_MS = 50
@@ -85,11 +84,9 @@ class AppSettings:
     dictation_replay_modifiers: tuple[str, ...] = ("ctrl", "alt")
     dictation_tap_ms: int = 400
     dictation_email_detection: bool = True
-    dictation_injection: str = "paste"
     dictation_restore_clipboard: bool = True
     dictation_spoken_punctuation: bool = False
     dictation_vocabulary: tuple[tuple[str, str], ...] = ()
-    dictation_signature: str = ""
     overlay_enabled: bool = True
 
     @classmethod
@@ -108,10 +105,6 @@ class AppSettings:
             raise ValueError(
                 f"dictation_tap_ms must be between {MIN_TAP_MS} and {MAX_TAP_MS}"
             )
-        signature = pick("dictation_signature")
-        if not isinstance(signature, str):
-            raise ValueError("dictation_signature must be text")
-
         settings = cls(
             hotkey_modifiers=normalize_modifiers(pick("hotkey_modifiers")),
             dictation_enabled=_flag(pick("dictation_enabled"), "dictation_enabled"),
@@ -126,9 +119,6 @@ class AppSettings:
             dictation_email_detection=_flag(
                 pick("dictation_email_detection"), "dictation_email_detection"
             ),
-            dictation_injection=_choice(
-                pick("dictation_injection"), INJECTIONS, "dictation_injection"
-            ),
             dictation_restore_clipboard=_flag(
                 pick("dictation_restore_clipboard"), "dictation_restore_clipboard"
             ),
@@ -136,7 +126,6 @@ class AppSettings:
                 pick("dictation_spoken_punctuation"), "dictation_spoken_punctuation"
             ),
             dictation_vocabulary=normalize_vocabulary(pick("dictation_vocabulary")),
-            dictation_signature=signature.strip(),
             overlay_enabled=_flag(pick("overlay_enabled"), "overlay_enabled"),
         )
         settings._check_chords()
@@ -228,13 +217,11 @@ class AppSettings:
             "dictation_replay_label": self.dictation_replay_label,
             "dictation_tap_ms": self.dictation_tap_ms,
             "dictation_email_detection": self.dictation_email_detection,
-            "dictation_injection": self.dictation_injection,
             "dictation_restore_clipboard": self.dictation_restore_clipboard,
             "dictation_spoken_punctuation": self.dictation_spoken_punctuation,
             "dictation_vocabulary": [
                 [heard, written] for heard, written in self.dictation_vocabulary
             ],
-            "dictation_signature": self.dictation_signature,
             "overlay_enabled": self.overlay_enabled,
         }
 

@@ -82,7 +82,7 @@ def test_hold_and_release_inserts_the_transcript(injected):
     arm(controller)
     release(controller, held_seconds=2.0)
     assert injected == [("Hello world", {
-        "method": inject.PASTE, "hwnd": 4242, "restore_clipboard": True
+        "hwnd": 4242, "restore_clipboard": True
     })]
     assert names(phases) == [
         dictation.LISTENING,
@@ -147,7 +147,7 @@ def test_second_tap_commits_a_latched_recording(injected):
     arm(controller)
     release(controller, held_seconds=0.1)
     assert injected == [("Hello world", {
-        "method": inject.PASTE, "hwnd": 4242, "restore_clipboard": True
+        "hwnd": 4242, "restore_clipboard": True
     })]
     assert names(phases)[-1] == dictation.INSERTED
 
@@ -452,5 +452,5 @@ def test_the_kept_text_can_then_be_replayed(injected, monkeypatch):
     )
     replay(controller, hwnd=999)
     assert injected == [("Hello world", {
-        "method": inject.PASTE, "hwnd": 999, "restore_clipboard": True
+        "hwnd": 999, "restore_clipboard": True
     })]
