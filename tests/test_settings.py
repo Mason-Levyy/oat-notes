@@ -53,8 +53,8 @@ def test_dictation_defaults():
     assert settings.dictation_modifiers == ("ctrl", "win")
     assert settings.dictation_label == "Ctrl+Win"
     assert settings.dictation_email_label == "Ctrl+Shift+Win"
-    assert settings.dictation_activation == "hybrid"
     assert settings.dictation_injection == "paste"
+    assert settings.dictation_replay_label == "Ctrl+Alt+Z"
 
 
 def test_every_default_survives_a_round_trip(tmp_path):
@@ -68,7 +68,7 @@ def test_full_dictation_round_trip(tmp_path):
     settings = AppSettings(
         dictation_modifiers=("alt", "win"),
         dictation_email_modifiers=(),
-        dictation_activation="toggle",
+        dictation_replay_modifiers=("alt", "shift"),
         dictation_tap_ms=250,
         dictation_injection="type",
         dictation_restore_clipboard=False,
@@ -88,15 +88,15 @@ def test_merge_leaves_untouched_fields_alone():
     settings = AppSettings(
         hotkey_modifiers=("alt", "shift"), dictation_signature="Mason"
     )
-    merged = settings.merged({"dictation_activation": "hold"})
-    assert merged.dictation_activation == "hold"
+    merged = settings.merged({"dictation_injection": "type"})
+    assert merged.dictation_injection == "type"
     assert merged.hotkey_modifiers == ("alt", "shift")
     assert merged.dictation_signature == "Mason"
 
 
 def test_merge_validates_the_result():
     with pytest.raises(ValueError):
-        AppSettings().merged({"dictation_activation": "telepathy"})
+        AppSettings().merged({"dictation_injection": "telepathy"})
 
 
 def test_merge_rejects_a_non_object():
@@ -133,7 +133,6 @@ def test_an_empty_email_chord_disables_it():
 @pytest.mark.parametrize(
     "payload",
     [
-        {"dictation_activation": "telepathy"},
         {"dictation_injection": "telekinesis"},
         {"dictation_tap_ms": 5},
         {"dictation_tap_ms": 99999},
@@ -168,3 +167,40 @@ def test_vocabulary_accepts_objects():
 def test_unknown_keys_are_ignored():
     settings = AppSettings.from_dict(AppSettings().to_dict())
     assert settings == AppSettings()
+
+
+def test_a_letter_chord_may_share_modifiers_with_a_digit_chord():
+    settings = AppSettings.from_dict(
+        {
+            "hotkey_modifiers": ["ctrl", "alt"],
+            "dictation_replay_modifiers": ["ctrl", "alt"],
+        }
+    )
+    assert settings.dictation_replay_label == "Ctrl+Alt+Z"
+
+
+def test_two_modifier_only_chords_still_collide():
+    with pytest.raises(ValueError, match="choose different modifiers"):
+        AppSettings.from_dict(
+            {
+                "dictation_modifiers": ["ctrl", "win"],
+                "dictation_email_modifiers": ["ctrl", "win"],
+            }
+        )
+
+
+def test_a_letter_chord_may_not_shadow_a_modifier_only_chord():
+    with pytest.raises(ValueError, match="choose different modifiers"):
+        AppSettings.from_dict(
+            {
+                "dictation_modifiers": ["ctrl", "alt"],
+                "hotkey_modifiers": ["ctrl", "shift"],
+                "dictation_replay_modifiers": ["ctrl", "alt"],
+            }
+        )
+
+
+def test_an_empty_replay_chord_disables_it():
+    settings = AppSettings.from_dict({"dictation_replay_modifiers": []})
+    assert settings.dictation_replay_modifiers == ()
+    assert settings.dictation_replay_label == "off"

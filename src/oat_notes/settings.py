@@ -18,8 +18,9 @@ MODIFIER_LABELS = {
     "win": "Win",
 }
 
-ACTIVATIONS = ("hybrid", "hold", "toggle")
 INJECTIONS = ("paste", "type")
+DIGIT_KEY = "digit"
+REPLAY_KEY = "z"
 MIN_TAP_MS = 50
 MAX_TAP_MS = 2000
 
@@ -81,7 +82,7 @@ class AppSettings:
     dictation_enabled: bool = True
     dictation_modifiers: tuple[str, ...] = ("ctrl", "win")
     dictation_email_modifiers: tuple[str, ...] = ("ctrl", "shift", "win")
-    dictation_activation: str = "hybrid"
+    dictation_replay_modifiers: tuple[str, ...] = ("ctrl", "alt")
     dictation_tap_ms: int = 400
     dictation_email_detection: bool = True
     dictation_injection: str = "paste"
@@ -118,8 +119,8 @@ class AppSettings:
             dictation_email_modifiers=normalize_modifiers(
                 pick("dictation_email_modifiers"), allow_empty=True
             ),
-            dictation_activation=_choice(
-                pick("dictation_activation"), ACTIVATIONS, "dictation_activation"
+            dictation_replay_modifiers=normalize_modifiers(
+                pick("dictation_replay_modifiers"), allow_empty=True
             ),
             dictation_tap_ms=tap_ms,
             dictation_email_detection=_flag(
@@ -142,22 +143,49 @@ class AppSettings:
         return settings
 
     def _check_chords(self) -> None:
-        """Chords match on an exact modifier set, so two bindings sharing one
-        would make the loser unreachable."""
-        chords = {
-            "the speaker-switch hotkey": self.hotkey_modifiers,
-            "the dictation hotkey": self.dictation_modifiers,
-        }
+        """Two bindings that resolve to the same keystroke make one of them
+        unreachable.
+
+        A chord is its modifiers *plus* its key, so Ctrl+Alt+Z and Ctrl+Alt+1–9
+        coexist happily. Modifier-only chords are the exception: they arm on the
+        modifiers alone, so they may not share modifiers with anything.
+        """
+        chords = [
+            ("the speaker-switch hotkey", self.hotkey_modifiers, DIGIT_KEY),
+            ("the dictation hotkey", self.dictation_modifiers, None),
+        ]
         if self.dictation_email_modifiers:
-            chords["the email dictation hotkey"] = self.dictation_email_modifiers
-        seen: dict[tuple[str, ...], str] = {}
-        for name, modifiers in chords.items():
-            if modifiers in seen:
+            chords.append(
+                ("the email dictation hotkey", self.dictation_email_modifiers, None)
+            )
+        if self.dictation_replay_modifiers:
+            chords.append(
+                ("the replay hotkey", self.dictation_replay_modifiers, REPLAY_KEY)
+            )
+
+        seen: dict[tuple[tuple[str, ...], str | None], str] = {}
+        modifier_only: dict[tuple[str, ...], str] = {}
+        for name, modifiers, key in chords:
+            clash = seen.get((modifiers, key))
+            if clash is None and key is not None:
+                clash = modifier_only.get(modifiers)
+            if clash is None and key is None:
+                clash = next(
+                    (
+                        other
+                        for (other_modifiers, _), other in seen.items()
+                        if other_modifiers == modifiers
+                    ),
+                    None,
+                )
+            if clash is not None:
                 raise ValueError(
-                    f"{name} and {seen[modifiers]} would both be"
+                    f"{name} and {clash} would both be"
                     f" {modifier_label(modifiers)} — choose different modifiers"
                 )
-            seen[modifiers] = name
+            seen[(modifiers, key)] = name
+            if key is None:
+                modifier_only[modifiers] = name
 
     def merged(self, payload: dict[str, Any]) -> AppSettings:
         """Apply a partial update. The settings page saves one card at a time,
@@ -181,6 +209,12 @@ class AppSettings:
             return "off"
         return modifier_label(self.dictation_email_modifiers)
 
+    @property
+    def dictation_replay_label(self) -> str:
+        if not self.dictation_replay_modifiers:
+            return "off"
+        return f"{modifier_label(self.dictation_replay_modifiers)}+{REPLAY_KEY.upper()}"
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "hotkey_modifiers": list(self.hotkey_modifiers),
@@ -190,7 +224,8 @@ class AppSettings:
             "dictation_label": self.dictation_label,
             "dictation_email_modifiers": list(self.dictation_email_modifiers),
             "dictation_email_label": self.dictation_email_label,
-            "dictation_activation": self.dictation_activation,
+            "dictation_replay_modifiers": list(self.dictation_replay_modifiers),
+            "dictation_replay_label": self.dictation_replay_label,
             "dictation_tap_ms": self.dictation_tap_ms,
             "dictation_email_detection": self.dictation_email_detection,
             "dictation_injection": self.dictation_injection,

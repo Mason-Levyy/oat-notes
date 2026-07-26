@@ -217,7 +217,19 @@ class HotkeyListener:
         if wanted == BRACKET:
             direction = cls._page_direction(key)
             return (False, ()) if direction is None else (True, (direction,))
+        if wanted and len(wanted) == 1 and wanted.isalpha():
+            return (cls._is_letter(key, wanted), ())
         return (getattr(key, "name", "") == wanted, ())
+
+    @staticmethod
+    def _is_letter(key, letter: str) -> bool:
+        char = getattr(key, "char", None)
+        if char and char.lower() == letter.lower():
+            return True
+        # Ctrl+letter on Windows reports a control character (\x1a for Z), the
+        # same problem _digit_index solves — fall back to the virtual key.
+        virtual_key = getattr(key, "vk", None)
+        return virtual_key is not None and virtual_key == ord(letter.upper())
 
     @staticmethod
     def _safely(callback: Callable, *arguments) -> None:
