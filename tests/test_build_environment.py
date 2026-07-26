@@ -28,3 +28,27 @@ def test_installer_build_uses_unlocked_private_app_staging():
     assert 'Join-Path $stageRoot "installer-dist"' in installer_script
     assert "$buildParams = @{ DistPath = $installerDistPath }" in installer_script
     assert '& "$PSScriptRoot\\build_app.ps1" @buildParams' in installer_script
+
+
+def test_version_is_consistent_across_the_build():
+    import re
+
+    import oat_notes
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    installer = (ROOT / "installer" / "oat-notes.iss").read_text(encoding="utf-8")
+    declared = re.search(r'#define AppVersion "([^"]+)"', installer).group(1)
+
+    assert project["project"]["version"] == oat_notes.__version__ == declared
+
+
+def test_overlay_toolkit_is_bundled():
+    spec = (ROOT / "oat-notes.spec").read_text(encoding="utf-8")
+    assert "'tkinter'" in spec
+
+
+def test_startup_shortcut_launches_in_the_background():
+    installer = (ROOT / "installer" / "oat-notes.iss").read_text(encoding="utf-8")
+    assert 'Name: "startupicon"' in installer
+    assert '{userstartup}\\Oat Notes' in installer
+    assert 'Parameters: "--background"' in installer

@@ -39,20 +39,30 @@ def _configure_windowed_logging() -> None:
         atexit.register(_log_file.close)
 
 
+_FROZEN_DEFAULTS = ("--ui", "--backend", "openvino", "--ov-device", "NPU")
+_FLAGS_THAT_DO_NOT_SELECT_A_MODE = frozenset(
+    {"--background", "--no-overlay", "--no-browser"}
+)
+
+
+def default_argv(argv: list[str]) -> list[str]:
+    """A double-click, or the Windows startup shortcut, means 'run the app'.
+    Anything that already picks a mode is left exactly as typed."""
+    if any(
+        argument not in _FLAGS_THAT_DO_NOT_SELECT_A_MODE for argument in argv[1:]
+    ):
+        return argv
+    return [
+        *argv,
+        *_FROZEN_DEFAULTS,
+        "--out-dir",
+        str(default_transcript_dir()),
+    ]
+
+
 def run() -> None:
     _configure_windowed_logging()
-    if len(sys.argv) == 1:
-        sys.argv.extend(
-            [
-                "--ui",
-                "--backend",
-                "openvino",
-                "--ov-device",
-                "NPU",
-                "--out-dir",
-                str(default_transcript_dir()),
-            ]
-        )
+    sys.argv = default_argv(sys.argv)
     from .cli import main
 
     main()

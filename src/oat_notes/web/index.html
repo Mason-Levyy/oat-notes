@@ -146,9 +146,7 @@ body {
   font-size: 9px;
 }
 .tab:last-child { border-right: 0; }
-/* Ink inversion marks a selected state; the orange accent is reserved for the
-   one action worth taking on a surface (START MEETING, SAVE HOTKEY, RECORD). */
-.tab.active { background: var(--ink); color: var(--paper); }
+.tab.active { background: var(--oat); }
 .tab:focus-visible { outline: 3px solid var(--ink); outline-offset: -3px; }
 
 /* ---------- layout ---------- */
@@ -219,7 +217,7 @@ body {
   text-align: center; background: var(--paper); font-size: 9px;
 }
 .modifier-option input:checked + span {
-  background: var(--ink); color: var(--paper); box-shadow: 3px 3px 0 var(--ink);
+  background: var(--oat); box-shadow: 3px 3px 0 var(--ink);
 }
 .modifier-option input:focus-visible + span { outline: 3px solid var(--sprout); }
 /* Sits flush under the modifier grid so the toggles and their result read as
@@ -228,6 +226,27 @@ body {
   border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
   padding: 11px; margin-bottom: 18px; text-align: center; font-size: 11px;
 }
+.dictation-status {
+  border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
+  padding: 11px; margin: 16px 0 4px; text-align: center; font-size: 10px;
+}
+.dictation-status.live { background: var(--rec); color: #fff; }
+.dictation-status.busy { color: var(--oat); }
+.dictation-status.failed { color: var(--rec); }
+.subhead {
+  font-size: 9px; margin: 22px 0 4px; padding-top: 14px;
+  border-top: 3px solid var(--ink);
+}
+.toggle-row { display: block; margin-top: 8px; }
+.toggle-row span { text-align: left; padding: 10px 12px; font-size: 8px; }
+.field-label { flex: 0 0 88px; font-size: 8px; }
+.vocabulary-row {
+  display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  border: 2px solid var(--ink); background: var(--paper);
+  padding: 8px 10px; margin-top: 8px; font-family: Consolas, monospace;
+  font-size: 12px;
+}
+.vocabulary-row .heard { color: #6b6558; }
 .settings-message { min-height: 18px; margin-top: 14px; font-size: 8px; }
 .settings-message.error { color: var(--rec); }
 .settings-message.saved { color: var(--sprout); }
@@ -417,7 +436,7 @@ body {
   background: #fff; padding: 9px 16px; cursor: pointer;
   box-shadow: -3px 3px 0 var(--ink);
 }
-.notes-tab[aria-expanded="true"] { background: var(--ink); color: var(--paper); }
+.notes-tab[aria-expanded="true"] { background: var(--oat-dark); }
 .notes-drawer {
   position: fixed; inset: 0 0 0 auto; width: min(320px, 86vw); z-index: 25;
   background: var(--paper); border-left: 3px solid var(--ink);
@@ -615,6 +634,71 @@ body {
       </form>
     </div>
     <div class="settings-card">
+      <h2 class="pixel">DICTATION</h2>
+      <p>Hold the chord anywhere in Windows, speak, and release. The cleaned text is inserted wherever the cursor is.</p>
+      <div class="hint">Everything stays on this machine. A quick tap latches recording on until you tap again; Esc cancels. Text that sounds like an email is reformatted as one.</div>
+      <div class="dictation-status pixel" id="dictation-status" role="status">IDLE</div>
+      <form id="dictation-form">
+        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-enabled"><span>ENABLE DICTATION</span></label>
+
+        <h3 class="pixel subhead">HOTKEY</h3>
+        <div class="modifier-grid" id="dictation-modifier-grid">
+          <label class="modifier-option pixel"><input type="checkbox" value="ctrl"><span>CTRL</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="alt"><span>ALT</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="shift"><span>SHIFT</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="win"><span>WIN</span></label>
+        </div>
+        <div class="hotkey-preview pixel" id="dictation-preview">CTRL+WIN</div>
+
+        <h3 class="pixel subhead">FORCE EMAIL HOTKEY</h3>
+        <div class="hint">Skips detection and always formats as an email. Clear every box to turn it off.</div>
+        <div class="modifier-grid" id="dictation-email-grid">
+          <label class="modifier-option pixel"><input type="checkbox" value="ctrl"><span>CTRL</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="alt"><span>ALT</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="shift"><span>SHIFT</span></label>
+          <label class="modifier-option pixel"><input type="checkbox" value="win"><span>WIN</span></label>
+        </div>
+        <div class="hotkey-preview pixel" id="dictation-email-preview">CTRL+SHIFT+WIN</div>
+
+        <h3 class="pixel subhead">BEHAVIOUR</h3>
+        <div class="compact-row">
+          <label class="field-label pixel" for="dictation-activation">ACTIVATION</label>
+          <select id="dictation-activation">
+            <option value="hybrid">Hybrid — hold to talk, tap to latch</option>
+            <option value="hold">Hold only</option>
+            <option value="toggle">Tap to toggle</option>
+          </select>
+        </div>
+        <div class="compact-row">
+          <label class="field-label pixel" for="dictation-injection">INSERT BY</label>
+          <select id="dictation-injection">
+            <option value="paste">Pasting (fastest)</option>
+            <option value="type">Typing (for apps that block paste)</option>
+          </select>
+        </div>
+        <div class="compact-row">
+          <label class="field-label pixel" for="dictation-signature">SIGN OFF AS</label>
+          <input type="text" id="dictation-signature" placeholder="Your name (optional)">
+        </div>
+        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-email-detection"><span>DETECT EMAILS AUTOMATICALLY</span></label>
+        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-restore-clipboard"><span>RESTORE MY CLIPBOARD AFTER PASTING</span></label>
+        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-spoken-punctuation"><span>OBEY SPOKEN PUNCTUATION ("PERIOD", "COMMA")</span></label>
+        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="overlay-enabled"><span>SHOW THE FLOATING HUD</span></label>
+
+        <h3 class="pixel subhead">VOCABULARY</h3>
+        <div class="hint">Names and jargon transcription keeps getting wrong. Matched whole-word, ignoring case.</div>
+        <div class="compact-row">
+          <input type="text" id="vocabulary-heard" placeholder="Heard as">
+          <input type="text" id="vocabulary-written" placeholder="Write instead">
+          <button type="button" class="mini" id="vocabulary-add">ADD</button>
+        </div>
+        <div class="library-list" id="vocabulary-list"></div>
+
+        <button type="submit" class="btn start" id="dictation-save">SAVE DICTATION</button>
+        <div class="settings-message pixel" id="dictation-message" role="status"></div>
+      </form>
+    </div>
+    <div class="settings-card">
       <h2 class="pixel">SPEAKER LIBRARY</h2>
       <p>Profiles stay on this machine. Only voice embeddings are saved; captured audio is never retained.</p>
       <div class="compact-row">
@@ -653,6 +737,7 @@ let state = {
   enrollment: null,
   profile_learning: null,
   cleanup_status: "loading",
+  dictation: { enabled: true, phase: "idle", error: null },
 };
 let setupRoster = [];
 let sessionEpoch = null;
@@ -660,6 +745,8 @@ let tick = null;
 let profileLearningTimer = null;
 let rosterFocus = null;
 let hotkeyDirty = false;
+let dictationDirty = false;
+let vocabulary = [];
 let dragIndex = null;
 let groupOptionsOpen = false;
 let personResults = [];
@@ -698,6 +785,24 @@ function hotkeyLabel(modifiers) {
 function updateHotkeyPreview() {
   const label = hotkeyLabel(selectedModifiers()).toUpperCase();
   $("hotkey-preview").textContent = hotkeyDirty ? `${label} — UNSAVED` : label;
+}
+
+function gridModifiers(id) {
+  return Array.from($(id).querySelectorAll("input[type=checkbox]:checked"))
+    .map((input) => input.value);
+}
+
+function chordLabel(modifiers, emptyText) {
+  if (!modifiers.length) return emptyText;
+  return modifiers.map((item) => modifierLabels[item]).join("+").toUpperCase();
+}
+
+function updateDictationPreview() {
+  const suffix = dictationDirty ? " — UNSAVED" : "";
+  $("dictation-preview").textContent =
+    chordLabel(gridModifiers("dictation-modifier-grid"), "CHOOSE A MODIFIER") + suffix;
+  $("dictation-email-preview").textContent =
+    chordLabel(gridModifiers("dictation-email-grid"), "OFF") + suffix;
 }
 
 function openTab(name) {
@@ -1074,7 +1179,89 @@ function renderSettings() {
     message.textContent = "";
     message.className = "settings-message pixel";
   }
+  renderDictationSettings();
   renderLibrarySettings();
+}
+
+function renderDictationSettings() {
+  const settings = state.settings || {};
+  if (!dictationDirty) {
+    setGrid("dictation-modifier-grid", settings.dictation_modifiers || []);
+    setGrid("dictation-email-grid", settings.dictation_email_modifiers || []);
+    $("dictation-enabled").checked = settings.dictation_enabled !== false;
+    $("dictation-email-detection").checked =
+      settings.dictation_email_detection !== false;
+    $("dictation-restore-clipboard").checked =
+      settings.dictation_restore_clipboard !== false;
+    $("dictation-spoken-punctuation").checked =
+      !!settings.dictation_spoken_punctuation;
+    $("overlay-enabled").checked = settings.overlay_enabled !== false;
+    $("dictation-activation").value = settings.dictation_activation || "hybrid";
+    $("dictation-injection").value = settings.dictation_injection || "paste";
+    $("dictation-signature").value = settings.dictation_signature || "";
+    vocabulary = (settings.dictation_vocabulary || []).map((pair) => pair.slice());
+  }
+  updateDictationPreview();
+  renderVocabulary();
+  renderDictationStatus();
+}
+
+const DICTATION_LABELS = {
+  idle: "IDLE", loading: "LOADING MODEL…", listening: "LISTENING…",
+  latched: "LISTENING (LATCHED)…", transcribing: "TRANSCRIBING…",
+  formatting: "FORMATTING…", inserted: "INSERTED", cancelled: "CANCELLED",
+  error: "ERROR", unavailable: "UNAVAILABLE",
+};
+const DICTATION_CLASSES = {
+  listening: "live", latched: "live", transcribing: "busy",
+  formatting: "busy", loading: "busy", error: "failed", unavailable: "failed",
+};
+
+function renderDictationStatus() {
+  const dictation = state.dictation || {};
+  const element = $("dictation-status");
+  if (dictation.enabled === false && dictation.phase !== "unavailable") {
+    element.textContent = "PAUSED";
+    element.className = "dictation-status pixel";
+    return;
+  }
+  const phase = dictation.phase || "idle";
+  element.textContent = dictation.error
+    ? String(dictation.error).toUpperCase()
+    : DICTATION_LABELS[phase] || phase.toUpperCase();
+  element.className = `dictation-status pixel ${DICTATION_CLASSES[phase] || ""}`.trim();
+}
+
+function setGrid(id, modifiers) {
+  const selected = new Set(modifiers);
+  $(id).querySelectorAll("input[type=checkbox]").forEach((input) => {
+    input.checked = selected.has(input.value);
+  });
+}
+
+function renderVocabulary() {
+  const list = $("vocabulary-list");
+  if (!vocabulary.length) {
+    list.innerHTML = '<div class="list-empty">No substitutions yet.</div>';
+    return;
+  }
+  list.innerHTML = vocabulary
+    .map(
+      (pair, index) =>
+        `<div class="vocabulary-row"><span><span class="heard">${escapeHtml(
+          pair[0]
+        )}</span> → ${escapeHtml(pair[1])}</span>` +
+        `<button type="button" class="mini danger" data-vocabulary="${index}">REMOVE</button></div>`
+    )
+    .join("");
+  list.querySelectorAll("[data-vocabulary]").forEach((button) => {
+    button.onclick = () => {
+      vocabulary.splice(Number(button.dataset.vocabulary), 1);
+      dictationDirty = true;
+      renderVocabulary();
+      updateDictationPreview();
+    };
+  });
 }
 
 function lineHtml(line) {
@@ -1630,6 +1817,63 @@ $("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
   input.onchange = () => { hotkeyDirty = true; updateHotkeyPreview(); };
 });
 
+$("dictation-form").querySelectorAll("input, select").forEach((input) => {
+  input.addEventListener("change", () => {
+    dictationDirty = true;
+    updateDictationPreview();
+  });
+});
+
+$("vocabulary-add").onclick = () => {
+  const heard = $("vocabulary-heard").value.trim();
+  const written = $("vocabulary-written").value.trim();
+  if (!heard) return;
+  vocabulary.push([heard, written]);
+  $("vocabulary-heard").value = "";
+  $("vocabulary-written").value = "";
+  $("vocabulary-heard").focus();
+  dictationDirty = true;
+  renderVocabulary();
+  updateDictationPreview();
+};
+
+$("dictation-form").onsubmit = (event) => {
+  event.preventDefault();
+  const message = $("dictation-message");
+  const modifiers = gridModifiers("dictation-modifier-grid");
+  if (!modifiers.length) {
+    message.textContent = "CHOOSE AT LEAST ONE MODIFIER";
+    message.className = "settings-message pixel error";
+    return;
+  }
+  post("/api/settings", {
+    dictation_enabled: $("dictation-enabled").checked,
+    dictation_modifiers: modifiers,
+    dictation_email_modifiers: gridModifiers("dictation-email-grid"),
+    dictation_activation: $("dictation-activation").value,
+    dictation_injection: $("dictation-injection").value,
+    dictation_email_detection: $("dictation-email-detection").checked,
+    dictation_restore_clipboard: $("dictation-restore-clipboard").checked,
+    dictation_spoken_punctuation: $("dictation-spoken-punctuation").checked,
+    dictation_signature: $("dictation-signature").value,
+    dictation_vocabulary: vocabulary,
+    overlay_enabled: $("overlay-enabled").checked,
+  }).then((result) => {
+    if (result.error) {
+      message.textContent = result.error.toUpperCase();
+      message.className = "settings-message pixel error";
+      return;
+    }
+    dictationDirty = false;
+    applyState(result);
+    const label = result.settings.dictation_enabled
+      ? `SAVED — ${result.settings.dictation_label}`
+      : "SAVED — DICTATION OFF";
+    message.textContent = label.toUpperCase();
+    message.className = "settings-message pixel saved";
+  });
+};
+
 $("settings-form").onsubmit = (event) => {
   event.preventDefault();
   const modifiers = selectedModifiers();
@@ -1719,6 +1963,12 @@ events.onmessage = (message) => {
     }
   } else if (event.type === "note") {
     addNoteEntry(event);
+  } else if (event.type === "dictation") {
+    state.dictation = Object.assign({}, state.dictation, {
+      phase: event.phase,
+      error: event.error || null,
+    });
+    renderDictationStatus();
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);
   } else if (event.type === "enrollment") {
