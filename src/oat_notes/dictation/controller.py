@@ -11,6 +11,8 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
@@ -40,6 +42,7 @@ _SHUTDOWN = "shutdown"
 REPLAY_KEY = "z"
 
 _LATCH_SPEECH_CEILING = 0.35
+HISTORY_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,11 @@ class DictationController:
         self._force_email = False
         self._target_hwnd = 0
         self.last_text: str | None = None
+        # Deliberately memory-only: this is a verbatim record of everything
+        # dictated, and the application never writes captured text to disk.
+        self._history: deque[dict] = deque(maxlen=HISTORY_LIMIT)
+        self._history_lock = threading.Lock()
+        self._next_entry_id = 1
 
         self.phase = IDLE
         self.last_error: str | None = None
@@ -319,7 +327,30 @@ class DictationController:
             restore_clipboard=self.options.restore_clipboard,
         )
         self.last_text = text
+        self._remember(text, mode)
         self._publish(INSERTED, mode=mode, characters=len(text))
+
+    def _remember(self, text: str, mode: str) -> None:
+        with self._history_lock:
+            self._history.appendleft(
+                {
+                    "id": self._next_entry_id,
+                    "text": text,
+                    "mode": mode,
+                    "at": time.time(),
+                }
+            )
+            self._next_entry_id += 1
+
+    def history(self) -> list[dict]:
+        """Newest first. Callers get copies so they cannot mutate the deque."""
+        with self._history_lock:
+            return [dict(entry) for entry in self._history]
+
+    def clear_history(self) -> None:
+        with self._history_lock:
+            self._history.clear()
+        self.last_text = None
 
     def _abandon(self) -> None:
         if self._recorder is not None:
