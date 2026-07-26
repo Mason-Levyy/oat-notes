@@ -167,12 +167,27 @@ def test_inject_dispatches_to_the_chosen_method(monkeypatch):
 @windows_only
 def test_inject_restores_focus_first(monkeypatch):
     order = []
-    monkeypatch.setattr(
-        inject, "restore_foreground", lambda hwnd: order.append(("focus", hwnd))
-    )
+
+    def restore(hwnd):
+        order.append(("focus", hwnd))
+        return True
+
+    monkeypatch.setattr(inject, "restore_foreground", restore)
     monkeypatch.setattr(inject, "paste_text", lambda text, **k: order.append("paste"))
     inject.inject("hello", hwnd=1234)
     assert order == [("focus", 1234), "paste"]
+
+
+@windows_only
+def test_inject_refuses_when_focus_cannot_be_restored(monkeypatch):
+    """Better to insert nothing than to type a dictation into Windows Search."""
+    monkeypatch.setattr(inject, "restore_foreground", lambda hwnd: False)
+    monkeypatch.setattr(inject, "paste_text", _fail)
+    monkeypatch.setattr(inject, "type_text", _fail)
+    with pytest.raises(inject.InjectionError, match="took focus"):
+        inject.inject("hello", hwnd=1234)
+
+
 
 
 @windows_only
