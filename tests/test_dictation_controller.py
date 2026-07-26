@@ -422,3 +422,35 @@ def test_history_snapshots_cannot_mutate_the_deque(injected):
     dictate(controller, "hello there")
     controller.history()[0]["text"] = "tampered"
     assert controller.history()[0]["text"] == "Hello there"
+
+
+def test_a_failed_insert_still_leaves_the_text_replayable(monkeypatch):
+    def explode(text, **kwargs):
+        raise inject.InjectionError("another window took focus")
+
+    monkeypatch.setattr(inject, "inject", explode)
+    controller, phases = make_controller()
+    arm(controller)
+    release(controller, held_seconds=2.0)
+
+    assert names(phases)[-1] == dictation.ERROR
+    assert controller.last_text == "Hello world"
+    assert [entry["text"] for entry in controller.history()] == ["Hello world"]
+
+
+def test_the_kept_text_can_then_be_replayed(injected, monkeypatch):
+    def explode(text, **kwargs):
+        raise inject.InjectionError("another window took focus")
+
+    monkeypatch.setattr(inject, "inject", explode)
+    controller, _ = make_controller()
+    arm(controller)
+    release(controller, held_seconds=2.0)
+
+    monkeypatch.setattr(
+        inject, "inject", lambda text, **kwargs: injected.append((text, kwargs))
+    )
+    replay(controller, hwnd=999)
+    assert injected == [("Hello world", {
+        "method": inject.PASTE, "hwnd": 999, "restore_clipboard": True
+    })]
