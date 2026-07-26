@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import threading
 from dataclasses import replace
 from datetime import datetime
@@ -59,21 +60,30 @@ def journal_path_for(directory: Path, started_at: datetime, name: str) -> Path:
 def recover_journals(directory: Path) -> list[Path]:
     """Turn journals orphaned by a crashed prior run into recovered
     transcripts. Empty journals are just cleaned up. Returns the paths of
-    the recovered transcript files."""
+    the recovered transcript files.
+
+    A journal another process still holds open is not orphaned — it belongs
+    to a live run — so it is left where it is. Startup must survive that:
+    recovery is a courtesy, and no journal is worth refusing to launch over.
+    """
     if not directory.exists():
         return []
     recovered: list[Path] = []
     for partial in sorted(directory.glob("*" + JOURNAL_SUFFIX)):
-        if partial.stat().st_size == 0:
-            partial.unlink(missing_ok=True)
+        try:
+            if partial.stat().st_size == 0:
+                partial.unlink(missing_ok=True)
+                continue
+            stem = partial.name[: -len(JOURNAL_SUFFIX)]
+            target = directory / f"{stem}_recovered.txt"
+            counter = 1
+            while target.exists():
+                counter += 1
+                target = directory / f"{stem}_recovered_{counter}.txt"
+            partial.rename(target)
+        except OSError as error:
+            print(f"warning: leaving {partial.name} in place: {error}", file=sys.stderr)
             continue
-        stem = partial.name[: -len(JOURNAL_SUFFIX)]
-        target = directory / f"{stem}_recovered.txt"
-        counter = 1
-        while target.exists():
-            counter += 1
-            target = directory / f"{stem}_recovered_{counter}.txt"
-        partial.rename(target)
         recovered.append(target)
     return recovered
 
