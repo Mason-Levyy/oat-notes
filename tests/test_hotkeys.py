@@ -287,3 +287,58 @@ def test_chord_rejects_unknown_modifier():
 def test_chord_rejects_empty():
     with pytest.raises(ValueError, match="at least one modifier or a key"):
         Chord.of(())
+
+
+def make_defused_listener(modifiers=("ctrl", "win")):
+    defused = []
+    listener, events = make_dictation_listener(modifiers)
+    listener._defuse_start_menu = lambda: defused.append(True)
+    return listener, events, defused
+
+
+def test_win_chord_defuses_the_start_menu_on_arm():
+    listener, _events, defused = make_defused_listener()
+    listener._handle_press(CTRL)
+    listener._handle_press(WIN)
+    assert defused == [True]
+
+
+def test_the_wrong_press_order_still_defuses():
+    listener, events, defused = make_defused_listener()
+    listener._handle_press(WIN)
+    assert defused == []
+    listener._handle_press(CTRL)
+    assert defused == [True]
+    listener._handle_release(WIN)
+    assert phases(events) == ["press", "release"]
+
+
+def test_a_chord_without_win_does_not_defuse():
+    listener, _events, defused = make_defused_listener(("ctrl", "alt"))
+    listener._handle_press(CTRL)
+    listener._handle_press(ALT)
+    assert defused == []
+
+
+def test_the_windows_key_alone_is_left_alone():
+    listener, _events, defused = make_defused_listener()
+    listener._handle_press(WIN)
+    listener._handle_release(WIN)
+    assert defused == []
+
+
+def test_the_injected_key_does_not_cancel_the_chord():
+    listener, events, _defused = make_defused_listener()
+    listener._handle_press(CTRL)
+    listener._handle_press(WIN)
+    listener._handle_press(FakeKey(vk=0xFC))
+    listener._handle_release(WIN)
+    assert phases(events) == ["press", "release"]
+
+
+def test_a_real_key_still_cancels_the_chord():
+    listener, events, _defused = make_defused_listener()
+    listener._handle_press(CTRL)
+    listener._handle_press(WIN)
+    listener._handle_press(FakeKey(char="d"))
+    assert phases(events) == ["press", "cancel"]
