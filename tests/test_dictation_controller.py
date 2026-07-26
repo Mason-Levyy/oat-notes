@@ -161,26 +161,6 @@ def test_quick_tap_that_caught_speech_still_commits(injected):
     assert injected != []
 
 
-def test_hold_mode_never_latches(injected):
-    recorder = FakeRecorder()
-    recorder.speech_seconds = 0.0
-    controller, _ = make_controller(recorder, activation=dictation.HOLD)
-    arm(controller)
-    release(controller, held_seconds=0.05)
-    assert injected != []
-
-
-def test_toggle_mode_always_latches(injected):
-    recorder = FakeRecorder()
-    controller, phases = make_controller(recorder, activation=dictation.TOGGLE)
-    arm(controller)
-    release(controller, held_seconds=5.0)
-    assert injected == []
-    assert names(phases)[-1] == dictation.LATCHED
-    arm(controller)
-    assert injected != []
-
-
 def test_escape_cancels_a_latched_recording(injected):
     recorder = FakeRecorder()
     recorder.speech_seconds = 0.0
@@ -280,12 +260,12 @@ def test_phase_listener_error_does_not_break_dictation(injected):
 # -- bindings --------------------------------------------------------------
 
 
-def test_bind_registers_both_chords_and_escape():
+def test_bind_registers_every_chord_and_escape():
     controller, _ = make_controller()
     listener = HotkeyListener()
     controller.bind(listener)
     assert set(listener._bindings) == {
-        "dictation", "dictation-email", "dictation-cancel"
+        "dictation", "dictation-email", "dictation-replay", "dictation-cancel"
     }
     controller.unbind(listener)
     assert listener._bindings == {}
@@ -327,3 +307,54 @@ def test_rebind_swaps_the_chord():
     assert listener._bindings["dictation"].chord.modifiers == frozenset(
         {"ctrl", "shift"}
     )
+
+
+def replay(controller, hwnd=4242):
+    controller._dispatch(_Command(dictation._REPLAY, hwnd=hwnd))
+
+
+def test_replay_reinserts_the_last_dictation(injected):
+    controller, _ = make_controller()
+    arm(controller)
+    release(controller, held_seconds=2.0)
+    replay(controller, hwnd=777)
+    assert [text for text, _ in injected] == ["Hello world", "Hello world"]
+    assert injected[1][1]["hwnd"] == 777
+
+
+def test_replay_targets_the_window_focused_now(injected):
+    controller, _ = make_controller()
+    arm(controller, hwnd=111)
+    release(controller, held_seconds=2.0)
+    replay(controller, hwnd=999)
+    assert injected[0][1]["hwnd"] == 111
+    assert injected[1][1]["hwnd"] == 999
+
+
+def test_replay_before_any_dictation_does_nothing(injected):
+    controller, _ = make_controller()
+    replay(controller)
+    assert injected == []
+
+
+def test_replay_while_recording_is_ignored(injected):
+    controller, _ = make_controller()
+    arm(controller)
+    replay(controller)
+    assert injected == []
+
+
+def test_a_dropped_dictation_does_not_become_replayable(injected):
+    controller, _ = make_controller(FakeRecorder(text=""))
+    arm(controller)
+    release(controller, held_seconds=2.0)
+    replay(controller)
+    assert injected == []
+
+
+def test_replay_reports_inserted(injected):
+    controller, phases = make_controller()
+    arm(controller)
+    release(controller, held_seconds=2.0)
+    replay(controller)
+    assert names(phases)[-1] == dictation.INSERTED

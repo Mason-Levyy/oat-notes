@@ -33,7 +33,7 @@ def dictation_options(settings: AppSettings) -> DictationOptions:
         enabled=settings.dictation_enabled,
         modifiers=settings.dictation_modifiers,
         email_modifiers=settings.dictation_email_modifiers,
-        activation=settings.dictation_activation,
+        replay_modifiers=settings.dictation_replay_modifiers,
         tap_seconds=settings.dictation_tap_ms / 1000.0,
         injection=settings.dictation_injection,
         restore_clipboard=settings.dictation_restore_clipboard,

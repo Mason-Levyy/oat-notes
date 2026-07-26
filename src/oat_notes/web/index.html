@@ -652,14 +652,6 @@ body {
 
         <h3 class="pixel subhead">BEHAVIOUR</h3>
         <div class="compact-row">
-          <label class="field-label pixel" for="dictation-activation">ACTIVATION</label>
-          <select id="dictation-activation">
-            <option value="hybrid">Hybrid — hold to talk, tap to latch</option>
-            <option value="hold">Hold only</option>
-            <option value="toggle">Tap to toggle</option>
-          </select>
-        </div>
-        <div class="compact-row">
           <label class="field-label pixel" for="dictation-injection">INSERT BY</label>
           <select id="dictation-injection">
             <option value="paste">Pasting (fastest)</option>
@@ -782,6 +774,15 @@ const SHORTCUTS = [
     note: "Always formats as an email. Clear all to turn it off.",
   },
   {
+    id: "replay",
+    name: "INSERT LAST AGAIN",
+    field: "dictation_replay_modifiers",
+    label: "dictation_replay_label",
+    allowEmpty: true,
+    suffix: "+Z",
+    note: "Re-inserts the last dictation wherever the cursor is now.",
+  },
+  {
     id: "switch-speaker",
     name: "SWITCH SPEAKER",
     field: "hotkey_modifiers",
@@ -819,6 +820,9 @@ function shortcutHtml(shortcut) {
       `</div></div>`;
   }
   const empty = shortcut.allowEmpty ? "OFF" : "CHOOSE A MODIFIER";
+  const preview = shortcutDraft.length
+    ? chordLabel(shortcutDraft, empty) + (shortcut.suffix || "").toUpperCase()
+    : empty;
   return `<div class="shortcut-row editing"><div class="shortcut-head">` +
     `<span class="shortcut-name pixel">${shortcut.name}</span></div>` +
     `<div class="modifier-grid" data-grid="${shortcut.id}">` +
@@ -827,7 +831,7 @@ function shortcutHtml(shortcut) {
       `${shortcutDraft.includes(modifier) ? " checked" : ""}><span>${modifier.toUpperCase()}</span></label>`
     ).join("") +
     `</div>` +
-    `<div class="hotkey-preview pixel">${escapeHtml(chordLabel(shortcutDraft, empty))}</div>` +
+    `<div class="hotkey-preview pixel">${escapeHtml(preview)}</div>` +
     `<div class="shortcut-actions">` +
     `<button type="button" class="btn start" data-save="${shortcut.id}">SAVE</button>` +
     `<button type="button" class="mini" data-cancel="${shortcut.id}">CANCEL</button>` +
@@ -1262,7 +1266,6 @@ function renderDictationSettings() {
     $("dictation-spoken-punctuation").checked =
       !!settings.dictation_spoken_punctuation;
     $("overlay-enabled").checked = settings.overlay_enabled !== false;
-    $("dictation-activation").value = settings.dictation_activation || "hybrid";
     $("dictation-injection").value = settings.dictation_injection || "paste";
     $("dictation-signature").value = settings.dictation_signature || "";
     vocabulary = (settings.dictation_vocabulary || []).map((pair) => pair.slice());
@@ -1891,7 +1894,6 @@ $("dictation-form").onsubmit = (event) => {
   const message = $("dictation-message");
   post("/api/settings", {
     dictation_enabled: $("dictation-enabled").checked,
-    dictation_activation: $("dictation-activation").value,
     dictation_injection: $("dictation-injection").value,
     dictation_email_detection: $("dictation-email-detection").checked,
     dictation_restore_clipboard: $("dictation-restore-clipboard").checked,

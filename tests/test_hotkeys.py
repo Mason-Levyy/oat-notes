@@ -342,3 +342,47 @@ def test_a_real_key_still_cancels_the_chord():
     listener._handle_press(WIN)
     listener._handle_press(FakeKey(char="d"))
     assert phases(events) == ["press", "cancel"]
+
+
+def make_letter_listener(modifiers=("ctrl", "alt"), letter="z"):
+    fired = []
+    listener = HotkeyListener()
+    listener.bind("replay", Chord.of(modifiers, letter), lambda: fired.append(True))
+    return listener, fired
+
+
+def test_letter_chord_fires_on_the_plain_character():
+    listener, fired = make_letter_listener()
+    press_chord(listener, FakeKey(char="z"), (CTRL, ALT))
+    assert fired == [True]
+
+
+def test_letter_chord_survives_the_control_character():
+    """Ctrl+Alt+Z reports \x1a on Windows, not "z"."""
+    listener, fired = make_letter_listener()
+    press_chord(listener, FakeKey(char="\x1a", vk=ord("Z")), (CTRL, ALT))
+    assert fired == [True]
+
+
+def test_letter_chord_is_case_insensitive():
+    listener, fired = make_letter_listener()
+    press_chord(listener, FakeKey(char="Z"), (CTRL, ALT))
+    assert fired == [True]
+
+
+def test_letter_chord_ignores_other_letters():
+    listener, fired = make_letter_listener()
+    press_chord(listener, FakeKey(char="x"), (CTRL, ALT))
+    press_chord(listener, FakeKey(char="a", vk=ord("A")), (CTRL, ALT))
+    assert fired == []
+
+
+def test_a_letter_and_a_digit_chord_share_modifiers_without_colliding():
+    switched = []
+    replayed = []
+    listener = HotkeyListener(switched.append, modifiers=("ctrl", "alt"))
+    listener.bind("replay", Chord.of(("ctrl", "alt"), "z"), lambda: replayed.append(True))
+    press_chord(listener, FakeKey(char="2"), (CTRL, ALT))
+    press_chord(listener, FakeKey(char="z"), (CTRL, ALT))
+    assert switched == [1]
+    assert replayed == [True]
