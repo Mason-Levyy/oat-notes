@@ -226,6 +226,21 @@ body {
   border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
   padding: 11px; margin-bottom: 18px; text-align: center; font-size: 11px;
 }
+.shortcut-row {
+  border: 3px solid var(--ink); background: var(--paper);
+  padding: 12px 14px; margin-top: 10px;
+}
+.shortcut-row.editing { box-shadow: 4px 4px 0 var(--ink); }
+.shortcut-head { display: flex; gap: 10px; align-items: center; }
+.shortcut-name { flex: 1; font-size: 9px; }
+.shortcut-chord {
+  font-family: Consolas, monospace; font-size: 13px; white-space: nowrap;
+}
+.shortcut-chord.off { color: #6b6558; }
+.shortcut-row .modifier-grid { margin: 12px 0 8px; }
+.shortcut-row .hotkey-preview { margin-bottom: 10px; }
+.shortcut-actions { display: flex; gap: 8px; }
+.shortcut-note { font-size: 8px; color: #6b6558; margin-top: 8px; }
 .dictation-status {
   border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
   padding: 11px; margin: 16px 0 4px; text-align: center; font-size: 10px;
@@ -238,6 +253,11 @@ body {
   border-top: 3px solid var(--ink);
 }
 .toggle-row { display: block; margin-top: 8px; }
+.toggle-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.toggle-grid .toggle-row { margin-top: 0; }
 .toggle-row span { text-align: left; padding: 10px 12px; font-size: 8px; }
 .field-label { flex: 0 0 88px; font-size: 8px; }
 .vocabulary-row {
@@ -618,47 +638,17 @@ body {
 
   <section class="settings-view" id="settings-view">
     <div class="settings-card">
-      <h2 class="pixel">SPEAKER SWITCH HOTKEY</h2>
-      <p>Choose the modifiers held with <b>1–9</b>. The number still selects that speaker's slot.</p>
-      <div class="hint">The shortcut is global while a meeting is recording. Single-modifier combinations may conflict with shortcuts in other apps.</div>
-      <form id="settings-form">
-        <div class="modifier-grid">
-          <label class="modifier-option pixel"><input type="checkbox" value="ctrl"><span>CTRL</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="alt"><span>ALT</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="shift"><span>SHIFT</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="win"><span>WIN</span></label>
-        </div>
-        <div class="hotkey-preview pixel" id="hotkey-preview">CTRL+ALT+1–9</div>
-        <button type="submit" class="btn start" id="settings-save">SAVE HOTKEY</button>
-        <div class="settings-message pixel" id="settings-message" role="status"></div>
-      </form>
+      <h2 class="pixel">SHORTCUTS</h2>
+      <div class="hint">Global to Windows. Two shortcuts can't share the same modifiers.</div>
+      <div class="shortcut-list" id="shortcut-list"></div>
+      <div class="settings-message pixel" id="settings-message" role="status"></div>
     </div>
     <div class="settings-card">
       <h2 class="pixel">DICTATION</h2>
-      <p>Hold the chord anywhere in Windows, speak, and release. The cleaned text is inserted wherever the cursor is.</p>
-      <div class="hint">Everything stays on this machine. A quick tap latches recording on until you tap again; Esc cancels. Text that sounds like an email is reformatted as one.</div>
+      <div class="hint">Hold the chord, speak, release. Everything stays on this machine.</div>
       <div class="dictation-status pixel" id="dictation-status" role="status">IDLE</div>
       <form id="dictation-form">
         <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-enabled"><span>ENABLE DICTATION</span></label>
-
-        <h3 class="pixel subhead">HOTKEY</h3>
-        <div class="modifier-grid" id="dictation-modifier-grid">
-          <label class="modifier-option pixel"><input type="checkbox" value="ctrl"><span>CTRL</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="alt"><span>ALT</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="shift"><span>SHIFT</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="win"><span>WIN</span></label>
-        </div>
-        <div class="hotkey-preview pixel" id="dictation-preview">CTRL+WIN</div>
-
-        <h3 class="pixel subhead">FORCE EMAIL HOTKEY</h3>
-        <div class="hint">Skips detection and always formats as an email. Clear every box to turn it off.</div>
-        <div class="modifier-grid" id="dictation-email-grid">
-          <label class="modifier-option pixel"><input type="checkbox" value="ctrl"><span>CTRL</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="alt"><span>ALT</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="shift"><span>SHIFT</span></label>
-          <label class="modifier-option pixel"><input type="checkbox" value="win"><span>WIN</span></label>
-        </div>
-        <div class="hotkey-preview pixel" id="dictation-email-preview">CTRL+SHIFT+WIN</div>
 
         <h3 class="pixel subhead">BEHAVIOUR</h3>
         <div class="compact-row">
@@ -680,13 +670,15 @@ body {
           <label class="field-label pixel" for="dictation-signature">SIGN OFF AS</label>
           <input type="text" id="dictation-signature" placeholder="Your name (optional)">
         </div>
-        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-email-detection"><span>DETECT EMAILS AUTOMATICALLY</span></label>
-        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-restore-clipboard"><span>RESTORE MY CLIPBOARD AFTER PASTING</span></label>
-        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-spoken-punctuation"><span>OBEY SPOKEN PUNCTUATION ("PERIOD", "COMMA")</span></label>
-        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="overlay-enabled"><span>SHOW THE FLOATING HUD</span></label>
+        <div class="toggle-grid">
+          <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-email-detection"><span>AUTO-DETECT EMAILS</span></label>
+          <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-restore-clipboard"><span>RESTORE CLIPBOARD</span></label>
+          <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-spoken-punctuation"><span>SPOKEN PUNCTUATION</span></label>
+          <label class="modifier-option pixel toggle-row"><input type="checkbox" id="overlay-enabled"><span>FLOATING HUD</span></label>
+        </div>
 
         <h3 class="pixel subhead">VOCABULARY</h3>
-        <div class="hint">Names and jargon transcription keeps getting wrong. Matched whole-word, ignoring case.</div>
+        <div class="hint">Names transcription keeps getting wrong.</div>
         <div class="compact-row">
           <input type="text" id="vocabulary-heard" placeholder="Heard as">
           <input type="text" id="vocabulary-written" placeholder="Write instead">
@@ -700,7 +692,7 @@ body {
     </div>
     <div class="settings-card">
       <h2 class="pixel">SPEAKER LIBRARY</h2>
-      <p>Profiles stay on this machine. Only voice embeddings are saved; captured audio is never retained.</p>
+      <div class="hint">Voice embeddings only — captured audio is never retained.</div>
       <div class="compact-row">
         <input type="text" id="library-new-name" placeholder="Speaker name">
         <button type="button" class="mini" id="library-create">ADD SPEAKER</button>
@@ -711,7 +703,7 @@ body {
     </div>
     <div class="settings-card">
       <h2 class="pixel">GROUPS</h2>
-      <p>Save recurring rosters with their normal order.</p>
+      <div class="hint">Recurring rosters, in their usual order.</div>
       <div class="compact-row">
         <input type="text" id="group-new-name" placeholder="Group name">
         <button type="button" class="mini" id="group-create">ADD GROUP</button>
@@ -744,7 +736,8 @@ let sessionEpoch = null;
 let tick = null;
 let profileLearningTimer = null;
 let rosterFocus = null;
-let hotkeyDirty = false;
+let editingShortcut = null;
+let shortcutDraft = [];
 let dictationDirty = false;
 let vocabulary = [];
 let dragIndex = null;
@@ -772,37 +765,123 @@ function fmt(totalSeconds) {
 
 const modifierLabels = { ctrl: "Ctrl", alt: "Alt", shift: "Shift", win: "Win" };
 
-function selectedModifiers() {
-  return Array.from($("settings-form").querySelectorAll("input[type=checkbox]:checked"))
-    .map((input) => input.value);
-}
-
-function hotkeyLabel(modifiers) {
-  if (!modifiers.length) return "CHOOSE A MODIFIER";
-  return `${modifiers.map((item) => modifierLabels[item]).join("+")}+1–9`;
-}
-
-function updateHotkeyPreview() {
-  const label = hotkeyLabel(selectedModifiers()).toUpperCase();
-  $("hotkey-preview").textContent = hotkeyDirty ? `${label} — UNSAVED` : label;
-}
-
-function gridModifiers(id) {
-  return Array.from($(id).querySelectorAll("input[type=checkbox]:checked"))
-    .map((input) => input.value);
-}
+const SHORTCUTS = [
+  {
+    id: "dictate",
+    name: "DICTATE",
+    field: "dictation_modifiers",
+    label: "dictation_label",
+    note: "Hold to talk, or tap to latch. Esc cancels.",
+  },
+  {
+    id: "dictate-email",
+    name: "DICTATE AS EMAIL",
+    field: "dictation_email_modifiers",
+    label: "dictation_email_label",
+    allowEmpty: true,
+    note: "Always formats as an email. Clear all to turn it off.",
+  },
+  {
+    id: "switch-speaker",
+    name: "SWITCH SPEAKER",
+    field: "hotkey_modifiers",
+    label: "hotkey_label",
+    lockedWhileRecording: true,
+    note: "Held with 1–9. Brackets page through banks.",
+  },
+];
 
 function chordLabel(modifiers, emptyText) {
   if (!modifiers.length) return emptyText;
   return modifiers.map((item) => modifierLabels[item]).join("+").toUpperCase();
 }
 
-function updateDictationPreview() {
-  const suffix = dictationDirty ? " — UNSAVED" : "";
-  $("dictation-preview").textContent =
-    chordLabel(gridModifiers("dictation-modifier-grid"), "CHOOSE A MODIFIER") + suffix;
-  $("dictation-email-preview").textContent =
-    chordLabel(gridModifiers("dictation-email-grid"), "OFF") + suffix;
+function shortcutChord(shortcut) {
+  const settings = state.settings || {};
+  return (settings[shortcut.field] || []).slice();
+}
+
+function renderShortcuts() {
+  $("shortcut-list").innerHTML = SHORTCUTS.map(shortcutHtml).join("");
+  SHORTCUTS.forEach(bindShortcutRow);
+}
+
+function shortcutHtml(shortcut) {
+  const settings = state.settings || {};
+  const editing = editingShortcut === shortcut.id;
+  const current = (settings[shortcut.label] || "").toUpperCase();
+  if (!editing) {
+    const locked = shortcut.lockedWhileRecording && state.recording;
+    return `<div class="shortcut-row"><div class="shortcut-head">` +
+      `<span class="shortcut-name pixel">${shortcut.name}</span>` +
+      `<span class="shortcut-chord${current === "OFF" ? " off" : ""}">${escapeHtml(current)}</span>` +
+      `<button type="button" class="mini" data-edit="${shortcut.id}"${locked ? " disabled" : ""}>EDIT</button>` +
+      `</div></div>`;
+  }
+  const empty = shortcut.allowEmpty ? "OFF" : "CHOOSE A MODIFIER";
+  return `<div class="shortcut-row editing"><div class="shortcut-head">` +
+    `<span class="shortcut-name pixel">${shortcut.name}</span></div>` +
+    `<div class="modifier-grid" data-grid="${shortcut.id}">` +
+    ["ctrl", "alt", "shift", "win"].map((modifier) =>
+      `<label class="modifier-option pixel"><input type="checkbox" value="${modifier}"` +
+      `${shortcutDraft.includes(modifier) ? " checked" : ""}><span>${modifier.toUpperCase()}</span></label>`
+    ).join("") +
+    `</div>` +
+    `<div class="hotkey-preview pixel">${escapeHtml(chordLabel(shortcutDraft, empty))}</div>` +
+    `<div class="shortcut-actions">` +
+    `<button type="button" class="btn start" data-save="${shortcut.id}">SAVE</button>` +
+    `<button type="button" class="mini" data-cancel="${shortcut.id}">CANCEL</button>` +
+    `</div><div class="shortcut-note">${shortcut.note}</div></div>`;
+}
+
+function bindShortcutRow(shortcut) {
+  const list = $("shortcut-list");
+  const edit = list.querySelector(`[data-edit="${shortcut.id}"]`);
+  if (edit) {
+    edit.onclick = () => {
+      editingShortcut = shortcut.id;
+      shortcutDraft = shortcutChord(shortcut);
+      renderShortcuts();
+    };
+    return;
+  }
+  list.querySelectorAll(`[data-grid="${shortcut.id}"] input`).forEach((input) => {
+    input.onchange = () => {
+      shortcutDraft = Array.from(
+        list.querySelectorAll(`[data-grid="${shortcut.id}"] input:checked`)
+      ).map((box) => box.value);
+      renderShortcuts();
+    };
+  });
+  list.querySelector(`[data-cancel="${shortcut.id}"]`).onclick = closeShortcutEditor;
+  list.querySelector(`[data-save="${shortcut.id}"]`).onclick = () => saveShortcut(shortcut);
+}
+
+function closeShortcutEditor() {
+  editingShortcut = null;
+  shortcutDraft = [];
+  renderShortcuts();
+}
+
+function saveShortcut(shortcut) {
+  const message = $("settings-message");
+  if (!shortcutDraft.length && !shortcut.allowEmpty) {
+    message.textContent = "CHOOSE AT LEAST ONE MODIFIER";
+    message.className = "settings-message pixel error";
+    return;
+  }
+  post("/api/settings", { [shortcut.field]: shortcutDraft }).then((result) => {
+    if (result.error) {
+      message.textContent = result.error.toUpperCase();
+      message.className = "settings-message pixel error";
+      return;
+    }
+    editingShortcut = null;
+    shortcutDraft = [];
+    applyState(result);
+    message.textContent = `SAVED — ${result.settings[shortcut.label]}`.toUpperCase();
+    message.className = "settings-message pixel saved";
+  });
 }
 
 function openTab(name) {
@@ -1158,25 +1237,14 @@ function renderLibrarySettings() {
 }
 
 function renderSettings() {
-  const settings = state.settings || { hotkey_modifiers: ["ctrl", "alt"] };
-  const selected = new Set(settings.hotkey_modifiers || []);
-  // A `status` event lands on every library mutation and enrollment, and each
-  // one re-runs applyState. Re-syncing the boxes then would silently revert a
-  // selection the user is still editing, so they'd save the old combination.
-  if (!hotkeyDirty) {
-    $("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
-      input.checked = selected.has(input.value);
-    });
-  }
-  updateHotkeyPreview();
-  $("hotkey-hint").textContent = settings.hotkey_label || hotkeyLabel([...selected]);
-  $("settings-save").disabled = !!state.recording;
+  const settings = state.settings || {};
+  // An open editor holds its own draft, so a `status` event landing mid-edit
+  // repaints around it instead of reverting the selection.
+  renderShortcuts();
+  $("hotkey-hint").textContent = settings.hotkey_label || "Ctrl+Alt+1–9";
   const message = $("settings-message");
-  if (state.recording) {
-    message.textContent = "END THE MEETING BEFORE CHANGING THE HOTKEY";
-    message.className = "settings-message pixel error";
-  } else if (message.textContent === "END THE MEETING BEFORE CHANGING THE HOTKEY") {
-    message.textContent = "";
+  if (state.recording && message.textContent === "") {
+    message.textContent = "END THE MEETING TO CHANGE THE SPEAKER SHORTCUT";
     message.className = "settings-message pixel";
   }
   renderDictationSettings();
@@ -1186,8 +1254,6 @@ function renderSettings() {
 function renderDictationSettings() {
   const settings = state.settings || {};
   if (!dictationDirty) {
-    setGrid("dictation-modifier-grid", settings.dictation_modifiers || []);
-    setGrid("dictation-email-grid", settings.dictation_email_modifiers || []);
     $("dictation-enabled").checked = settings.dictation_enabled !== false;
     $("dictation-email-detection").checked =
       settings.dictation_email_detection !== false;
@@ -1201,7 +1267,6 @@ function renderDictationSettings() {
     $("dictation-signature").value = settings.dictation_signature || "";
     vocabulary = (settings.dictation_vocabulary || []).map((pair) => pair.slice());
   }
-  updateDictationPreview();
   renderVocabulary();
   renderDictationStatus();
 }
@@ -1232,13 +1297,6 @@ function renderDictationStatus() {
   element.className = `dictation-status pixel ${DICTATION_CLASSES[phase] || ""}`.trim();
 }
 
-function setGrid(id, modifiers) {
-  const selected = new Set(modifiers);
-  $(id).querySelectorAll("input[type=checkbox]").forEach((input) => {
-    input.checked = selected.has(input.value);
-  });
-}
-
 function renderVocabulary() {
   const list = $("vocabulary-list");
   if (!vocabulary.length) {
@@ -1259,7 +1317,6 @@ function renderVocabulary() {
       vocabulary.splice(Number(button.dataset.vocabulary), 1);
       dictationDirty = true;
       renderVocabulary();
-      updateDictationPreview();
     };
   });
 }
@@ -1813,15 +1870,8 @@ $("notes-form").onsubmit = (event) => {
 $("tab-meeting").onclick = () => openTab("meeting");
 $("tab-settings").onclick = () => openTab("settings");
 
-$("settings-form").querySelectorAll("input[type=checkbox]").forEach((input) => {
-  input.onchange = () => { hotkeyDirty = true; updateHotkeyPreview(); };
-});
-
 $("dictation-form").querySelectorAll("input, select").forEach((input) => {
-  input.addEventListener("change", () => {
-    dictationDirty = true;
-    updateDictationPreview();
-  });
+  input.addEventListener("change", () => { dictationDirty = true; });
 });
 
 $("vocabulary-add").onclick = () => {
@@ -1834,22 +1884,13 @@ $("vocabulary-add").onclick = () => {
   $("vocabulary-heard").focus();
   dictationDirty = true;
   renderVocabulary();
-  updateDictationPreview();
 };
 
 $("dictation-form").onsubmit = (event) => {
   event.preventDefault();
   const message = $("dictation-message");
-  const modifiers = gridModifiers("dictation-modifier-grid");
-  if (!modifiers.length) {
-    message.textContent = "CHOOSE AT LEAST ONE MODIFIER";
-    message.className = "settings-message pixel error";
-    return;
-  }
   post("/api/settings", {
     dictation_enabled: $("dictation-enabled").checked,
-    dictation_modifiers: modifiers,
-    dictation_email_modifiers: gridModifiers("dictation-email-grid"),
     dictation_activation: $("dictation-activation").value,
     dictation_injection: $("dictation-injection").value,
     dictation_email_detection: $("dictation-email-detection").checked,
@@ -1870,29 +1911,6 @@ $("dictation-form").onsubmit = (event) => {
       ? `SAVED — ${result.settings.dictation_label}`
       : "SAVED — DICTATION OFF";
     message.textContent = label.toUpperCase();
-    message.className = "settings-message pixel saved";
-  });
-};
-
-$("settings-form").onsubmit = (event) => {
-  event.preventDefault();
-  const modifiers = selectedModifiers();
-  const message = $("settings-message");
-  if (!modifiers.length) {
-    message.textContent = "CHOOSE AT LEAST ONE MODIFIER";
-    message.className = "settings-message pixel error";
-    return;
-  }
-  post("/api/settings", { hotkey_modifiers: modifiers }).then((result) => {
-    if (result.error) {
-      message.textContent = result.error.toUpperCase();
-      message.className = "settings-message pixel error";
-      return;
-    }
-    // Clear before applyState so renderSettings re-syncs from the saved value.
-    hotkeyDirty = false;
-    applyState(result);
-    message.textContent = `SAVED — ${result.settings.hotkey_label}`;
     message.className = "settings-message pixel saved";
   });
 };
