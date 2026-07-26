@@ -26,6 +26,7 @@ VK_LWIN = 0x5B
 VK_RWIN = 0x5C
 VK_RETURN = 0x0D
 VK_V = 0x56
+VK_NONAME = 0xFC
 
 _CHORD_MODIFIER_KEYS = (VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN)
 
@@ -203,6 +204,21 @@ def release_modifiers(timeout: float = _MODIFIER_WAIT_SECONDS) -> None:
     stuck = held_modifiers()
     if stuck:
         _send([_key_input(vk, up=True) for vk in stuck])
+
+
+def defuse_start_menu() -> None:
+    """Stop a held Windows key from opening Start when it is released.
+
+    Windows arms "open Start on keyup" when the Windows key goes down on its
+    own, and a modifier pressed afterwards does not disarm it — so Win-then-
+    Ctrl opens Start while Ctrl-then-Win does not. Pressing any key during
+    the hold does disarm it, so one unassigned virtual key is enough.
+
+    Suppressing the keyup instead would leave Windows believing the key is
+    still down, turning every later keystroke into a Win chord.
+    """
+    _require_windows()
+    _send([_key_input(VK_NONAME), _key_input(VK_NONAME, up=True)])
 
 
 def _text_events(text: str) -> list[INPUT]:

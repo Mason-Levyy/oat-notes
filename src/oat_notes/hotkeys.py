@@ -18,6 +18,8 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from .inject import VK_NONAME
+
 MODIFIERS = ("ctrl", "alt", "shift", "win")
 
 DIGIT = "digit"
@@ -137,6 +139,8 @@ class HotkeyListener:
             return tuple(self._bindings.values())
 
     def _handle_press(self, key) -> None:
+        if getattr(key, "vk", None) == VK_NONAME:
+            return
         modifier = self._modifier_name(key)
         if modifier is not None:
             if modifier in self._held:
@@ -173,7 +177,20 @@ class HotkeyListener:
                 continue
             binding.armed_at = time.perf_counter()
             binding.cancelled = False
+            if "win" in binding.chord.modifiers:
+                self._defuse_start_menu()
             self._safely(binding.on_press)
+
+    def _defuse_start_menu(self) -> None:
+        try:
+            from .inject import defuse_start_menu
+
+            defuse_start_menu()
+        except Exception as error:
+            print(
+                f"could not defuse the Start menu: {type(error).__name__}",
+                file=sys.stderr,
+            )
 
     def _cancel_armed(self) -> None:
         for binding in self._snapshot():
