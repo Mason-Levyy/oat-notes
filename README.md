@@ -2,6 +2,8 @@
 
 Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
+It also does **dictation**: hold Ctrl+Win anywhere in Windows, speak, and the cleaned text is inserted into whatever has focus — with automatic email formatting. See [Dictation](#dictation).
+
 Live mic + system-audio loopback → timestamped transcript with speaker labels, in the console or a local 8-bit web UI. On a Zoom/Teams call, other participants are captured from the loopback of your output device — no mic pickup needed. Wear headphones to prevent the mic from capturing the same speech and producing duplicate lines.
 
 ## First-time setup
@@ -76,6 +78,40 @@ Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved peo
 
 The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order but stay editable per meeting. Someone unexpected joins? Click `+ GUEST`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
 
+## Dictation
+
+Hold **Ctrl+Win** anywhere in Windows, speak, release — the cleaned text is
+inserted wherever your cursor is. A small pill above the taskbar shows the
+level and what stage it's at; it never takes focus, so the text always lands in
+the window you were typing in.
+
+- **Hold** to talk, or **tap** to latch recording on until you tap again.
+  **Esc** cancels without inserting. `--activation` equivalents live in Settings.
+- **Cleanup is deterministic and instant** by default — filler words, stutters,
+  spoken `new line`/`new paragraph`, and your own vocabulary substitutions.
+  Whisper already punctuates, so no model runs on the common path.
+- **Emails are detected and reformatted.** Text that opens with a salutation and
+  reads like a message ("Hey Sarah, following up on…") is rewritten into a
+  greeting, paragraphs and a sign-off by the local LLM. A free heuristic decides
+  the clear cases; only genuinely ambiguous text costs a model call.
+  **Ctrl+Shift+Win** forces email formatting regardless.
+- **Vocabulary** is the setting worth filling in first. Whisper is reliable on
+  ordinary English and hopeless on colleague and product names.
+
+Everything runs on this machine. Dictated text goes to the target window and
+nowhere else — the clipboard write is even marked excluded from Win+V history
+and cloud clipboard sync.
+
+Settings → **DICTATION** changes the chords, activation style, insertion method
+(paste or simulated typing), sign-off name and vocabulary. Installing with the
+*Start with Windows* option adds a `--background` startup shortcut; launching
+the app again while it's running opens the UI on that instance.
+
+Two Windows caveats worth knowing: a non-elevated app cannot send input to an
+elevated window, so dictating into an admin console silently does nothing; and
+chords Windows reserves (Ctrl+Win+D, Ctrl+Win+arrows) cancel the recording
+rather than starting one.
+
 ## Usage
 
 ```
@@ -95,6 +131,9 @@ uv run oat-notes --model small.en    # swap whisper models
 uv run oat-notes --backend openvino  # offload to the Intel NPU (see below)
 uv run oat-notes --backend openvino --ov-device GPU   # or the Arc GPU
 uv run oat-notes --offline           # never touch the network; fails if the model isn't cached yet
+uv run oat-notes --ui --background   # no browser tab; dictation hotkey only
+uv run oat-notes --ui --no-overlay   # no floating dictation HUD
+uv run oat-notes --llm-device GPU    # run the cleanup/formatting LLM on the iGPU
 ```
 
 Output, one line per speech chunk:
@@ -116,11 +155,17 @@ clock.py      one monotonic session clock — all timestamps stamped at capture
 vad.py        streaming Silero VAD (ONNX model bundled with faster-whisper)
 chunker.py    state machine: split at 0.5s silence, force-split at 15s, drop blips
 transcriber.py  Transcriber ABC + faster-whisper and OpenVINO backends
+models.py     model download/cache resolution shared by whisper and the LLM
+llm.py        one lock-serialized local LLM shared by cleanup and dictation
+cleanup.py    delayed per-line transcript cleanup on top of that LLM
 pipeline.py   capture → chunker thread → transcription worker → sink, via queues
 attribution.py  switch log + majority-overlap speaker attribution
 speaker_store.py  local SQLite speaker/group directory + embedding centroids
 speaker_id.py  bundled sherpa-onnx embeddings, enrollment, roster matching
-hotkeys.py    configurable global modifier+1..9 listener (session-scoped)
+hotkeys.py    one process-wide chord hook: modifier+1..9 and modifier-only chords
+inject.py     Win32 clipboard paste / unicode SendInput into the focused window
+overlay.py    frameless, always-on-top, never-focused dictation HUD (tkinter)
+dictation/    recorder (mic → VAD → whisper), formatter (rules + email), controller
 session.py    one meeting: capture + pipeline + attribution + transcript log
 server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
 ```
@@ -129,7 +174,7 @@ Chunks carry a channel tag (`MIC`/`LOOPBACK`) and segments carry a `speaker` fie
 
 ## Local-only by design
 
-Captured audio, transcripts, voice embeddings, identities, groups, and recognition results never leave the machine. Profiles are stored as embeddings only—never replayable audio—under `%LOCALAPPDATA%\oat-notes\speakers.db`, outside the normal OneDrive Documents tree. Speaker inference uses a bundled ONNX model and performs no download. The web UI binds to `127.0.0.1` only and rejects requests whose `Host`/`Origin` headers don't name that address. The only permitted network traffic is the existing one-time transcription-model download; `--offline` disables that too. HF telemetry and implicit-token lookups are disabled by default.
+Captured audio, transcripts, dictated text, voice embeddings, identities, groups, and recognition results never leave the machine. Profiles are stored as embeddings only—never replayable audio—under `%LOCALAPPDATA%\oat-notes\speakers.db`, outside the normal OneDrive Documents tree. Speaker inference uses a bundled ONNX model and performs no download. The web UI binds to `127.0.0.1` only and rejects requests whose `Host`/`Origin` headers don't name that address. Dictation adds nothing here: transcription, cleanup and email formatting all run on local models, and the dictated text is written only to the target window — the clipboard write is marked excluded from Win+V history and cloud clipboard sync. The only permitted network traffic is the existing one-time model download; `--offline` disables that too. HF telemetry and implicit-token lookups are disabled by default. `tests/test_local_only.py` fails the build if any module on the dictation path imports a network client.
 
 ## OpenVINO backend (NPU/GPU offload)
 

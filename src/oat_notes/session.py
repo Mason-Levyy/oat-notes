@@ -39,6 +39,7 @@ class SessionOptions:
     save_file: bool = True
     hotkeys: bool = True
     hotkey_modifiers: tuple[str, ...] = ("ctrl", "alt")
+    hotkey_listener: HotkeyListener | None = None
     speaker_store: SpeakerStore | None = None
     embedding_engine: SpeakerEmbeddingEngine | None = None
     tracking_embedding_engine: SpeakerEmbeddingEngine | None = None
@@ -187,12 +188,12 @@ class Session:
             )
 
         self._hotkeys = None
+        self._owns_hotkeys = False
         if options.hotkeys:
-            self._hotkeys = HotkeyListener(
-                self.switch_hotkey,
-                modifiers=options.hotkey_modifiers,
-                on_page=self.page_hotkeys,
-            )
+            self._hotkeys = options.hotkey_listener
+            if self._hotkeys is None:
+                self._hotkeys = HotkeyListener()
+                self._owns_hotkeys = True
 
     @staticmethod
     def _assign_hotkey_slots(speakers: tuple[Speaker, ...]) -> list[Speaker]:
@@ -212,7 +213,11 @@ class Session:
 
     def start(self) -> None:
         if self._hotkeys is not None:
-            self._hotkeys.start()
+            self._hotkeys.bind_speaker_switch(
+                self._options.hotkey_modifiers, self.switch_hotkey, self.page_hotkeys
+            )
+            if self._owns_hotkeys:
+                self._hotkeys.start()
         if self._cleanup is not None:
             self._cleanup.start()
         self._pipeline.start()
@@ -391,7 +396,9 @@ class Session:
             return
         self._stopped = True
         if self._hotkeys is not None:
-            self._hotkeys.stop()
+            self._hotkeys.unbind_speaker_switch()
+            if self._owns_hotkeys:
+                self._hotkeys.stop()
         for capture in self.captures:
             capture.stop()
         self._pipeline.finish()

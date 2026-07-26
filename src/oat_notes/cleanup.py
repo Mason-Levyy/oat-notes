@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Callable, Protocol, Sequence
 
-from .config import Config
+from .llm import LlmEngine
 
 DROP_TOKEN = "[DROP]"
 # A cleanup pass only ever removes or repairs words. Output that grows past
@@ -79,20 +79,12 @@ def postprocess_output(output: str, original: str) -> str | None:
 
 
 class TranscriptCleaner:
-    """One ``openvino_genai.LLMPipeline`` used from the cleanup worker
-    thread only — calls are serialized by that single consumer."""
+    """Cleanup prompts on top of the shared ``LlmEngine``. The engine
+    serializes generation, so dictation formatting can use the same model
+    concurrently without the two conversations interleaving."""
 
-    def __init__(self, config: Config, model_dir: str | None = None) -> None:
-        import openvino_genai
-
-        from .transcriber import resolve_openvino_model
-
-        source = model_dir or resolve_openvino_model(
-            config.cleanup_model, config.offline
-        )
-        self._pipeline = openvino_genai.LLMPipeline(
-            source, device=config.cleanup_device
-        )
+    def __init__(self, engine: LlmEngine) -> None:
+        self._engine = engine
 
     def clean(
         self, text: str, before: Sequence[str] = (), after: Sequence[str] = ()
@@ -101,15 +93,10 @@ class TranscriptCleaner:
         if not original:
             return None
         max_new_tokens = min(256, 16 + 3 * len(original.split()))
-        prompt = build_prompt(original, before, after)
-        self._pipeline.start_chat(SYSTEM_PROMPT)
-        try:
-            output = self._pipeline.generate(
-                prompt, max_new_tokens=max_new_tokens, do_sample=False
-            )
-        finally:
-            self._pipeline.finish_chat()
-        return postprocess_output(str(output), original)
+        output = self._engine.generate(
+            SYSTEM_PROMPT, build_prompt(original, before, after), max_new_tokens
+        )
+        return postprocess_output(output, original)
 
     def warm_up(self) -> None:
         """One dummy generation so the first real line isn't slowed by
