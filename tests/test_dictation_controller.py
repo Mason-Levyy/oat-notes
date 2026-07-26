@@ -358,3 +358,67 @@ def test_replay_reports_inserted(injected):
     release(controller, held_seconds=2.0)
     replay(controller)
     assert names(phases)[-1] == dictation.INSERTED
+
+
+def dictate(controller, text):
+    controller._recorder = FakeRecorder(text=text)
+    arm(controller)
+    release(controller, held_seconds=2.0)
+
+
+def test_history_records_each_dictation_newest_first(injected):
+    controller, _ = make_controller()
+    for text in ("first one", "second one", "third one"):
+        dictate(controller, text)
+    assert [entry["text"] for entry in controller.history()] == [
+        "Third one", "Second one", "First one"
+    ]
+
+
+def test_history_is_capped(injected):
+    controller, _ = make_controller()
+    for index in range(dictation.HISTORY_LIMIT + 5):
+        dictate(controller, f"line {index}")
+    assert len(controller.history()) == dictation.HISTORY_LIMIT
+    assert controller.history()[0]["text"] == f"Line {dictation.HISTORY_LIMIT + 4}"
+
+
+def test_history_entries_carry_a_mode_and_a_timestamp(injected):
+    controller, _ = make_controller()
+    dictate(controller, "hello there")
+    entry = controller.history()[0]
+    assert entry["mode"] == "text"
+    assert entry["at"] > 0
+    assert isinstance(entry["id"], int)
+
+
+def test_history_ids_stay_unique_past_the_cap(injected):
+    controller, _ = make_controller()
+    for index in range(dictation.HISTORY_LIMIT + 5):
+        dictate(controller, f"line {index}")
+    ids = [entry["id"] for entry in controller.history()]
+    assert len(set(ids)) == len(ids)
+
+
+def test_dropped_dictations_are_not_recorded(injected):
+    controller, _ = make_controller()
+    dictate(controller, "")
+    assert controller.history() == []
+
+
+def test_clearing_history_also_forgets_the_replay_text(injected):
+    controller, _ = make_controller()
+    dictate(controller, "hello there")
+    controller.clear_history()
+    assert controller.history() == []
+    assert controller.last_text is None
+    injected.clear()
+    replay(controller)
+    assert injected == []
+
+
+def test_history_snapshots_cannot_mutate_the_deque(injected):
+    controller, _ = make_controller()
+    dictate(controller, "hello there")
+    controller.history()[0]["text"] = "tampered"
+    assert controller.history()[0]["text"] == "Hello there"
