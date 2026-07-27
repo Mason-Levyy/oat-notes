@@ -105,6 +105,14 @@ def _declare_prototypes() -> None:
     _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     _user32.GetAsyncKeyState.restype = ctypes.c_short
     _user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    _user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    _user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, wintypes.LPDWORD]
+    _user32.AttachThreadInput.restype = wintypes.BOOL
+    _user32.AttachThreadInput.argtypes = [
+        wintypes.DWORD, wintypes.DWORD, wintypes.BOOL
+    ]
+    _kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+    _kernel32.GetCurrentThreadId.argtypes = []
     _user32.SendInput.restype = wintypes.UINT
     _user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
 
@@ -150,10 +158,33 @@ def foreground_window() -> int:
 
 
 def restore_foreground(hwnd: int) -> bool:
+    """Put focus back, reporting whether it actually worked.
+
+    Windows refuses SetForegroundWindow from a process that is not already in
+    front, and it fails silently. Attaching to the target's input queue lifts
+    that restriction, which is what makes this work when Search or Start has
+    stolen focus mid-dictation.
+    """
     _require_windows()
-    if not hwnd or foreground_window() == hwnd:
+    if not hwnd:
+        return False
+    if foreground_window() == hwnd:
         return True
-    return bool(_user32.SetForegroundWindow(wintypes.HWND(hwnd)))
+
+    _user32.SetForegroundWindow(wintypes.HWND(hwnd))
+    if foreground_window() == hwnd:
+        return True
+
+    target = _user32.GetWindowThreadProcessId(wintypes.HWND(hwnd), None)
+    ours = _kernel32.GetCurrentThreadId()
+    if not target or target == ours:
+        return False
+    _user32.AttachThreadInput(ours, target, True)
+    try:
+        _user32.SetForegroundWindow(wintypes.HWND(hwnd))
+    finally:
+        _user32.AttachThreadInput(ours, target, False)
+    return foreground_window() == hwnd
 
 
 def _key_input(vk: int, up: bool = False) -> INPUT:
@@ -375,6 +406,10 @@ def inject(
 ) -> None:
     """Insert ``text`` into ``hwnd``, or whatever has focus now.
 
+    If the target window can't be brought back, this raises rather than
+    pasting. Something else has focus — Search or Start, usually — and typing
+    a dictation into it is worse than not typing it at all.
+
     A non-elevated process cannot send input to an elevated window, so
     dictating into an admin console silently does nothing. That is Windows
     UIPI, not something this can work around.
@@ -382,8 +417,10 @@ def inject(
     _require_windows()
     if not text:
         return
-    if hwnd:
-        restore_foreground(hwnd)
+    if hwnd and not restore_foreground(hwnd):
+        raise InjectionError(
+            "another window took focus — text kept, use the replay shortcut"
+        )
     if method == TYPE:
         type_text(text)
     else:
