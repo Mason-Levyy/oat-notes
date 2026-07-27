@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from oat_notes.output import (
     JOURNAL_SUFFIX,
@@ -188,3 +189,23 @@ def test_recover_journals_promotes_orphans_and_clears_empties(tmp_path):
     assert not live.exists()
     assert not empty.exists()  # empty journal just cleaned up
     assert recover_journals(tmp_path) == []  # nothing left to recover
+
+
+def test_a_journal_another_process_holds_open_does_not_stop_startup(tmp_path, monkeypatch):
+    locked = journal_path_for(tmp_path, datetime(2026, 7, 9, 11, 12), "live")
+    TranscriptJournal(locked).append("[00:00:01] Mason: still being written")
+    orphan = journal_path_for(tmp_path, datetime(2026, 7, 9, 14, 30), "crashed")
+    TranscriptJournal(orphan).append("[00:00:01] Mason: unsaved words")
+
+    real_rename = Path.rename
+
+    def rename(self, target):
+        if self == locked:
+            raise PermissionError(32, "The process cannot access the file")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    recovered = recover_journals(tmp_path)
+
+    assert recovered == [tmp_path / "crashed_2026-07-09_1430_recovered.txt"]
+    assert locked.exists()
