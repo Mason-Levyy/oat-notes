@@ -19,27 +19,27 @@ from typing import Callable
 from .. import inject
 from ..config import Config
 from ..hotkeys import Chord, HotkeyListener
+from ..settings import REPLAY_KEY
 from ..transcriber import Transcriber
 from .format import format_dictation
+from .phases import (
+    CANCELLED,
+    ERROR,
+    FORMATTING,
+    IDLE,
+    INSERTED,
+    LATCHED,
+    LISTENING,
+    LOADING,
+    TRANSCRIBING,
+)
 from .recorder import UtteranceRecorder
-
-IDLE = "idle"
-LISTENING = "listening"
-LATCHED = "latched"
-TRANSCRIBING = "transcribing"
-FORMATTING = "formatting"
-INSERTED = "inserted"
-CANCELLED = "cancelled"
-ERROR = "error"
-LOADING = "loading"
 
 _ARM = "arm"
 _CANCEL = "cancel"
 _RELEASE = "release"
 _REPLAY = "replay"
 _SHUTDOWN = "shutdown"
-
-REPLAY_KEY = "z"
 
 _LATCH_SPEECH_CEILING = 0.35
 HISTORY_LIMIT = 20
@@ -197,14 +197,13 @@ class DictationController:
             listener.unbind(name)
 
     def rebind(self, options: DictationOptions) -> None:
-        self._end_recording_owned_by_the_outgoing_chord()
+        # Any recording in flight belongs to the outgoing chord, which is
+        # about to stop existing, so it ends here rather than hanging.
+        self._post(_CANCEL)
         self.options = options
         if self._listener is not None:
             self.unbind(self._listener)
             self.bind(self._listener)
-
-    def _end_recording_owned_by_the_outgoing_chord(self) -> None:
-        self._post(_CANCEL)
 
     def _cancel_if_active(self) -> None:
         if self._recording:

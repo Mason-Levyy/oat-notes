@@ -179,10 +179,8 @@ class UtteranceRecorder:
         if samples.size == 0:
             return
         level = float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
-        self._notify_meter_without_stalling_capture(level)
-
-    def _notify_meter_without_stalling_capture(self, level: float) -> None:
         try:
             self._level_sink(level)
         except Exception:
+            # A failing meter must never stall the capture thread behind it.
             pass

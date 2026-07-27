@@ -10,21 +10,11 @@ from abc import ABC, abstractmethod
 from .config import Config
 from .models import (
     ensure_tls_trust,
+    load_on_device_or_fall_back,
     openvino_cache_dir,
-    openvino_model_cached,
     resolve_openvino_model,
 )
 from .types import AudioChunk, TranscriptSegment
-
-__all__ = [
-    "Transcriber",
-    "FasterWhisperTranscriber",
-    "OpenVinoTranscriber",
-    "create_transcriber",
-    "ensure_tls_trust",
-    "openvino_model_cached",
-    "resolve_openvino_model",
-]
 
 
 class Transcriber(ABC):
@@ -92,23 +82,15 @@ class OpenVinoTranscriber(Transcriber):
             ) from error
 
         model_dir = resolve_openvino_model(config.openvino_model, config.offline)
-        self.device = config.openvino_device
         self._lock = threading.Lock()
-        cache_dir = openvino_cache_dir()
-        try:
-            self._pipeline = openvino_genai.WhisperPipeline(
-                model_dir, device=self.device, CACHE_DIR=str(cache_dir)
-            )
-        except Exception as error:
-            if self.device == "CPU":
-                raise
-            print(
-                f"warning: OpenVINO {self.device} rejected the model"
-                f" ({error}); falling back to CPU",
-                file=sys.stderr,
-            )
-            self.device = "CPU"
-            self._pipeline = openvino_genai.WhisperPipeline(model_dir, device="CPU")
+        cache_dir = str(openvino_cache_dir())
+        self._pipeline, self.device = load_on_device_or_fall_back(
+            lambda device: openvino_genai.WhisperPipeline(
+                model_dir, device=device, CACHE_DIR=cache_dir
+            ),
+            config.openvino_device,
+            "transcription model",
+        )
 
     def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:
         with self._lock:
