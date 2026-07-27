@@ -9,11 +9,15 @@ other's conversations together.
 
 from __future__ import annotations
 
-import sys
 import threading
 
 from .config import Config
-from .models import openvino_cache_dir, openvino_model_cached, resolve_openvino_model
+from .models import (
+    load_on_device_or_fall_back,
+    openvino_cache_dir,
+    openvino_model_cached,
+    resolve_openvino_model,
+)
 
 
 class LlmEngine:
@@ -30,21 +34,15 @@ class LlmEngine:
 
         model_dir = resolve_openvino_model(model, offline)
         self.model = model
-        self.device = device
         self._lock = threading.Lock()
-        try:
-            self._pipeline = openvino_genai.LLMPipeline(
-                model_dir, device=device, CACHE_DIR=str(openvino_cache_dir())
-            )
-        except Exception as error:
-            if device == "CPU":
-                raise
-            print(
-                f"warning: {device} rejected the LLM ({error}); falling back to CPU",
-                file=sys.stderr,
-            )
-            self.device = "CPU"
-            self._pipeline = openvino_genai.LLMPipeline(model_dir, device="CPU")
+        cache_dir = str(openvino_cache_dir())
+        self._pipeline, self.device = load_on_device_or_fall_back(
+            lambda chosen: openvino_genai.LLMPipeline(
+                model_dir, device=chosen, CACHE_DIR=cache_dir
+            ),
+            device,
+            "language model",
+        )
 
     @classmethod
     def from_config(cls, config: Config) -> LlmEngine:

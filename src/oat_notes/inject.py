@@ -1,7 +1,5 @@
-"""Insert dictated text into whatever window currently has focus.
-
-Either paste through the clipboard or synthesize the characters directly,
-both via Win32 ``SendInput``.
+"""Insert dictated text into whatever window currently has focus, by putting
+it on the clipboard and sending Ctrl+V through Win32 ``SendInput``.
 
 Ordering matters: at commit time the dictation chord's own modifiers may
 still be held, and Ctrl+V with the Windows key down opens Clipboard History
@@ -16,15 +14,11 @@ import threading
 import time
 from ctypes import wintypes
 
-PASTE = "paste"
-TYPE = "type"
-
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
-VK_RETURN = 0x0D
 VK_V = 0x56
 VK_NONAME = 0xFC
 
@@ -195,15 +189,6 @@ def _key_input(vk: int, up: bool = False) -> INPUT:
     return event
 
 
-def _unicode_input(code_unit: int, up: bool = False) -> INPUT:
-    flags = _KEYEVENTF_UNICODE | (_KEYEVENTF_KEYUP if up else 0)
-    event = INPUT(type=_INPUT_KEYBOARD)
-    event.ki = _KeyboardInput(
-        wVk=0, wScan=code_unit, dwFlags=flags, time=0, dwExtraInfo=None
-    )
-    return event
-
-
 def _send(events: list[INPUT]) -> None:
     if not events:
         return
@@ -250,32 +235,6 @@ def defuse_start_menu() -> None:
     """
     _require_windows()
     _send([_key_input(VK_NONAME), _key_input(VK_NONAME, up=True)])
-
-
-def _text_events(text: str) -> list[INPUT]:
-    """Text is walked as UTF-16 code units so astral characters arrive as the
-    surrogate pairs KEYEVENTF_UNICODE expects. Newlines go as VK_RETURN —
-    sending "\\n" as a unicode code unit is unreliable across applications."""
-    events: list[INPUT] = []
-    for index, line in enumerate(text.split("\n")):
-        if index:
-            events.append(_key_input(VK_RETURN))
-            events.append(_key_input(VK_RETURN, up=True))
-        encoded = line.encode("utf-16-le")
-        for position in range(0, len(encoded), 2):
-            unit = int.from_bytes(encoded[position:position + 2], "little")
-            events.append(_unicode_input(unit))
-            events.append(_unicode_input(unit, up=True))
-    return events
-
-
-def type_text(text: str) -> None:
-    """Synthesize the text as one batched SendInput call."""
-    _require_windows()
-    if not text:
-        return
-    release_modifiers()
-    _send(_text_events(text))
 
 
 def _open_clipboard() -> None:
@@ -399,10 +358,7 @@ def _restore_clipboard(previous: str) -> None:
 
 
 def inject(
-    text: str,
-    method: str = PASTE,
-    hwnd: int | None = None,
-    restore_clipboard: bool = True,
+    text: str, hwnd: int | None = None, restore_clipboard: bool = True
 ) -> None:
     """Insert ``text`` into ``hwnd``, or whatever has focus now.
 
@@ -421,7 +377,4 @@ def inject(
         raise InjectionError(
             "another window took focus — text kept, use the replay shortcut"
         )
-    if method == TYPE:
-        type_text(text)
-    else:
-        paste_text(text, restore_clipboard=restore_clipboard)
+    paste_text(text, restore_clipboard=restore_clipboard)

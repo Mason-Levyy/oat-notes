@@ -17,19 +17,21 @@ import sys
 import threading
 from dataclasses import dataclass
 
+from .dictation.phases import (
+    CANCELLED,
+    ERROR,
+    FORMATTING,
+    IDLE,
+    INSERTED,
+    LATCHED,
+    LISTENING,
+    LOADING,
+    TRANSCRIBING,
+)
+
 INK = "#1A1A1A"
 PAPER = "#EDE8DD"
 TRANSPARENT = "#FF00FF"
-
-IDLE = "idle"
-LISTENING = "listening"
-LATCHED = "latched"
-TRANSCRIBING = "transcribing"
-FORMATTING = "formatting"
-INSERTED = "inserted"
-CANCELLED = "cancelled"
-ERROR = "error"
-LOADING = "loading"
 
 _VISIBLE = {LISTENING, LATCHED, TRANSCRIBING, FORMATTING, INSERTED, ERROR, LOADING}
 _SELF_DISMISSING = {INSERTED, CANCELLED, ERROR}
@@ -63,7 +65,6 @@ _MONITOR_DEFAULTTONEAREST = 2
 class OverlayState:
     phase: str = IDLE
     level: float = 0.0
-    elapsed: float = 0.0
     email: bool = False
     label: str = ""
 
@@ -198,12 +199,11 @@ def meter_heights(level: float, bars: int = _METER_BARS) -> list[float]:
 class Overlay:
     """Created and run on the main thread; fed from anywhere via ``post``."""
 
-    def __init__(self, on_quit=None, on_open_ui=None, on_toggle_pause=None) -> None:
+    def __init__(self, on_quit=None, on_open_ui=None) -> None:
         self._queue: queue.Queue[OverlayState] = queue.Queue(maxsize=64)
         self._state = OverlayState()
         self._on_quit = on_quit
         self._on_open_ui = on_open_ui
-        self._on_toggle_pause = on_toggle_pause
         self._root = None
         self._canvas = None
         self._visible = False
@@ -295,8 +295,6 @@ class Overlay:
     def _build_menu(self, tk) -> None:
         """Right-click menu stands in for a tray icon — no extra dependency."""
         menu = tk.Menu(self._root, tearoff=0)
-        if self._on_toggle_pause is not None:
-            menu.add_command(label="Pause dictation", command=self._on_toggle_pause)
         if self._on_open_ui is not None:
             menu.add_command(label="Open Oat Notes", command=self._on_open_ui)
         if self._on_quit is not None:
