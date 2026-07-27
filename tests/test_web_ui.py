@@ -218,17 +218,40 @@ def test_dictation_card_edits_are_not_clobbered_by_status_events():
     assert "if (!dictationDirty) {" in HTML
     assert "dictationDirty = true;" in HTML
     # Cleared before applyState so the card re-syncs from the saved values.
-    assert HTML.index("dictationDirty = false;") < HTML.index("applyState(result);\n    const label")
+    submit = HTML[HTML.index('$("dictation-form").onsubmit'):]
+    assert submit.index("dictationDirty = false;") < submit.index("applyState(result);")
 
 
 def test_dictation_save_sends_every_field_it_owns():
     for field in (
-        "dictation_enabled", "dictation_injection",
         "dictation_email_detection", "dictation_restore_clipboard",
-        "dictation_spoken_punctuation", "dictation_signature",
+        "dictation_spoken_punctuation",
         "dictation_vocabulary", "overlay_enabled",
     ):
         assert f"{field}:" in HTML
+
+
+def test_the_enable_switch_lives_in_the_card_header():
+    head = HTML[HTML.index('<div class="card-head">'):]
+    head = head[:head.index("</div>")]
+    assert 'id="dictation-enabled"' in head
+
+
+def test_the_enable_switch_applies_without_a_save():
+    # It is the one dictation setting with an immediate effect, so it posts on
+    # change; the rest of the card still waits for SAVE.
+    handler = HTML[HTML.index('$("dictation-enabled").onchange'):]
+    handler = handler[:handler.index("\n};")]
+    assert '"/api/dictation/toggle"' in handler
+    submit = HTML[HTML.index('$("dictation-form").onsubmit'):]
+    assert "dictation_enabled:" not in submit
+
+
+def test_turning_dictation_off_greys_out_the_rest_of_the_card():
+    assert 'id="dictation-body"' in HTML
+    assert '.card-body.off {' in HTML
+    assert 'body.classList.toggle("off", !enabled);' in HTML
+    assert "body.inert = !enabled;" in HTML
 
 
 def test_the_dictation_card_no_longer_saves_chords():

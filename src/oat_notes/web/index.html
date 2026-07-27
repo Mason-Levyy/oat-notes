@@ -261,6 +261,22 @@ body {
   box-shadow: 5px 5px 0 var(--ink); padding: 22px; margin-bottom: 22px;
 }
 .settings-card h2 { font-size: 12px; margin-bottom: 12px; }
+.card-head { display: flex; align-items: center; gap: 12px; }
+.card-head h2 { flex: 1; margin-bottom: 0; }
+.card-body.off { opacity: 0.4; filter: grayscale(1); pointer-events: none; }
+.switch { display: flex; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; }
+.switch-track {
+  box-sizing: border-box; position: relative; width: 40px; height: 20px;
+  border: 3px solid var(--ink); background: var(--paper);
+}
+.switch-track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px;
+  background: var(--ink); transition: transform 150ms ease-out;
+}
+.switch input:checked + .switch-track { background: var(--oat); }
+.switch input:checked + .switch-track::after { transform: translateX(20px); }
+.switch input:focus-visible + .switch-track { outline: 3px solid var(--ink); outline-offset: 2px; }
 .modifier-grid {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px; margin: 20px 0 8px;
@@ -730,23 +746,17 @@ body {
       <div class="settings-message pixel" id="settings-message" role="status"></div>
     </div>
     <div class="settings-card">
-      <h2 class="pixel">DICTATION</h2>
+      <div class="card-head">
+        <h2 class="pixel">DICTATION</h2>
+        <label class="switch">
+          <input type="checkbox" id="dictation-enabled" aria-label="Enable dictation">
+          <span class="switch-track"></span>
+        </label>
+      </div>
+      <div class="card-body" id="dictation-body">
       <div class="hint">Live status and history live in the DICTATE section.</div>
       <form id="dictation-form">
-        <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-enabled"><span>ENABLE DICTATION</span></label>
-
         <h3 class="pixel subhead">BEHAVIOUR</h3>
-        <div class="compact-row">
-          <label class="field-label pixel" for="dictation-injection">INSERT BY</label>
-          <select id="dictation-injection">
-            <option value="paste">Pasting (fastest)</option>
-            <option value="type">Typing (for apps that block paste)</option>
-          </select>
-        </div>
-        <div class="compact-row">
-          <label class="field-label pixel" for="dictation-signature">SIGN OFF AS</label>
-          <input type="text" id="dictation-signature" placeholder="Your name (optional)">
-        </div>
         <div class="toggle-grid">
           <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-email-detection"><span>AUTO-DETECT EMAILS</span></label>
           <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-restore-clipboard"><span>RESTORE CLIPBOARD</span></label>
@@ -766,6 +776,7 @@ body {
         <button type="submit" class="btn start" id="dictation-save">SAVE DICTATION</button>
         <div class="settings-message pixel" id="dictation-message" role="status"></div>
       </form>
+      </div>
     </div>
     <div class="settings-card">
       <h2 class="pixel">SPEAKER LIBRARY</h2>
@@ -1355,8 +1366,8 @@ function renderSettings() {
 
 function renderDictationSettings() {
   const settings = state.settings || {};
+  applyDictationEnabled(settings.dictation_enabled !== false);
   if (!dictationDirty) {
-    $("dictation-enabled").checked = settings.dictation_enabled !== false;
     $("dictation-email-detection").checked =
       settings.dictation_email_detection !== false;
     $("dictation-restore-clipboard").checked =
@@ -1364,8 +1375,6 @@ function renderDictationSettings() {
     $("dictation-spoken-punctuation").checked =
       !!settings.dictation_spoken_punctuation;
     $("overlay-enabled").checked = settings.overlay_enabled !== false;
-    $("dictation-injection").value = settings.dictation_injection || "paste";
-    $("dictation-signature").value = settings.dictation_signature || "";
     vocabulary = (settings.dictation_vocabulary || []).map((pair) => pair.slice());
   }
   renderVocabulary();
@@ -1375,6 +1384,13 @@ function renderDictationSettings() {
   $("dictation-chord-hint").textContent =
     `Hold ${chord} to talk, tap it to latch, Esc to cancel.` +
     (replay && replay !== "off" ? ` ${replay} re-inserts the last one.` : "");
+}
+
+function applyDictationEnabled(enabled) {
+  $("dictation-enabled").checked = enabled;
+  const body = $("dictation-body");
+  body.classList.toggle("off", !enabled);
+  body.inert = !enabled;
 }
 
 const DICTATION_LABELS = {
@@ -2099,16 +2115,30 @@ $("vocabulary-add").onclick = () => {
   renderVocabulary();
 };
 
+$("dictation-enabled").onchange = (event) => {
+  const enabled = event.target.checked;
+  applyDictationEnabled(enabled);
+  const message = $("dictation-message");
+  post("/api/dictation/toggle", { enabled }).then((result) => {
+    if (result.error) {
+      applyDictationEnabled(!enabled);
+      message.textContent = result.error.toUpperCase();
+      message.className = "settings-message pixel error";
+      return;
+    }
+    applyState(result);
+    message.textContent = enabled ? "DICTATION ON" : "DICTATION OFF";
+    message.className = "settings-message pixel saved";
+  });
+};
+
 $("dictation-form").onsubmit = (event) => {
   event.preventDefault();
   const message = $("dictation-message");
   post("/api/settings", {
-    dictation_enabled: $("dictation-enabled").checked,
-    dictation_injection: $("dictation-injection").value,
     dictation_email_detection: $("dictation-email-detection").checked,
     dictation_restore_clipboard: $("dictation-restore-clipboard").checked,
     dictation_spoken_punctuation: $("dictation-spoken-punctuation").checked,
-    dictation_signature: $("dictation-signature").value,
     dictation_vocabulary: vocabulary,
     overlay_enabled: $("overlay-enabled").checked,
   }).then((result) => {
@@ -2119,10 +2149,7 @@ $("dictation-form").onsubmit = (event) => {
     }
     dictationDirty = false;
     applyState(result);
-    const label = result.settings.dictation_enabled
-      ? `SAVED — ${result.settings.dictation_label}`
-      : "SAVED — DICTATION OFF";
-    message.textContent = label.toUpperCase();
+    message.textContent = `SAVED — ${result.settings.dictation_label}`.toUpperCase();
     message.className = "settings-message pixel saved";
   });
 };
