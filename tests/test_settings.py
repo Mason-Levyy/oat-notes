@@ -53,7 +53,6 @@ def test_dictation_defaults():
     assert settings.dictation_modifiers == ("ctrl", "win")
     assert settings.dictation_label == "Ctrl+Win"
     assert settings.dictation_email_label == "Ctrl+Shift+Win"
-    assert settings.dictation_injection == "paste"
     assert settings.dictation_replay_label == "Ctrl+Alt+Z"
 
 
@@ -70,11 +69,9 @@ def test_full_dictation_round_trip(tmp_path):
         dictation_email_modifiers=(),
         dictation_replay_modifiers=("alt", "shift"),
         dictation_tap_ms=250,
-        dictation_injection="type",
         dictation_restore_clipboard=False,
         dictation_spoken_punctuation=True,
         dictation_vocabulary=(("levya", "Mason"), ("oat notes", "Oat Notes")),
-        dictation_signature="Mason",
         overlay_enabled=False,
     )
     store.save(settings)
@@ -86,17 +83,17 @@ def test_full_dictation_round_trip(tmp_path):
 
 def test_merge_leaves_untouched_fields_alone():
     settings = AppSettings(
-        hotkey_modifiers=("alt", "shift"), dictation_signature="Mason"
+        hotkey_modifiers=("alt", "shift"), dictation_spoken_punctuation=True
     )
-    merged = settings.merged({"dictation_injection": "type"})
-    assert merged.dictation_injection == "type"
+    merged = settings.merged({"dictation_tap_ms": 250})
+    assert merged.dictation_tap_ms == 250
     assert merged.hotkey_modifiers == ("alt", "shift")
-    assert merged.dictation_signature == "Mason"
+    assert merged.dictation_spoken_punctuation is True
 
 
 def test_merge_validates_the_result():
     with pytest.raises(ValueError):
-        AppSettings().merged({"dictation_injection": "telepathy"})
+        AppSettings().merged({"dictation_tap_ms": 99999})
 
 
 def test_merge_rejects_a_non_object():
@@ -133,13 +130,12 @@ def test_an_empty_email_chord_disables_it():
 @pytest.mark.parametrize(
     "payload",
     [
-        {"dictation_injection": "telekinesis"},
         {"dictation_tap_ms": 5},
         {"dictation_tap_ms": 99999},
         {"dictation_tap_ms": "fast"},
         {"dictation_tap_ms": True},
         {"dictation_enabled": "yes"},
-        {"dictation_signature": 42},
+        {"dictation_spoken_punctuation": "sure"},
         {"dictation_vocabulary": "levya=Mason"},
         {"dictation_vocabulary": [["only-one-item"]]},
         {"dictation_vocabulary": [[1, 2]]},
