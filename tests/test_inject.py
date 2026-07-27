@@ -16,56 +16,9 @@ def test_input_struct_matches_the_win32_layout():
 
 
 @windows_only
-def test_text_events_are_keydown_keyup_pairs():
-    events = inject._text_events("hi")
-    assert len(events) == 4
-    assert [event.ki.wScan for event in events] == [
-        ord("h"), ord("h"), ord("i"), ord("i")
-    ]
-    assert events[0].ki.dwFlags == inject._KEYEVENTF_UNICODE
-    assert events[1].ki.dwFlags == inject._KEYEVENTF_UNICODE | inject._KEYEVENTF_KEYUP
-
-
-@windows_only
-def test_newlines_become_return_keys():
-    events = inject._text_events("a\nb")
-    scans = [event.ki.wScan for event in events]
-    vks = [event.ki.wVk for event in events]
-    assert inject.VK_RETURN in vks
-    assert scans.count(ord("a")) == 2 and scans.count(ord("b")) == 2
-    assert all(event.type == inject._INPUT_KEYBOARD for event in events)
-
-
-@windows_only
-def test_paragraph_break_sends_two_returns():
-    events = inject._text_events("a\n\nb")
-    assert [event.ki.wVk for event in events].count(inject.VK_RETURN) == 4
-
-
-@windows_only
-def test_astral_characters_become_surrogate_pairs():
-    events = inject._text_events("\U0001F600")
-    assert len(events) == 4
-    units = [events[0].ki.wScan, events[2].ki.wScan]
-    assert units == [0xD83D, 0xDE00]
-
-
-@windows_only
-def test_accented_characters_survive():
-    events = inject._text_events("é")
-    assert events[0].ki.wScan == ord("é")
-
-
-@windows_only
-def test_empty_text_produces_no_events():
-    assert inject._text_events("") == []
-
-
-@windows_only
 def test_empty_injection_is_a_no_op(monkeypatch):
     monkeypatch.setattr(inject, "_send", _fail)
-    inject.inject("", method=inject.PASTE)
-    inject.type_text("")
+    inject.inject("")
 
 
 def _fail(*_args, **_kwargs):
@@ -155,16 +108,6 @@ def test_non_text_clipboard_is_not_clobbered_back(monkeypatch):
 
 
 @windows_only
-def test_inject_dispatches_to_the_chosen_method(monkeypatch):
-    calls = []
-    monkeypatch.setattr(inject, "paste_text", lambda text, **k: calls.append("paste"))
-    monkeypatch.setattr(inject, "type_text", lambda text: calls.append("type"))
-    inject.inject("hello", method=inject.PASTE)
-    inject.inject("hello", method=inject.TYPE)
-    assert calls == ["paste", "type"]
-
-
-@windows_only
 def test_inject_restores_focus_first(monkeypatch):
     order = []
 
@@ -183,7 +126,6 @@ def test_inject_refuses_when_focus_cannot_be_restored(monkeypatch):
     """Better to insert nothing than to type a dictation into Windows Search."""
     monkeypatch.setattr(inject, "restore_foreground", lambda hwnd: False)
     monkeypatch.setattr(inject, "paste_text", _fail)
-    monkeypatch.setattr(inject, "type_text", _fail)
     with pytest.raises(inject.InjectionError, match="took focus"):
         inject.inject("hello", hwnd=1234)
 

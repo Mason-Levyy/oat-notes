@@ -249,13 +249,7 @@ def test_format_email_falls_back_when_the_model_throws():
     assert format_email(original, FakeEngine(explode=True)) == original
 
 
-def test_signature_is_named_in_the_prompt():
-    engine = FakeEngine(reply="Hi Dave,\n\nThe build is green and ready.\n\nMason")
-    format_email("Hey Dave the build is green and ready", engine, signature="Mason")
-    assert "'Mason'" in engine.calls[0][1]
-
-
-def test_without_a_signature_the_model_is_told_not_to_sign():
+def test_the_model_is_told_not_to_sign_a_name():
     engine = FakeEngine(reply="Hi Dave,\n\nThe build is green and ready.\n\nThanks,")
     format_email("Hey Dave the build is green and ready", engine)
     assert "do not sign a name" in engine.calls[0][1]
