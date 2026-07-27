@@ -19,8 +19,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .inject import VK_NONAME
-
-MODIFIERS = ("ctrl", "alt", "shift", "win")
+from .settings import MODIFIER_ORDER as MODIFIERS
 
 DIGIT = "digit"
 BRACKET = "bracket"

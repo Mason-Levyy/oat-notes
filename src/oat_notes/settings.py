@@ -75,6 +75,18 @@ def _flag(value: Any, field: str) -> bool:
     return value
 
 
+def _chords_collide(
+    one: tuple[tuple[str, ...], str | None],
+    other: tuple[tuple[str, ...], str | None],
+) -> bool:
+    """Same modifiers and same key collide; so does any pair where either side
+    is modifier-only, since it fires on the modifiers alone."""
+    (modifiers, key), (other_modifiers, other_key) = one, other
+    if modifiers != other_modifiers:
+        return False
+    return key is None or other_key is None or key == other_key
+
+
 @dataclass(frozen=True)
 class AppSettings:
     hotkey_modifiers: tuple[str, ...] = ("ctrl", "alt")
@@ -152,29 +164,14 @@ class AppSettings:
                 ("the replay hotkey", self.dictation_replay_modifiers, REPLAY_KEY)
             )
 
-        seen: dict[tuple[tuple[str, ...], str | None], str] = {}
-        modifier_only: dict[tuple[str, ...], str] = {}
-        for name, modifiers, key in chords:
-            clash = seen.get((modifiers, key))
-            if clash is None and key is not None:
-                clash = modifier_only.get(modifiers)
-            if clash is None and key is None:
-                clash = next(
-                    (
-                        other
-                        for (other_modifiers, _), other in seen.items()
-                        if other_modifiers == modifiers
-                    ),
-                    None,
-                )
-            if clash is not None:
+        for index, (name, modifiers, key) in enumerate(chords):
+            for other_name, other_modifiers, other_key in chords[:index]:
+                if not _chords_collide((modifiers, key), (other_modifiers, other_key)):
+                    continue
                 raise ValueError(
-                    f"{name} and {clash} would both be"
+                    f"{name} and {other_name} would both be"
                     f" {modifier_label(modifiers)} — choose different modifiers"
                 )
-            seen[(modifiers, key)] = name
-            if key is None:
-                modifier_only[modifiers] = name
 
     def merged(self, payload: dict[str, Any]) -> AppSettings:
         """Apply a partial update. The settings page saves one card at a time,

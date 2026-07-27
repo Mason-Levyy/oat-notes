@@ -67,6 +67,27 @@ def resolve_openvino_model(source: str, offline: bool) -> str:
     return snapshot_download(source, local_dir=target)
 
 
+def load_on_device_or_fall_back(build, device: str, what: str):
+    """Build a pipeline on ``device``, dropping to CPU if it refuses.
+
+    An NPU or GPU can reject a model for reasons that only surface at load
+    time — an unsupported op, a driver that is too old, another process
+    already holding the device. CPU always works, so a refusal costs speed
+    rather than the feature. Returns the pipeline and the device that took it.
+    """
+    try:
+        return build(device), device
+    except Exception as error:
+        if device == "CPU":
+            raise
+        print(
+            f"warning: {device} rejected the {what} ({error});"
+            " falling back to CPU",
+            file=sys.stderr,
+        )
+        return build("CPU"), "CPU"
+
+
 def openvino_cache_dir() -> Path:
     """Where OpenVINO drops compiled device blobs. Keeping these means an NPU
     load is seconds rather than minutes on every launch."""

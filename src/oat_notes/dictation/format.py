@@ -187,17 +187,11 @@ EMAIL_SYSTEM_PROMPT = (
 )
 
 
-def build_email_prompt(text: str, signature: str = "") -> str:
-    if signature.strip():
-        closing = (
-            f"End with a short closing line and sign it exactly "
-            f"{signature.strip()!r} on its own line."
-        )
-    else:
-        closing = (
-            "End with a short closing line such as 'Thanks,' and do not sign "
-            "a name after it."
-        )
+def build_email_prompt(text: str) -> str:
+    closing = (
+        "End with a short closing line such as 'Thanks,' and do not sign "
+        "a name after it."
+    )
     return f"{closing}\n\nDictated text:\n{text.strip()}"
 
 
@@ -225,7 +219,7 @@ def postprocess_email(output: str, original: str) -> str | None:
     return cleaned
 
 
-def format_email(text: str, engine: LlmEngine, signature: str = "") -> str:
+def format_email(text: str, engine: LlmEngine) -> str:
     """Rewrite as an email, falling back to the input if anything looks off."""
     original = text.strip()
     if not original:
@@ -233,7 +227,7 @@ def format_email(text: str, engine: LlmEngine, signature: str = "") -> str:
     max_new_tokens = int(64 + 2.5 * len(original.split()))
     try:
         output = engine.generate(
-            EMAIL_SYSTEM_PROMPT, build_email_prompt(original, signature), max_new_tokens
+            EMAIL_SYSTEM_PROMPT, build_email_prompt(original), max_new_tokens
         )
     except Exception as error:
         print(f"email formatting failed: {type(error).__name__}", file=sys.stderr)
@@ -251,7 +245,6 @@ def format_dictation(
     force_email: bool = False,
     vocabulary: Sequence[tuple[str, str]] = (),
     spoken_punctuation: bool = False,
-    signature: str = "",
     detect: bool = True,
 ) -> tuple[str, str]:
     """Raw transcript in, text-to-insert and its mode out."""
@@ -263,4 +256,4 @@ def format_dictation(
     )
     if not wants_email or engine is None:
         return cleaned, TEXT_MODE
-    return format_email(cleaned, engine, signature), EMAIL_MODE
+    return format_email(cleaned, engine), EMAIL_MODE
