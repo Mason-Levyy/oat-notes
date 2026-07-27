@@ -1,5 +1,5 @@
 #define AppName "Oat Notes"
-#define AppVersion "0.1.0"
+#define AppVersion "0.3.0"
 #define AppPublisher "Mason Levy"
 #define AppExeName "oat-notes.exe"
 #ifndef AppSource
@@ -32,6 +32,7 @@ UninstallDisplayIcon={app}\{#AppExeName}
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "startupicon"; Description: "Start Oat Notes with Windows (dictation hotkey always ready)"; GroupDescription: "Additional shortcuts:"
 
 [Dirs]
 Name: "{userdocs}\Oat Notes"
@@ -42,6 +43,9 @@ Source: "{#AppSource}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{autoprograms}\Oat Notes"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{userdocs}\Oat Notes"; IconFilename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\Oat Notes"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{userdocs}\Oat Notes"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
+; --background skips the browser tab. Launching the app again while it is
+; running opens the UI on the already-running instance, so nothing is stranded.
+Name: "{userstartup}\Oat Notes"; Filename: "{app}\{#AppExeName}"; Parameters: "--background"; WorkingDir: "{userdocs}\Oat Notes"; IconFilename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch Oat Notes"; Flags: nowait postinstall skipifsilent

@@ -17,6 +17,10 @@ tmp_ret = collect_all('openvino_tokenizers')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('sherpa_onnx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# The dictation HUD is a tkinter window. PyInstaller usually detects tkinter
+# and its tcl/tk data, but only through the import graph — overlay.py imports
+# it lazily inside a function so headless runs don't need it, so name it here.
+hiddenimports += ['tkinter', 'tkinter.font']
 
 
 a = Analysis(
