@@ -29,6 +29,7 @@ class Config:
     cleanup_context_before: int = 2
     cleanup_context_after: int = 2
     cleanup_max_wait_seconds: float = 15.0
+    dictation_max_chunk_seconds: float = 8.0
     offline: bool = False
     debug: bool = False
 

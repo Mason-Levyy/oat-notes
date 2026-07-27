@@ -157,11 +157,13 @@ def test_groups_collapse_by_default_and_label_their_member_list():
     assert '${count} MEMBER${count === 1 ? "" : "S"}' in HTML
 
 
-def test_the_orange_accent_marks_only_the_dominant_action_on_a_surface():
-    # Selected states invert to ink so orange keeps meaning "act here".
-    assert ".tab.active { background: var(--ink); color: var(--paper); }" in HTML
-    assert "background: var(--ink); color: var(--paper); box-shadow: 3px 3px 0 var(--ink);" in HTML
-    # Secondary buttons dropped the filled treatment.
+def test_selected_states_are_marked_with_the_oat_accent():
+    assert ".tab.active { background: var(--oat); }" in HTML
+    assert "background: var(--oat); box-shadow: 3px 3px 0 var(--ink);" in HTML
+    assert '.notes-tab[aria-expanded="true"] { background: var(--oat-dark); }' in HTML
+
+
+def test_secondary_buttons_stay_unfilled():
     assert 'id="live-add-btn">+ ADD' in HTML
     assert 'class="mini primary" id="library-create"' not in HTML
     assert 'class="mini primary" id="group-create"' not in HTML
@@ -181,3 +183,40 @@ def test_profile_learning_feedback_uses_the_new_three_and_five_second_rules():
     assert "SAMPLE ADDED" in HTML
     assert "SAMPLE SKIPPED" in HTML
     assert "ready_seconds: 5.0" in HTML
+
+
+def test_dictation_card_offers_both_chords_and_the_vocabulary_editor():
+    assert 'id="dictation-form"' in HTML
+    assert 'id="dictation-modifier-grid"' in HTML
+    assert 'id="dictation-email-grid"' in HTML
+    assert 'id="vocabulary-list"' in HTML
+    assert "function renderVocabulary()" in HTML
+    assert "DICTATION" in HTML
+
+
+def test_dictation_card_edits_are_not_clobbered_by_status_events():
+    assert "if (!dictationDirty) {" in HTML
+    assert "dictationDirty = true;" in HTML
+    # Cleared before applyState so the card re-syncs from the saved values.
+    assert HTML.index("dictationDirty = false;") < HTML.index("applyState(result);\n    const label")
+
+
+def test_dictation_save_sends_every_field_it_owns():
+    for field in (
+        "dictation_enabled", "dictation_modifiers", "dictation_email_modifiers",
+        "dictation_activation", "dictation_injection", "dictation_email_detection",
+        "dictation_restore_clipboard", "dictation_spoken_punctuation",
+        "dictation_signature", "dictation_vocabulary", "overlay_enabled",
+    ):
+        assert f"{field}:" in HTML
+
+
+def test_dictation_status_mirrors_the_overlay():
+    assert 'id="dictation-status"' in HTML
+    assert 'event.type === "dictation"' in HTML
+    assert "function renderDictationStatus()" in HTML
+    assert "DICTATION_LABELS" in HTML
+
+
+def test_empty_email_chord_reads_as_off():
+    assert 'chordLabel(gridModifiers("dictation-email-grid"), "OFF")' in HTML

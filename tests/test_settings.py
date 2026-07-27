@@ -43,3 +43,128 @@ def test_missing_or_corrupt_settings_use_defaults(tmp_path):
 
     path.write_text("not json", encoding="utf-8")
     assert store.load() == AppSettings()
+
+
+# -- dictation settings ----------------------------------------------------
+
+
+def test_dictation_defaults():
+    settings = AppSettings()
+    assert settings.dictation_modifiers == ("ctrl", "win")
+    assert settings.dictation_label == "Ctrl+Win"
+    assert settings.dictation_email_label == "Ctrl+Shift+Win"
+    assert settings.dictation_activation == "hybrid"
+    assert settings.dictation_injection == "paste"
+
+
+def test_every_default_survives_a_round_trip(tmp_path):
+    store = SettingsStore(tmp_path / "settings.json")
+    store.save(AppSettings())
+    assert store.load() == AppSettings()
+
+
+def test_full_dictation_round_trip(tmp_path):
+    store = SettingsStore(tmp_path / "settings.json")
+    settings = AppSettings(
+        dictation_modifiers=("alt", "win"),
+        dictation_email_modifiers=(),
+        dictation_activation="toggle",
+        dictation_tap_ms=250,
+        dictation_injection="type",
+        dictation_restore_clipboard=False,
+        dictation_spoken_punctuation=True,
+        dictation_vocabulary=(("levya", "Mason"), ("oat notes", "Oat Notes")),
+        dictation_signature="Mason",
+        overlay_enabled=False,
+    )
+    store.save(settings)
+    assert store.load() == settings
+
+
+# -- partial merge ---------------------------------------------------------
+
+
+def test_merge_leaves_untouched_fields_alone():
+    settings = AppSettings(
+        hotkey_modifiers=("alt", "shift"), dictation_signature="Mason"
+    )
+    merged = settings.merged({"dictation_activation": "hold"})
+    assert merged.dictation_activation == "hold"
+    assert merged.hotkey_modifiers == ("alt", "shift")
+    assert merged.dictation_signature == "Mason"
+
+
+def test_merge_validates_the_result():
+    with pytest.raises(ValueError):
+        AppSettings().merged({"dictation_activation": "telepathy"})
+
+
+def test_merge_rejects_a_non_object():
+    with pytest.raises(ValueError):
+        AppSettings().merged(["nope"])
+
+
+# -- validation ------------------------------------------------------------
+
+
+def test_colliding_chords_are_rejected():
+    with pytest.raises(ValueError, match="choose different modifiers"):
+        AppSettings.from_dict(
+            {"hotkey_modifiers": ["ctrl", "win"], "dictation_modifiers": ["ctrl", "win"]}
+        )
+
+
+def test_dictation_and_email_chords_may_not_collide():
+    with pytest.raises(ValueError, match="choose different modifiers"):
+        AppSettings.from_dict(
+            {
+                "dictation_modifiers": ["ctrl", "win"],
+                "dictation_email_modifiers": ["win", "ctrl"],
+            }
+        )
+
+
+def test_an_empty_email_chord_disables_it():
+    settings = AppSettings.from_dict({"dictation_email_modifiers": []})
+    assert settings.dictation_email_modifiers == ()
+    assert settings.dictation_email_label == "off"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"dictation_activation": "telepathy"},
+        {"dictation_injection": "telekinesis"},
+        {"dictation_tap_ms": 5},
+        {"dictation_tap_ms": 99999},
+        {"dictation_tap_ms": "fast"},
+        {"dictation_tap_ms": True},
+        {"dictation_enabled": "yes"},
+        {"dictation_signature": 42},
+        {"dictation_vocabulary": "levya=Mason"},
+        {"dictation_vocabulary": [["only-one-item"]]},
+        {"dictation_vocabulary": [[1, 2]]},
+    ],
+)
+def test_invalid_dictation_settings_are_rejected(payload):
+    with pytest.raises(ValueError):
+        AppSettings.from_dict(payload)
+
+
+def test_vocabulary_accepts_the_ui_shape_and_drops_blanks():
+    settings = AppSettings.from_dict(
+        {"dictation_vocabulary": [["levya", "Mason"], ["  ", "ignored"], ["x", " y "]]}
+    )
+    assert settings.dictation_vocabulary == (("levya", "Mason"), ("x", "y"))
+
+
+def test_vocabulary_accepts_objects():
+    settings = AppSettings.from_dict(
+        {"dictation_vocabulary": [{"heard": "levya", "written": "Mason"}]}
+    )
+    assert settings.dictation_vocabulary == (("levya", "Mason"),)
+
+
+def test_unknown_keys_are_ignored():
+    settings = AppSettings.from_dict(AppSettings().to_dict())
+    assert settings == AppSettings()

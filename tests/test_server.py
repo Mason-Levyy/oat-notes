@@ -372,3 +372,127 @@ def test_stop_voice_recording_stops_active_recorder(tmp_path, monkeypatch):
     result = state.stop_voice_recording()
     assert result == {"ok": True}
     assert recorder.stopped
+
+
+# -- dictation -------------------------------------------------------------
+
+
+class FakeDictation:
+    def __init__(self, enabled=True):
+        from oat_notes.dictation.controller import DictationOptions
+
+        self.options = DictationOptions(enabled=enabled)
+        self.phase = "idle"
+        self.last_error = None
+        self.rebinds = []
+
+    def rebind(self, options):
+        self.options = options
+        self.rebinds.append(options)
+
+
+def dictation_state(**kwargs):
+    from oat_notes.server import AppState
+
+    return AppState(Config(), transcriber=None, dictation=FakeDictation(), **kwargs)
+
+
+def test_status_reports_dictation():
+    status = dictation_state().status()
+    assert status["dictation"] == {"enabled": True, "phase": "idle", "error": None}
+
+
+def test_status_without_dictation_reports_unavailable():
+    state = AppState(Config(), transcriber=None)
+    assert state.status()["dictation"]["phase"] == "unavailable"
+
+
+def test_saving_dictation_settings_rebinds_the_chord():
+    state = dictation_state(save_settings=lambda settings: None)
+    state.update_settings({"dictation_modifiers": ["alt", "win"]})
+    assert state.dictation.rebinds[-1].modifiers == ("alt", "win")
+
+
+def test_partial_update_keeps_the_other_card_intact():
+    state = dictation_state(save_settings=lambda settings: None)
+    state.update_settings({"hotkey_modifiers": ["alt", "shift"]})
+    state.update_settings({"dictation_activation": "hold"})
+    assert state.settings.hotkey_modifiers == ("alt", "shift")
+    assert state.settings.dictation_activation == "hold"
+
+
+def test_dictation_settings_may_change_during_a_meeting():
+    from oat_notes.types import Channel
+
+    state = dictation_state(save_settings=lambda settings: None)
+    state.session = FakeSession()
+    state.session.active = {Channel.MIC: None, Channel.LOOPBACK: None}
+    state.session.current_speaker = None
+    state.session.profile_learning = None
+    state.session.channels = ()
+    state.session.hotkey_bank = 0
+    state.session.elapsed = lambda: 0.0
+    response = state.update_settings({"dictation_signature": "Mason"})
+    assert "error" not in response
+    assert state.settings.dictation_signature == "Mason"
+
+
+def test_speaker_hotkey_still_locked_during_a_meeting():
+    state = dictation_state(save_settings=lambda settings: None)
+    state.session = object()
+    response = state.update_settings({"hotkey_modifiers": ["shift"]})
+    assert response == {"error": "end the meeting before changing hotkeys"}
+
+
+def test_colliding_chords_are_refused():
+    state = dictation_state(save_settings=lambda settings: None)
+    response = state.update_settings({"dictation_modifiers": ["ctrl", "alt"]})
+    assert "choose different modifiers" in response["error"]
+    assert state.settings.dictation_modifiers == ("ctrl", "win")
+
+
+def test_toggle_dictation_flips_the_setting():
+    state = dictation_state(save_settings=lambda settings: None)
+    status = state.toggle_dictation({})
+    assert status["settings"]["dictation_enabled"] is False
+    assert state.dictation.rebinds[-1].enabled is False
+
+    status = state.toggle_dictation({})
+    assert status["settings"]["dictation_enabled"] is True
+
+
+def test_toggle_dictation_accepts_an_explicit_value():
+    state = dictation_state(save_settings=lambda settings: None)
+    state.toggle_dictation({"enabled": False})
+    assert state.settings.dictation_enabled is False
+    state.toggle_dictation({"enabled": False})
+    assert state.settings.dictation_enabled is False
+
+
+def test_toggle_dictation_rejects_a_non_boolean():
+    state = dictation_state(save_settings=lambda settings: None)
+    assert "error" in state.toggle_dictation({"enabled": "maybe"})
+
+
+def test_toggle_without_dictation_reports_unavailable():
+    state = AppState(Config(), transcriber=None)
+    assert state.toggle_dictation({}) == {"error": "dictation is unavailable"}
+
+
+def test_settings_map_onto_dictation_options():
+    from oat_notes.server import dictation_options
+
+    options = dictation_options(
+        AppSettings(
+            dictation_modifiers=("alt", "win"),
+            dictation_activation="toggle",
+            dictation_tap_ms=250,
+            dictation_vocabulary=(("levya", "Mason"),),
+            dictation_signature="Mason",
+        )
+    )
+    assert options.modifiers == ("alt", "win")
+    assert options.activation == "toggle"
+    assert options.tap_seconds == 0.25
+    assert options.vocabulary == (("levya", "Mason"),)
+    assert options.signature == "Mason"

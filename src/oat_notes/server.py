@@ -18,10 +18,30 @@ from typing import Callable
 
 from .attribution import Speaker
 from .config import Config
+from .dictation.controller import DictationController, DictationOptions
+from .hotkeys import HotkeyListener
 from .output import format_timestamp, recover_journals
+from .overlay import Overlay
 from .settings import AppSettings, SettingsStore
 from .speaker_store import SpeakerStore
 from .types import Channel, TranscriptSegment
+
+
+def dictation_options(settings: AppSettings) -> DictationOptions:
+    """The single place persisted settings become runtime dictation options."""
+    return DictationOptions(
+        enabled=settings.dictation_enabled,
+        modifiers=settings.dictation_modifiers,
+        email_modifiers=settings.dictation_email_modifiers,
+        activation=settings.dictation_activation,
+        tap_seconds=settings.dictation_tap_ms / 1000.0,
+        injection=settings.dictation_injection,
+        restore_clipboard=settings.dictation_restore_clipboard,
+        email_detection=settings.dictation_email_detection,
+        spoken_punctuation=settings.dictation_spoken_punctuation,
+        vocabulary=settings.dictation_vocabulary,
+        signature=settings.dictation_signature,
+    )
 
 
 class EventHub:
@@ -65,6 +85,8 @@ class AppState:
         speaker_store: SpeakerStore | None = None,
         embedding_engine=None,
         tracking_embedding_engine=None,
+        hotkey_listener=None,
+        dictation=None,
     ) -> None:
         self.config = config
         self.transcriber = transcriber
@@ -74,11 +96,14 @@ class AppState:
         self.speaker_store = speaker_store
         self.embedding_engine = embedding_engine
         self.tracking_embedding_engine = tracking_embedding_engine
+        self.hotkey_listener = hotkey_listener
+        self.dictation = dictation
         self.speaker_model_status = (
             "ready" if embedding_engine is not None else "loading" if speaker_store else "unavailable"
         )
         self.speaker_model_error: str | None = None
         self.cleaner = None
+        self.llm_engine = None
         self.cleanup_status = "loading"
         self.cleanup_error: str | None = None
         self.model_status = "ready" if transcriber is not None else "loading"
@@ -167,6 +192,7 @@ class AppState:
                 "model_error": self.model_error,
                 "model_load_seconds": self.model_load_seconds,
                 "settings": self.settings.to_dict(),
+                "dictation": self.dictation_status(),
                 "hotkey_bank": self.session.hotkey_bank if recording else 0,
                 "speaker_model_status": self.speaker_model_status,
                 "speaker_model_error": self.speaker_model_error,
@@ -190,6 +216,8 @@ class AppState:
             self.model_status = "ready"
             self.model_error = None
             self.model_load_seconds = elapsed
+        if self.dictation is not None:
+            self.dictation.set_transcriber(transcriber)
         self.hub.publish({"type": "status", "recording": False})
 
     def model_failed(self, error: Exception, elapsed: float) -> None:
@@ -236,6 +264,33 @@ class AppState:
             self.cleanup_error = reason
         self.hub.publish({"type": "status", "recording": self.session is not None})
 
+    def apply_dictation_settings(self) -> None:
+        """Re-bind the dictation chords from the current settings. Safe to
+        call while a dictation is idle; the listener swaps bindings live."""
+        if self.dictation is None:
+            return
+        self.dictation.rebind(dictation_options(self.settings))
+
+    def toggle_dictation(self, body: dict) -> dict:
+        """Pause or resume the dictation chord without restarting the app."""
+        if self.dictation is None:
+            return {"error": "dictation is unavailable"}
+        wanted = body.get("enabled")
+        if wanted is None:
+            wanted = not self.settings.dictation_enabled
+        if not isinstance(wanted, bool):
+            return {"error": "enabled must be true or false"}
+        return self.update_settings({"dictation_enabled": wanted})
+
+    def dictation_status(self) -> dict:
+        if self.dictation is None:
+            return {"enabled": False, "phase": "unavailable", "error": None}
+        return {
+            "enabled": self.dictation.options.enabled,
+            "phase": self.dictation.phase,
+            "error": self.dictation.last_error,
+        }
+
     def cleaner_failed(self, error: Exception) -> None:
         with self.lock:
             self.cleaner = None
@@ -245,11 +300,14 @@ class AppState:
 
     def update_settings(self, body: dict) -> dict:
         try:
-            settings = AppSettings.from_dict(body)
+            settings = self.settings.merged(body)
         except (TypeError, ValueError) as error:
             return {"error": str(error)}
         with self.lock:
-            if self.session is not None:
+            changes_a_chord = (
+                settings.hotkey_modifiers != self.settings.hotkey_modifiers
+            )
+            if self.session is not None and changes_a_chord:
                 return {"error": "end the meeting before changing hotkeys"}
             try:
                 if self._save_settings is not None:
@@ -257,6 +315,7 @@ class AppState:
             except OSError as error:
                 return {"error": f"could not save settings: {error}"}
             self.settings = settings
+        self.apply_dictation_settings()
         self.hub.publish({"type": "status", "recording": False})
         return self.status()
 
@@ -505,6 +564,7 @@ class AppState:
                     use_loopback=bool(body.get("loopback", True)),
                     out_dir=self._out_dir,
                     hotkey_modifiers=self.settings.hotkey_modifiers,
+                    hotkey_listener=self.hotkey_listener,
                     speaker_store=self.speaker_store,
                     embedding_engine=self.embedding_engine,
                     tracking_embedding_engine=self.tracking_embedding_engine,
@@ -791,6 +851,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
             self._send_json(self.state.switch_speaker(index))
+        elif self.path == "/api/dictation/toggle":
+            self._send_json(self.state.toggle_dictation(body))
         elif self.path == "/api/add_guest":
             self._send_json(self.state.add_guest(body))
         elif self.path == "/api/roster/add":
@@ -911,20 +973,15 @@ def _initialize_model(state: AppState, config: Config) -> None:
         return
     try:
         from .cleanup import TranscriptCleaner
-        from .transcriber import openvino_model_cached
+        from .llm import LlmEngine, model_is_cached
 
-        if not config.offline and not openvino_model_cached(config.cleanup_model):
-            print(
-                f"Downloading transcript cleanup model ({config.cleanup_model})…",
-                flush=True,
-            )
+        if not config.offline and not model_is_cached(config):
+            print(f"Downloading language model ({config.cleanup_model})…", flush=True)
             state.cleaner_downloading()
         else:
-            print(
-                f"Loading transcript cleanup model ({config.cleanup_model})…",
-                flush=True,
-            )
-        cleaner = TranscriptCleaner(config)
+            print(f"Loading language model ({config.cleanup_model})…", flush=True)
+        engine = LlmEngine.from_config(config)
+        cleaner = TranscriptCleaner(engine)
         cleaner.warm_up()
     except ImportError:
         print(
@@ -940,21 +997,69 @@ def _initialize_model(state: AppState, config: Config) -> None:
         )
         state.cleaner_failed(error)
     else:
-        print("Transcript cleanup ready", flush=True)
+        print(f"Language model ready on {engine.device}", flush=True)
+        state.llm_engine = engine
+        if state.dictation is not None:
+            state.dictation.set_engine(engine)
         state.cleaner_ready(cleaner)
+
+
+def _await_shutdown(state: AppState, overlay, show_overlay: bool = True) -> None:
+    """Block the main thread until the app is told to quit.
+
+    Tk insists on owning the thread it was created on, so when the overlay is
+    enabled the main thread becomes its event loop and polls ``shutdown``
+    from inside. Without it — headless runs, or a build with no tkinter —
+    this stays the plain wait it always was.
+    """
+    if show_overlay:
+        try:
+            overlay.run(state.shutdown)
+            return
+        except Exception as error:
+            print(
+                f"overlay unavailable, continuing without it: "
+                f"{type(error).__name__}: {error}",
+                file=sys.stderr,
+            )
+    while not state.shutdown.wait(timeout=0.3):
+        pass
 
 
 def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -> None:
     started = time.perf_counter()
     settings_store = SettingsStore()
     speaker_store = SpeakerStore()
+    settings = settings_store.load()
+    hotkey_listener = HotkeyListener()
+    url = f"http://127.0.0.1:{args.port}"
+    overlay = Overlay(
+        on_quit=lambda: state.shutdown.set(),
+        on_open_ui=lambda: webbrowser.open(url),
+    )
+    last_phase_sent_to_browser: list[str] = [""]
+
+    def on_dictation_phase(phase: str, details: dict) -> None:
+        overlay.post_phase(phase, details)
+        if last_phase_sent_to_browser[0] != phase:
+            last_phase_sent_to_browser[0] = phase
+            state.hub.publish({"type": "dictation", "phase": phase, **details})
+
+    dictation = DictationController(
+        config,
+        options=dictation_options(settings),
+        on_phase=on_dictation_phase,
+        level_sink=overlay.post_level,
+    )
     state = AppState(
         config,
         transcriber=None,
         out_dir=args.out_dir,
-        settings=settings_store.load(),
+        settings=settings,
         save_settings=settings_store.save,
         speaker_store=speaker_store,
+        hotkey_listener=hotkey_listener,
+        dictation=dictation,
     )
     recovered = recover_journals(args.out_dir)
     if recovered:
@@ -963,7 +1068,6 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
             print(f"Recovered an unsaved transcript from a previous run: {path}", flush=True)
     Handler.state = state
     Handler.port = args.port
-    url = f"http://127.0.0.1:{args.port}"
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError as error:
@@ -974,6 +1078,10 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
             return
         raise
     server.daemon_threads = True
+
+    dictation.bind(hotkey_listener)
+    dictation.start()
+    hotkey_listener.start()
 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -994,11 +1102,16 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
     model_thread.daemon = True
     model_thread.start()
     try:
-        while not state.shutdown.wait(timeout=0.3):
-            pass
+        _await_shutdown(
+            state,
+            overlay,
+            show_overlay=settings.overlay_enabled and not args.no_overlay,
+        )
     except KeyboardInterrupt:
         pass
     print("Shutting down…", flush=True)
+    dictation.stop()
+    hotkey_listener.stop()
     if state.session is not None:
         state.stop_session()
     server.shutdown()

@@ -20,3 +20,25 @@ def test_windowed_logging_never_persists_stdout_transcripts(tmp_path, monkeypatc
     assert "private captured transcript" not in logged
     app._stdout_sink.close()
     app._log_file.close()
+
+
+def test_bare_launch_runs_the_ui_on_the_npu():
+    argv = app.default_argv(["oat-notes.exe"])
+    assert "--ui" in argv and "--backend" in argv and "openvino" in argv
+
+
+def test_startup_shortcut_still_gets_the_ui_defaults():
+    argv = app.default_argv(["oat-notes.exe", "--background"])
+    assert argv[1] == "--background"
+    assert "--ui" in argv and "openvino" in argv
+
+
+def test_launch_flags_combine():
+    argv = app.default_argv(["oat-notes.exe", "--background", "--no-overlay"])
+    assert "--ui" in argv
+
+
+def test_explicit_commands_are_left_alone():
+    for command in (["--list-devices"], ["--wav", "a.mp3"], ["--ui", "--port", "9000"]):
+        argv = ["oat-notes.exe", *command]
+        assert app.default_argv(argv) == argv

@@ -96,15 +96,35 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--llm-device",
         "--cleanup-device",
+        dest="llm_device",
         default=None,
         metavar="DEVICE",
-        help="OpenVINO device for the cleanup model: CPU (default), GPU, or NPU",
+        help=(
+            "OpenVINO device for the language model shared by transcript"
+            " cleanup and dictation formatting: CPU (default), GPU, or NPU."
+            " GPU is usually faster for generation and leaves the NPU to"
+            " Whisper; it falls back to CPU if the device refuses the model"
+        ),
     )
     parser.add_argument(
         "--no-cleanup",
         action="store_true",
         help="don't load the transcript cleanup model",
+    )
+    parser.add_argument(
+        "--no-overlay",
+        action="store_true",
+        help="don't show the floating dictation HUD",
+    )
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help=(
+            "start without opening the browser — for the Windows startup"
+            " shortcut. Launching the app again opens the UI on this instance"
+        ),
     )
     parser.add_argument(
         "--wav",
@@ -148,8 +168,8 @@ def main() -> None:
         config_overrides["openvino_model"] = args.ov_model
     if args.cleanup_model:
         config_overrides["cleanup_model"] = args.cleanup_model
-    if args.cleanup_device:
-        config_overrides["cleanup_device"] = args.cleanup_device
+    if args.llm_device:
+        config_overrides["cleanup_device"] = args.llm_device
     if args.no_cleanup:
         config_overrides["cleanup_enabled"] = False
     config = Config(**config_overrides)
@@ -157,7 +177,11 @@ def main() -> None:
     if args.ui:
         from .server import serve
 
-        serve(config, args, open_browser=not args.no_browser)
+        serve(
+            config,
+            args,
+            open_browser=not (args.no_browser or args.background),
+        )
         return
 
     from .transcriber import create_transcriber
