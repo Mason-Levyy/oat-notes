@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import sys
 import threading
@@ -281,6 +282,45 @@ class AppState:
         if not isinstance(wanted, bool):
             return {"error": "enabled must be true or false"}
         return self.update_settings({"dictation_enabled": wanted})
+
+    def dictation_history(self) -> dict:
+        if self.dictation is None:
+            return {"entries": [], "limit": 0}
+        from .dictation.controller import HISTORY_LIMIT
+
+        return {"entries": self.dictation.history(), "limit": HISTORY_LIMIT}
+
+    def clear_dictation_history(self) -> dict:
+        if self.dictation is None:
+            return {"error": "dictation is unavailable"}
+        self.dictation.clear_history()
+        self.hub.publish({"type": "dictation", "phase": self.dictation.phase})
+        return self.dictation_history()
+
+    def copy_dictation(self, body: dict) -> dict:
+        """Put a past dictation on the clipboard.
+
+        Deliberately not a re-insert: the click comes from the browser, so the
+        browser holds focus and the text would land there. Ctrl+Alt+Z is how
+        you re-insert somewhere useful.
+        """
+        if self.dictation is None:
+            return {"error": "dictation is unavailable"}
+        entry_id = body.get("id")
+        if not isinstance(entry_id, int):
+            return {"error": "id must be an integer"}
+        entry = next(
+            (item for item in self.dictation.history() if item["id"] == entry_id), None
+        )
+        if entry is None:
+            return {"error": "that dictation is no longer in the history"}
+        try:
+            from .inject import write_clipboard_text
+
+            write_clipboard_text(entry["text"])
+        except Exception as error:
+            return {"error": f"could not copy: {type(error).__name__}"}
+        return self.dictation_history()
 
     def dictation_status(self) -> dict:
         if self.dictation is None:
@@ -815,6 +855,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, _load_asset("pixel.woff2"), "font/woff2")
         elif self.path == "/api/state":
             self._send_json(self.state.status())
+        elif self.path == "/api/dictation/history":
+            self._send_json(self.state.dictation_history())
         elif self.path == "/api/library":
             self._send_json(
                 self.state.speaker_store.library()
@@ -853,6 +895,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.switch_speaker(index))
         elif self.path == "/api/dictation/toggle":
             self._send_json(self.state.toggle_dictation(body))
+        elif self.path == "/api/dictation/history/clear":
+            self._send_json(self.state.clear_dictation_history())
+        elif self.path == "/api/dictation/copy":
+            self._send_json(self.state.copy_dictation(body))
         elif self.path == "/api/add_guest":
             self._send_json(self.state.add_guest(body))
         elif self.path == "/api/roster/add":
@@ -1004,6 +1050,29 @@ def _initialize_model(state: AppState, config: Config) -> None:
         state.cleaner_ready(cleaner)
 
 
+def exit_backstop(seconds: float = 5.0) -> threading.Timer:
+    """Guarantee the process actually dies after an orderly shutdown.
+
+    Teardown stops the captures, drains the pipeline and closes the server, but
+    the native audio and inference libraries underneath can leave a thread that
+    outlives the interpreter. A process that lingers keeps its low-level
+    keyboard hook installed, so the next launch runs two — and the stale one
+    still answers on its port until it finally releases it.
+
+    Nothing is masked: this fires only if the normal exit has not happened,
+    and stderr is flushed first because a windowed build's stderr is the log.
+    """
+    def bail() -> None:
+        sys.stderr.flush()
+        os._exit(0)
+
+    timer = threading.Timer(seconds, bail)
+    timer.name = "exit-backstop"
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def _await_shutdown(state: AppState, overlay, show_overlay: bool = True) -> None:
     """Block the main thread until the app is told to quit.
 
@@ -1110,6 +1179,7 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
     except KeyboardInterrupt:
         pass
     print("Shutting down…", flush=True)
+    exit_backstop()
     dictation.stop()
     hotkey_listener.stop()
     if state.session is not None:
