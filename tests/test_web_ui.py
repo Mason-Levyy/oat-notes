@@ -157,7 +157,7 @@ def test_groups_collapse_by_default_and_label_their_member_list():
 
 
 def test_selected_states_are_marked_with_the_oat_accent():
-    assert ".tab.active { background: var(--oat); }" in HTML
+    assert ".nav-btn.active { background: var(--oat); }" in HTML
     assert "background: var(--oat); box-shadow: 3px 3px 0 var(--ink);" in HTML
     assert '.notes-tab[aria-expanded="true"] { background: var(--oat-dark); }' in HTML
 
@@ -250,3 +250,63 @@ def test_dictation_status_mirrors_the_overlay():
 def test_empty_email_chord_reads_as_off():
     assert 'allowEmpty: true' in HTML
     assert 'shortcut.allowEmpty ? "OFF" : "CHOOSE A MODIFIER"' in HTML
+
+
+def test_navigation_is_a_vertical_rail_not_tabs():
+    assert '<nav class="nav-rail" role="tablist" aria-orientation="vertical"' in HTML
+    assert 'class="tabs"' not in HTML
+    for section in ("nav-home", "nav-meeting", "nav-dictation", "nav-settings"):
+        assert f'id="{section}"' in HTML
+    assert "function openSection(name)" in HTML
+    assert "function openTab(" not in HTML
+
+
+def test_every_rail_button_maps_to_a_section():
+    for view in ("home-view", "meeting-view", "dictation-view", "settings-view"):
+        assert f'id="{view}"' in HTML
+
+
+def test_rail_glyphs_are_drawn_in_css_not_a_font():
+    # Same reason the grip is CSS: the bundled pixel font has no icon coverage.
+    assert ".nav-glyph.home" in HTML
+    assert ".nav-glyph.dictation" in HTML
+    assert "clip-path: polygon" in HTML
+
+
+def test_history_is_listed_with_copy_and_clear():
+    assert 'id="history-list"' in HTML
+    assert 'id="history-clear"' in HTML
+    assert "function renderHistory()" in HTML
+    assert '"/api/dictation/copy"' in HTML
+    assert '"/api/dictation/history/clear"' in HTML
+
+
+def test_history_offers_copy_rather_than_reinsert():
+    # A click comes from the browser, so the browser holds focus and a
+    # re-insert would land there. Ctrl+Alt+Z is the re-insert path.
+    assert ">COPY<" in HTML
+    assert '"/api/dictation/insert"' not in HTML
+
+
+def test_transcript_text_never_rides_the_event_stream():
+    assert 'if (event.phase === "inserted") refreshHistory();' in HTML
+
+
+def test_history_state_does_not_shadow_the_window_global():
+    assert "let dictationHistory = [];" in HTML
+    assert "let history = [];" not in HTML
+
+
+def test_home_summarises_status_and_shortcuts():
+    assert "function renderHome()" in HTML
+    assert 'id="home-status"' in HTML
+    assert 'id="home-shortcuts"' in HTML
+    assert "dictation_replay_label" in HTML
+
+
+def test_transient_dictation_phases_reset_in_the_browser():
+    # The overlay dismisses INSERTED itself; the browser needs telling, or the
+    # pill reads INSERTED until the next dictation.
+    assert "DICTATION_TRANSIENT" in HTML
+    assert 'phase: "idle"' in HTML
+    assert "clearTimeout(dictationReset)" in HTML

@@ -139,15 +139,61 @@ body {
 }
 .power:active { transform: translate(2px, 2px); box-shadow: none; }
 
-.tabs { display: flex; border-bottom: 3px solid var(--ink); }
-.tab {
-  flex: 1; border: 0; border-right: 3px solid var(--ink); background: #fff;
-  padding: 9px 14px; cursor: pointer; font-family: "Pixel", Consolas, monospace;
-  font-size: 9px;
+.console-body { display: flex; align-items: stretch; min-height: 520px; }
+.section-host { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.nav-rail {
+  flex: none; width: 92px; background: #fff;
+  border-right: 3px solid var(--ink);
+  display: flex; flex-direction: column;
 }
-.tab:last-child { border-right: 0; }
-.tab.active { background: var(--oat); }
-.tab:focus-visible { outline: 3px solid var(--ink); outline-offset: -3px; }
+.nav-btn {
+  border: 0; border-bottom: 3px solid var(--ink); background: #fff;
+  padding: 14px 6px 12px; cursor: pointer; display: block; width: 100%;
+  font-family: "Pixel", Consolas, monospace;
+}
+.nav-btn.active { background: var(--oat); }
+.nav-btn:focus-visible { outline: 3px solid var(--ink); outline-offset: -3px; }
+.nav-label { display: block; font-size: 7px; margin-top: 8px; }
+/* Glyphs are drawn in CSS: the bundled pixel font has no icon coverage. */
+.nav-glyph {
+  display: block; width: 18px; height: 18px; margin: 0 auto;
+  background: var(--ink);
+}
+.nav-glyph.home {
+  clip-path: polygon(50% 0, 100% 45%, 84% 45%, 84% 100%, 16% 100%, 16% 45%, 0 45%);
+}
+.nav-glyph.meeting {
+  clip-path: polygon(0 0, 100% 0, 100% 72%, 62% 72%, 38% 100%, 38% 72%, 0 72%);
+}
+.nav-glyph.dictation {
+  clip-path: polygon(34% 0, 66% 0, 66% 55%, 34% 55%, 34% 0,
+                     0 45%, 16% 45%, 16% 62%, 84% 62%, 84% 45%, 100% 45%,
+                     100% 72%, 58% 72%, 58% 88%, 84% 88%, 84% 100%,
+                     16% 100%, 16% 88%, 42% 88%, 42% 72%, 0 72%);
+}
+.nav-glyph.settings {
+  clip-path: polygon(0 38%, 20% 38%, 20% 20%, 38% 20%, 38% 0, 62% 0, 62% 20%,
+                     80% 20%, 80% 38%, 100% 38%, 100% 62%, 80% 62%, 80% 80%,
+                     62% 80%, 62% 100%, 38% 100%, 38% 80%, 20% 80%, 20% 62%,
+                     0 62%);
+}
+.home-view, .dictation-view { display: none; padding: 24px; }
+.status-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
+.status-grid .key { font-size: 8px; padding-top: 3px; }
+.status-grid .value { font-family: Consolas, monospace; font-size: 13px; }
+.status-grid .value.warn { color: var(--rec); }
+.history-row {
+  border: 2px solid var(--ink); background: var(--paper);
+  padding: 10px 12px; margin-top: 8px;
+  display: flex; gap: 10px; align-items: flex-start;
+}
+.history-row .text {
+  flex: 1; min-width: 0; font-family: Consolas, monospace; font-size: 13px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.history-row .when { font-size: 8px; color: #6b6558; margin-top: 6px; }
+.history-row .email-tag { font-size: 7px; color: var(--oat-dark); }
+#history-clear { margin-top: 14px; }
 
 /* ---------- layout ---------- */
 .body { display: flex; }
@@ -551,10 +597,41 @@ body {
     </div>
   </header>
 
-  <nav class="tabs" aria-label="Application sections">
-    <button class="tab active" id="tab-meeting" type="button" aria-selected="true">MEETING</button>
-    <button class="tab" id="tab-settings" type="button" aria-selected="false">SETTINGS</button>
+  <div class="console-body">
+  <nav class="nav-rail" role="tablist" aria-orientation="vertical" aria-label="Application sections">
+    <button class="nav-btn" id="nav-home" type="button" role="tab" aria-selected="false"><span class="nav-glyph home" aria-hidden="true"></span><span class="nav-label pixel">HOME</span></button>
+    <button class="nav-btn active" id="nav-meeting" type="button" role="tab" aria-selected="true"><span class="nav-glyph meeting" aria-hidden="true"></span><span class="nav-label pixel">MEETING</span></button>
+    <button class="nav-btn" id="nav-dictation" type="button" role="tab" aria-selected="false"><span class="nav-glyph dictation" aria-hidden="true"></span><span class="nav-label pixel">DICTATE</span></button>
+    <button class="nav-btn" id="nav-settings" type="button" role="tab" aria-selected="false"><span class="nav-glyph settings" aria-hidden="true"></span><span class="nav-label pixel">SETUP</span></button>
   </nav>
+  <div class="section-host">
+
+  <section class="home-view" id="home-view">
+    <div class="settings-card">
+      <h2 class="pixel">STATUS</h2>
+      <div class="status-grid" id="home-status"></div>
+    </div>
+    <div class="settings-card">
+      <h2 class="pixel">SHORTCUTS</h2>
+      <div class="status-grid" id="home-shortcuts"></div>
+    </div>
+  </section>
+
+  <section class="dictation-view" id="dictation-view">
+    <div class="settings-card">
+      <h2 class="pixel">DICTATION</h2>
+      <div class="hint">Hold the chord, speak, release. Everything stays on this machine.</div>
+      <div class="dictation-status pixel" id="dictation-status" role="status">IDLE</div>
+      <div class="hint" id="dictation-chord-hint"></div>
+    </div>
+    <div class="settings-card">
+      <h2 class="pixel">HISTORY</h2>
+      <div class="hint">The last <span id="history-limit">20</span>, kept in memory only — cleared when the app closes.</div>
+      <div class="history-list" id="history-list"></div>
+      <button type="button" class="mini danger" id="history-clear">CLEAR HISTORY</button>
+      <div class="settings-message pixel" id="history-message" role="status"></div>
+    </div>
+  </section>
 
   <div class="body" id="meeting-view">
     <aside class="rail">
@@ -645,8 +722,7 @@ body {
     </div>
     <div class="settings-card">
       <h2 class="pixel">DICTATION</h2>
-      <div class="hint">Hold the chord, speak, release. Everything stays on this machine.</div>
-      <div class="dictation-status pixel" id="dictation-status" role="status">IDLE</div>
+      <div class="hint">Live status and history live in the DICTATE section.</div>
       <form id="dictation-form">
         <label class="modifier-option pixel toggle-row"><input type="checkbox" id="dictation-enabled"><span>ENABLE DICTATION</span></label>
 
@@ -703,6 +779,9 @@ body {
       <div class="group-list" id="group-list"></div>
     </div>
   </section>
+
+  </div>
+  </div>
 </div>
 
 <script>
@@ -730,6 +809,8 @@ let profileLearningTimer = null;
 let rosterFocus = null;
 let editingShortcut = null;
 let shortcutDraft = [];
+let dictationHistory = [];
+let dictationReset = null;
 let dictationDirty = false;
 let vocabulary = [];
 let dragIndex = null;
@@ -888,14 +969,22 @@ function saveShortcut(shortcut) {
   });
 }
 
-function openTab(name) {
-  const settingsOpen = name === "settings";
-  $("meeting-view").style.display = settingsOpen ? "none" : "flex";
-  $("settings-view").style.display = settingsOpen ? "block" : "none";
-  $("tab-meeting").classList.toggle("active", !settingsOpen);
-  $("tab-settings").classList.toggle("active", settingsOpen);
-  $("tab-meeting").setAttribute("aria-selected", String(!settingsOpen));
-  $("tab-settings").setAttribute("aria-selected", String(settingsOpen));
+const SECTIONS = [
+  { name: "home", view: "home-view", nav: "nav-home", display: "block" },
+  { name: "meeting", view: "meeting-view", nav: "nav-meeting", display: "flex" },
+  { name: "dictation", view: "dictation-view", nav: "nav-dictation", display: "block" },
+  { name: "settings", view: "settings-view", nav: "nav-settings", display: "block" },
+];
+
+function openSection(name) {
+  SECTIONS.forEach((section) => {
+    const open = section.name === name;
+    $(section.view).style.display = open ? section.display : "none";
+    $(section.nav).classList.toggle("active", open);
+    $(section.nav).setAttribute("aria-selected", String(open));
+  });
+  if (name === "dictation") refreshHistory();
+  if (name === "home") renderHome();
 }
 
 function librarySpeakers() {
@@ -1272,6 +1361,11 @@ function renderDictationSettings() {
   }
   renderVocabulary();
   renderDictationStatus();
+  const chord = settings.dictation_label || "the dictation chord";
+  const replay = settings.dictation_replay_label;
+  $("dictation-chord-hint").textContent =
+    `Hold ${chord} to talk, tap it to latch, Esc to cancel.` +
+    (replay && replay !== "off" ? ` ${replay} re-inserts the last one.` : "");
 }
 
 const DICTATION_LABELS = {
@@ -1280,10 +1374,97 @@ const DICTATION_LABELS = {
   formatting: "FORMATTING…", inserted: "INSERTED", cancelled: "CANCELLED",
   error: "ERROR", unavailable: "UNAVAILABLE",
 };
+const DICTATION_TRANSIENT = new Set(["inserted", "cancelled"]);
 const DICTATION_CLASSES = {
   listening: "live", latched: "live", transcribing: "busy",
   formatting: "busy", loading: "busy", error: "failed", unavailable: "failed",
 };
+
+function refreshHistory() {
+  fetch("/api/dictation/history").then((r) => r.json()).then(applyHistory);
+}
+
+function applyHistory(payload) {
+  dictationHistory = (payload && payload.entries) || [];
+  if (payload && payload.limit) $("history-limit").textContent = payload.limit;
+  renderHistory();
+}
+
+function renderHistory() {
+  const list = $("history-list");
+  if (!dictationHistory.length) {
+    list.innerHTML = '<div class="list-empty">Nothing dictated yet this session.</div>';
+    return;
+  }
+  list.innerHTML = dictationHistory
+    .map(
+      (entry) =>
+        `<div class="history-row"><div class="text">${escapeHtml(entry.text)}` +
+        `<div class="when">${escapeHtml(agoLabel(entry.at))}` +
+        (entry.mode === "email" ? ' <span class="email-tag">EMAIL</span>' : "") +
+        `</div></div>` +
+        `<button type="button" class="mini" data-copy="${entry.id}">COPY</button></div>`
+    )
+    .join("");
+  list.querySelectorAll("[data-copy]").forEach((button) => {
+    button.onclick = () => {
+      post("/api/dictation/copy", { id: Number(button.dataset.copy) }).then((result) => {
+        const message = $("history-message");
+        if (result.error) {
+          message.textContent = result.error.toUpperCase();
+          message.className = "settings-message pixel error";
+          return;
+        }
+        applyHistory(result);
+        message.textContent = "COPIED TO CLIPBOARD";
+        message.className = "settings-message pixel saved";
+      });
+    };
+  });
+}
+
+function agoLabel(at) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - at));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+function renderHome() {
+  const settings = state.settings || {};
+  const dictation = state.dictation || {};
+  const rows = [
+    ["TRANSCRIPTION", state.model_status === "ready"
+      ? `ready${state.model_load_seconds ? ` in ${state.model_load_seconds.toFixed(1)}s` : ""}`
+      : state.model_status, state.model_status === "error"],
+    ["LANGUAGE MODEL", state.cleanup_status, state.cleanup_status === "error"],
+    ["SPEAKER ID", state.speaker_model_status, state.speaker_model_status === "error"],
+    ["DICTATION", dictation.enabled === false ? "paused" : (dictation.phase || "idle"),
+      dictation.phase === "error"],
+    ["MEETING", state.recording ? "recording" : "not recording", false],
+    ["LAST TRANSCRIPT", state.last_saved || "none this session", false],
+  ];
+  if ((state.recovered || []).length) {
+    rows.push(["RECOVERED", `${state.recovered.length} unsaved transcript(s)`, true]);
+  }
+  $("home-status").innerHTML = statusRows(rows);
+  $("home-shortcuts").innerHTML = statusRows([
+    ["DICTATE", settings.dictation_label || "—", false],
+    ["AS EMAIL", settings.dictation_email_label || "—", false],
+    ["INSERT LAST", settings.dictation_replay_label || "—", false],
+    ["SWITCH SPEAKER", settings.hotkey_label || "—", false],
+  ]);
+}
+
+function statusRows(rows) {
+  return rows
+    .map(
+      ([key, value, warn]) =>
+        `<div class="key pixel">${escapeHtml(key)}</div>` +
+        `<div class="value${warn ? " warn" : ""}">${escapeHtml(String(value))}</div>`
+    )
+    .join("");
+}
 
 function renderDictationStatus() {
   const dictation = state.dictation || {};
@@ -1298,6 +1479,16 @@ function renderDictationStatus() {
     ? String(dictation.error).toUpperCase()
     : DICTATION_LABELS[phase] || phase.toUpperCase();
   element.className = `dictation-status pixel ${DICTATION_CLASSES[phase] || ""}`.trim();
+  // The overlay dismisses these itself; the browser has to be told, or the
+  // pill reads INSERTED until the next dictation.
+  if (dictationReset) clearTimeout(dictationReset);
+  if (DICTATION_TRANSIENT.has(phase)) {
+    dictationReset = setTimeout(() => {
+      state.dictation = Object.assign({}, state.dictation, { phase: "idle" });
+      renderDictationStatus();
+      renderHome();
+    }, 1500);
+  }
 }
 
 function renderVocabulary() {
@@ -1571,6 +1762,7 @@ function applyState(s) {
   }
   if (s.recording) renderPlayers();
   renderSettings();
+  renderHome();
   renderNotes();
 }
 
@@ -1870,8 +2062,17 @@ $("notes-form").onsubmit = (event) => {
   });
 };
 
-$("tab-meeting").onclick = () => openTab("meeting");
-$("tab-settings").onclick = () => openTab("settings");
+SECTIONS.forEach((section) => {
+  $(section.nav).onclick = () => openSection(section.name);
+});
+
+$("history-clear").onclick = () => {
+  post("/api/dictation/history/clear").then((result) => {
+    applyHistory(result);
+    $("history-message").textContent = "HISTORY CLEARED";
+    $("history-message").className = "settings-message pixel";
+  });
+};
 
 $("dictation-form").querySelectorAll("input, select").forEach((input) => {
   input.addEventListener("change", () => { dictationDirty = true; });
@@ -1989,6 +2190,9 @@ events.onmessage = (message) => {
       error: event.error || null,
     });
     renderDictationStatus();
+    renderHome();
+    // Transcript text never rides the event stream; fetch it once it landed.
+    if (event.phase === "inserted") refreshHistory();
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);
   } else if (event.type === "enrollment") {
