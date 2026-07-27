@@ -159,8 +159,17 @@ body {
   display: block; width: 18px; height: 18px; margin: 0 auto;
   background: var(--ink);
 }
-.nav-glyph.home {
-  clip-path: polygon(50% 0, 100% 45%, 84% 45%, 84% 100%, 16% 100%, 16% 45%, 0 45%);
+/* Pinned to the bottom and smaller: reference material, not a destination. */
+.nav-btn.info {
+  margin-top: auto; border-bottom: 0; border-top: 3px solid var(--ink);
+  padding: 10px 6px 9px;
+}
+.nav-btn.info .nav-glyph { width: 13px; height: 13px; }
+.nav-btn.info .nav-label { font-size: 6px; margin-top: 6px; }
+.nav-glyph.info {
+  clip-path: polygon(38% 0, 62% 0, 62% 22%, 38% 22%,
+                     30% 34%, 62% 34%, 62% 82%, 74% 82%, 74% 100%,
+                     26% 100%, 26% 82%, 40% 82%, 40% 50%, 30% 50%);
 }
 .nav-glyph.meeting {
   clip-path: polygon(0 0, 100% 0, 100% 72%, 62% 72%, 38% 100%, 38% 72%, 0 72%);
@@ -177,7 +186,7 @@ body {
                      62% 80%, 62% 100%, 38% 100%, 38% 80%, 20% 80%, 20% 62%,
                      0 62%);
 }
-.home-view, .dictation-view { display: none; padding: 24px; }
+.info-view, .dictation-view { display: none; padding: 24px; }
 .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
 .status-grid .key { font-size: 8px; padding-top: 3px; }
 .status-grid .value { font-family: Consolas, monospace; font-size: 13px; }
@@ -599,21 +608,21 @@ body {
 
   <div class="console-body">
   <nav class="nav-rail" role="tablist" aria-orientation="vertical" aria-label="Application sections">
-    <button class="nav-btn" id="nav-home" type="button" role="tab" aria-selected="false"><span class="nav-glyph home" aria-hidden="true"></span><span class="nav-label pixel">HOME</span></button>
     <button class="nav-btn active" id="nav-meeting" type="button" role="tab" aria-selected="true"><span class="nav-glyph meeting" aria-hidden="true"></span><span class="nav-label pixel">MEETING</span></button>
     <button class="nav-btn" id="nav-dictation" type="button" role="tab" aria-selected="false"><span class="nav-glyph dictation" aria-hidden="true"></span><span class="nav-label pixel">DICTATE</span></button>
     <button class="nav-btn" id="nav-settings" type="button" role="tab" aria-selected="false"><span class="nav-glyph settings" aria-hidden="true"></span><span class="nav-label pixel">SETUP</span></button>
+    <button class="nav-btn info" id="nav-info" type="button" role="tab" aria-selected="false" title="Status and shortcuts"><span class="nav-glyph info" aria-hidden="true"></span><span class="nav-label pixel">INFO</span></button>
   </nav>
   <div class="section-host">
 
-  <section class="home-view" id="home-view">
+  <section class="info-view" id="info-view">
     <div class="settings-card">
       <h2 class="pixel">STATUS</h2>
-      <div class="status-grid" id="home-status"></div>
+      <div class="status-grid" id="info-status"></div>
     </div>
     <div class="settings-card">
       <h2 class="pixel">SHORTCUTS</h2>
-      <div class="status-grid" id="home-shortcuts"></div>
+      <div class="status-grid" id="info-shortcuts"></div>
     </div>
   </section>
 
@@ -970,10 +979,10 @@ function saveShortcut(shortcut) {
 }
 
 const SECTIONS = [
-  { name: "home", view: "home-view", nav: "nav-home", display: "block" },
   { name: "meeting", view: "meeting-view", nav: "nav-meeting", display: "flex" },
   { name: "dictation", view: "dictation-view", nav: "nav-dictation", display: "block" },
   { name: "settings", view: "settings-view", nav: "nav-settings", display: "block" },
+  { name: "info", view: "info-view", nav: "nav-info", display: "block" },
 ];
 
 function openSection(name) {
@@ -984,7 +993,7 @@ function openSection(name) {
     $(section.nav).setAttribute("aria-selected", String(open));
   });
   if (name === "dictation") refreshHistory();
-  if (name === "home") renderHome();
+  if (name === "info") renderInfo();
 }
 
 function librarySpeakers() {
@@ -1430,7 +1439,7 @@ function agoLabel(at) {
   return `${Math.floor(seconds / 3600)}h ago`;
 }
 
-function renderHome() {
+function renderInfo() {
   const settings = state.settings || {};
   const dictation = state.dictation || {};
   const rows = [
@@ -1447,8 +1456,8 @@ function renderHome() {
   if ((state.recovered || []).length) {
     rows.push(["RECOVERED", `${state.recovered.length} unsaved transcript(s)`, true]);
   }
-  $("home-status").innerHTML = statusRows(rows);
-  $("home-shortcuts").innerHTML = statusRows([
+  $("info-status").innerHTML = statusRows(rows);
+  $("info-shortcuts").innerHTML = statusRows([
     ["DICTATE", settings.dictation_label || "—", false],
     ["AS EMAIL", settings.dictation_email_label || "—", false],
     ["INSERT LAST", settings.dictation_replay_label || "—", false],
@@ -1486,7 +1495,7 @@ function renderDictationStatus() {
     dictationReset = setTimeout(() => {
       state.dictation = Object.assign({}, state.dictation, { phase: "idle" });
       renderDictationStatus();
-      renderHome();
+      renderInfo();
     }, 1500);
   }
 }
@@ -1762,7 +1771,7 @@ function applyState(s) {
   }
   if (s.recording) renderPlayers();
   renderSettings();
-  renderHome();
+  renderInfo();
   renderNotes();
 }
 
@@ -2190,7 +2199,7 @@ events.onmessage = (message) => {
       error: event.error || null,
     });
     renderDictationStatus();
-    renderHome();
+    renderInfo();
     // Transcript text never rides the event stream; fetch it once it landed.
     if (event.phase === "inserted") refreshHistory();
   } else if (event.type === "status") {

@@ -255,20 +255,20 @@ def test_empty_email_chord_reads_as_off():
 def test_navigation_is_a_vertical_rail_not_tabs():
     assert '<nav class="nav-rail" role="tablist" aria-orientation="vertical"' in HTML
     assert 'class="tabs"' not in HTML
-    for section in ("nav-home", "nav-meeting", "nav-dictation", "nav-settings"):
+    for section in ("nav-meeting", "nav-dictation", "nav-settings", "nav-info"):
         assert f'id="{section}"' in HTML
     assert "function openSection(name)" in HTML
     assert "function openTab(" not in HTML
 
 
 def test_every_rail_button_maps_to_a_section():
-    for view in ("home-view", "meeting-view", "dictation-view", "settings-view"):
+    for view in ("meeting-view", "dictation-view", "settings-view", "info-view"):
         assert f'id="{view}"' in HTML
 
 
 def test_rail_glyphs_are_drawn_in_css_not_a_font():
     # Same reason the grip is CSS: the bundled pixel font has no icon coverage.
-    assert ".nav-glyph.home" in HTML
+    assert ".nav-glyph.info" in HTML
     assert ".nav-glyph.dictation" in HTML
     assert "clip-path: polygon" in HTML
 
@@ -297,10 +297,10 @@ def test_history_state_does_not_shadow_the_window_global():
     assert "let history = [];" not in HTML
 
 
-def test_home_summarises_status_and_shortcuts():
-    assert "function renderHome()" in HTML
-    assert 'id="home-status"' in HTML
-    assert 'id="home-shortcuts"' in HTML
+def test_info_summarises_status_and_shortcuts():
+    assert "function renderInfo()" in HTML
+    assert 'id="info-status"' in HTML
+    assert 'id="info-shortcuts"' in HTML
     assert "dictation_replay_label" in HTML
 
 
@@ -310,3 +310,15 @@ def test_transient_dictation_phases_reset_in_the_browser():
     assert "DICTATION_TRANSIENT" in HTML
     assert 'phase: "idle"' in HTML
     assert "clearTimeout(dictationReset)" in HTML
+
+
+def test_meeting_is_the_landing_section():
+    assert '<button class="nav-btn active" id="nav-meeting"' in HTML
+    assert 'id="nav-home"' not in HTML
+    assert HTML.index('id="nav-meeting"') < HTML.index('id="nav-dictation"')
+
+
+def test_info_is_pinned_to_the_bottom_of_the_rail():
+    assert HTML.index('id="nav-info"') > HTML.index('id="nav-settings"')
+    assert ".nav-btn.info {" in HTML
+    assert "margin-top: auto;" in HTML

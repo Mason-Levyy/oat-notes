@@ -320,14 +320,17 @@ class DictationController:
         if not text:
             self._publish(IDLE)
             return
+        # Recorded before the insert, not after: if the target window is gone
+        # the insert raises, and the transcript has to survive that or the
+        # dictation is lost for good.
+        self.last_text = text
+        self._remember(text, mode)
         inject.inject(
             text,
             method=self.options.injection,
             hwnd=self._target_hwnd,
             restore_clipboard=self.options.restore_clipboard,
         )
-        self.last_text = text
-        self._remember(text, mode)
         self._publish(INSERTED, mode=mode, characters=len(text))
 
     def _remember(self, text: str, mode: str) -> None:

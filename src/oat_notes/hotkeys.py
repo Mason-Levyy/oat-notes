@@ -182,6 +182,19 @@ class HotkeyListener:
             self._safely(binding.on_press)
 
     def _defuse_start_menu(self) -> None:
+        """Hand the keystroke to a worker rather than sending it here.
+
+        SendInput called from inside a low-level keyboard hook is unreliable:
+        the hook runs under a system timeout and injected events can be
+        dropped or delivered re-entrantly, so the Start menu was only being
+        defused about half the time.
+        """
+        threading.Thread(
+            target=self._send_defuse, name="start-menu-defuse", daemon=True
+        ).start()
+
+    @staticmethod
+    def _send_defuse() -> None:
         try:
             from .inject import defuse_start_menu
 
