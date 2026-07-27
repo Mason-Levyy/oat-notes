@@ -21,10 +21,6 @@ from ..transcriber import Transcriber
 from .format import format_dictation
 from .recorder import UtteranceRecorder
 
-HOLD = "hold"
-TOGGLE = "toggle"
-HYBRID = "hybrid"
-
 IDLE = "idle"
 LISTENING = "listening"
 LATCHED = "latched"
@@ -38,7 +34,10 @@ LOADING = "loading"
 _ARM = "arm"
 _CANCEL = "cancel"
 _RELEASE = "release"
+_REPLAY = "replay"
 _SHUTDOWN = "shutdown"
+
+REPLAY_KEY = "z"
 
 _LATCH_SPEECH_CEILING = 0.35
 
@@ -48,7 +47,7 @@ class DictationOptions:
     enabled: bool = True
     modifiers: tuple[str, ...] = ("ctrl", "win")
     email_modifiers: tuple[str, ...] = ("ctrl", "shift", "win")
-    activation: str = HYBRID
+    replay_modifiers: tuple[str, ...] = ("ctrl", "alt")
     tap_seconds: float = 0.4
     injection: str = inject.PASTE
     restore_clipboard: bool = True
@@ -96,6 +95,7 @@ class DictationController:
         self._latched = False
         self._force_email = False
         self._target_hwnd = 0
+        self.last_text: str | None = None
 
         self.phase = IDLE
         self.last_error: str | None = None
@@ -177,10 +177,18 @@ class DictationController:
                 on_release=lambda held: self._post(_RELEASE, held_seconds=held),
                 on_cancel=lambda: self._post(_CANCEL),
             )
+        if self.options.replay_modifiers:
+            listener.bind(
+                "dictation-replay",
+                Chord.of(self.options.replay_modifiers, REPLAY_KEY),
+                on_press=lambda: self._post(_REPLAY, hwnd=self._capture_target()),
+            )
         listener.bind("dictation-cancel", Chord.of((), "esc"), self._cancel_if_active)
 
     def unbind(self, listener: HotkeyListener) -> None:
-        for name in ("dictation", "dictation-email", "dictation-cancel"):
+        for name in (
+            "dictation", "dictation-email", "dictation-replay", "dictation-cancel"
+        ):
             listener.unbind(name)
 
     def rebind(self, options: DictationOptions) -> None:
@@ -236,6 +244,22 @@ class DictationController:
             self._on_cancel()
         elif command.kind == _RELEASE:
             self._on_release(command)
+        elif command.kind == _REPLAY:
+            self._on_replay(command)
+
+    def _on_replay(self, command: _Command) -> None:
+        """Re-insert the last dictation wherever the cursor is now, which is
+        the point: the usual reason to replay is that it landed in the wrong
+        window the first time."""
+        if self._recording or not self.last_text:
+            return
+        inject.inject(
+            self.last_text,
+            method=self.options.injection,
+            hwnd=command.hwnd,
+            restore_clipboard=self.options.restore_clipboard,
+        )
+        self._publish(INSERTED, mode="replay", characters=len(self.last_text))
 
     def _on_arm(self, command: _Command) -> None:
         if self._recording:
@@ -268,10 +292,8 @@ class DictationController:
         self._commit()
 
     def _should_latch(self, held_seconds: float) -> bool:
-        if self.options.activation == HOLD:
-            return False
-        if self.options.activation == TOGGLE:
-            return True
+        """A quick tap that caught no real speech means hands-free, not a
+        half-second dictation."""
         if held_seconds >= self.options.tap_seconds:
             return False
         recorder = self._recorder
@@ -296,6 +318,7 @@ class DictationController:
             hwnd=self._target_hwnd,
             restore_clipboard=self.options.restore_clipboard,
         )
+        self.last_text = text
         self._publish(INSERTED, mode=mode, characters=len(text))
 
     def _abandon(self) -> None:
