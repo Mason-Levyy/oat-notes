@@ -121,14 +121,13 @@ def test_capture_options_share_one_row():
 
 
 def test_a_pending_hotkey_choice_survives_background_state_updates():
-    # `status` events fire on every library mutation and re-run applyState; without
-    # the dirty flag they silently reverted the user's pending selection, so SAVE
-    # persisted the old combination.
-    assert "let hotkeyDirty = false;" in HTML
-    assert "if (!hotkeyDirty) {" in HTML
-    assert "input.onchange = () => { hotkeyDirty = true; updateHotkeyPreview(); };" in HTML
-    assert "hotkeyDirty = false;\n    applyState(result);" in HTML
-    assert "— UNSAVED" in HTML
+    # `status` events fire on every library mutation and re-run applyState. The
+    # open editor keeps its own draft, so a repaint no longer has anything to
+    # revert — the draft is only seeded when EDIT is pressed.
+    assert "let editingShortcut = null;" in HTML
+    assert "let shortcutDraft = [];" in HTML
+    assert "shortcutDraft = shortcutChord(shortcut);" in HTML
+    assert "editingShortcut = null;\n    shortcutDraft = [];\n    applyState(result);" in HTML
 
 
 def test_roster_instructions_are_a_disclosure_rather_than_permanent_copy():
@@ -185,10 +184,31 @@ def test_profile_learning_feedback_uses_the_new_three_and_five_second_rules():
     assert "ready_seconds: 5.0" in HTML
 
 
-def test_dictation_card_offers_both_chords_and_the_vocabulary_editor():
+def test_every_shortcut_lives_in_one_card():
+    assert 'id="shortcut-list"' in HTML
+    assert "function renderShortcuts()" in HTML
+    for field in (
+        "dictation_modifiers", "dictation_email_modifiers", "hotkey_modifiers"
+    ):
+        assert f'field: "{field}"' in HTML
+    # No modifier grid is rendered until EDIT opens one.
+    assert 'class="modifier-grid" id=' not in HTML
+
+
+def test_shortcut_rows_collapse_to_a_single_line():
+    assert 'class="shortcut-chord' in HTML
+    assert 'data-edit="${shortcut.id}"' in HTML
+    assert 'data-save="${shortcut.id}"' in HTML
+    assert 'data-cancel="${shortcut.id}"' in HTML
+
+
+def test_the_speaker_shortcut_is_locked_while_recording():
+    assert "lockedWhileRecording: true" in HTML
+    assert "shortcut.lockedWhileRecording && state.recording" in HTML
+
+
+def test_dictation_card_keeps_behaviour_and_vocabulary():
     assert 'id="dictation-form"' in HTML
-    assert 'id="dictation-modifier-grid"' in HTML
-    assert 'id="dictation-email-grid"' in HTML
     assert 'id="vocabulary-list"' in HTML
     assert "function renderVocabulary()" in HTML
     assert "DICTATION" in HTML
@@ -203,12 +223,21 @@ def test_dictation_card_edits_are_not_clobbered_by_status_events():
 
 def test_dictation_save_sends_every_field_it_owns():
     for field in (
-        "dictation_enabled", "dictation_modifiers", "dictation_email_modifiers",
-        "dictation_activation", "dictation_injection", "dictation_email_detection",
-        "dictation_restore_clipboard", "dictation_spoken_punctuation",
-        "dictation_signature", "dictation_vocabulary", "overlay_enabled",
+        "dictation_enabled", "dictation_activation", "dictation_injection",
+        "dictation_email_detection", "dictation_restore_clipboard",
+        "dictation_spoken_punctuation", "dictation_signature",
+        "dictation_vocabulary", "overlay_enabled",
     ):
         assert f"{field}:" in HTML
+
+
+def test_the_dictation_card_no_longer_saves_chords():
+    # The SHORTCUTS card owns them; sending them from here too would let a
+    # stale copy overwrite a chord saved seconds earlier.
+    submit = HTML[HTML.index('$("dictation-form").onsubmit'):]
+    submit = submit[:submit.index("};")]
+    assert "dictation_modifiers" not in submit
+    assert "hotkey_modifiers" not in submit
 
 
 def test_dictation_status_mirrors_the_overlay():
@@ -219,4 +248,5 @@ def test_dictation_status_mirrors_the_overlay():
 
 
 def test_empty_email_chord_reads_as_off():
-    assert 'chordLabel(gridModifiers("dictation-email-grid"), "OFF")' in HTML
+    assert 'allowEmpty: true' in HTML
+    assert 'shortcut.allowEmpty ? "OFF" : "CHOOSE A MODIFIER"' in HTML
