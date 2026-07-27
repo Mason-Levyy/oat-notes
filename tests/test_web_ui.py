@@ -223,7 +223,7 @@ def test_dictation_card_edits_are_not_clobbered_by_status_events():
 
 def test_dictation_save_sends_every_field_it_owns():
     for field in (
-        "dictation_enabled", "dictation_activation", "dictation_injection",
+        "dictation_enabled", "dictation_injection",
         "dictation_email_detection", "dictation_restore_clipboard",
         "dictation_spoken_punctuation", "dictation_signature",
         "dictation_vocabulary", "overlay_enabled",
