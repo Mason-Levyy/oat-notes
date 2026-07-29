@@ -25,6 +25,7 @@ from .hotkeys import HotkeyListener
 from .output import format_timestamp, recover_journals
 from .overlay import Overlay
 from .settings import AppSettings, SettingsStore
+from .single_instance import SingleInstance
 from .speaker_store import SpeakerStore
 from .types import Channel, TranscriptSegment
 
@@ -1206,6 +1207,16 @@ def _await_shutdown(state: AppState, overlay, show_overlay: bool = True) -> None
 
 def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -> None:
     started = time.perf_counter()
+    # Before anything installs a keyboard hook or opens the microphone: a
+    # second instance arms on the same chord and pastes the same dictation
+    # again.
+    instance = SingleInstance()
+    running_url = instance.acquire(args.port)
+    if running_url is not None:
+        print(f"oat-notes is already running at {running_url}", flush=True)
+        if open_browser:
+            webbrowser.open(running_url)
+        return
     settings_store = SettingsStore()
     speaker_store = SpeakerStore()
     settings = settings_store.load()
@@ -1291,6 +1302,7 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
         pass
     print("Shutting down…", flush=True)
     exit_backstop()
+    instance.release()
     dictation.stop()
     hotkey_listener.stop()
     if state.session is not None:
