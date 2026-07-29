@@ -570,6 +570,11 @@ class AppState:
                         )
                     return
 
+            def on_line_relabelled(
+                line_id: int, name: str, index: int, score: float
+            ) -> None:
+                self._publish_line_label(line_id, name, index, "auto", score)
+
             def on_speaker(index: int) -> None:
                 # Reads the live session roster without the state lock —
                 # this fires from inside switch calls that may hold it.
@@ -639,6 +644,7 @@ class AppState:
                 SessionEvents(
                     on_segment=on_segment,
                     on_line_cleaned=on_line_cleaned,
+                    on_line_relabelled=on_line_relabelled,
                     on_speaker=on_speaker,
                     on_attribution=on_attribution,
                     on_hotkey_bank=on_hotkey_bank,
@@ -788,6 +794,53 @@ class AppState:
                         line["label"] = new_name
             self.roster = tuple(session.roster)
         self.hub.publish({"type": "status", "recording": True})
+        return self.status()
+
+    def _publish_line_label(
+        self,
+        line_id: int,
+        name: str,
+        index: int | None,
+        source: str,
+        confidence: float | None,
+    ) -> None:
+        """Re-render one transcript line under a new speaker. Rides the same
+        line_update event the cleanup pass already uses, so the browser needs
+        nothing new to show it."""
+        for line in self.lines:
+            if line.get("id") != line_id:
+                continue
+            line["label"] = name
+            line["speaker_index"] = index
+            line["attribution"] = source
+            line["confidence"] = confidence
+            self.hub.publish({"type": "line_update", **line})
+            return
+
+    def assign_line(self, body: dict) -> dict:
+        """Put a transcript line on a person by hand.
+
+        Recording only: once the meeting stops the session — and with it the
+        log this writes through to — is gone.
+        """
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            line_id = body.get("id")
+            index = body.get("index")
+            if not isinstance(line_id, int):
+                return {"error": "id must be an integer"}
+            # bool is an int subclass, so it has to be excluded explicitly.
+            if index is not None and (
+                isinstance(index, bool) or not isinstance(index, int)
+            ):
+                return {"error": "index must be an integer or null"}
+            error = session.assign_line(line_id, index)
+            if error:
+                return {"error": error}
+            name = "Unknown" if index is None else session.roster[index].name
+            self._publish_line_label(line_id, name, index, "manual", None)
         return self.status()
 
     def reset_roster_profile(self, body: dict) -> dict:
@@ -956,6 +1009,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.rename_roster_speaker(body))
         elif self.path == "/api/roster/reset_profile":
             self._send_json(self.state.reset_roster_profile(body))
+        elif self.path == "/api/lines/assign":
+            self._send_json(self.state.assign_line(body))
         elif self.path == "/api/profile_learning/cancel":
             self._send_json(self.state.cancel_profile_learning())
         elif self.path == "/api/notes/add":

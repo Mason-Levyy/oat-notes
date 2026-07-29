@@ -631,3 +631,63 @@ def test_a_session_error_reaches_the_browser_unchanged():
     assert state.reset_roster_profile({"index": 0}) == {
         "error": "speaker already removed"
     }
+
+
+def _line_state():
+    state = AppState(Config(), transcriber=None)
+    state.lines = [
+        {"id": 0, "label": "Unknown", "text": "the churn number",
+         "speaker_index": None, "attribution": "unknown", "confidence": None},
+        {"id": 1, "label": "Alex", "text": "agreed",
+         "speaker_index": 1, "attribution": "auto", "confidence": 0.9},
+    ]
+    return state
+
+
+def test_assigning_a_line_updates_it_and_tells_the_browser():
+    state = _line_state()
+    session = FakeSession()
+    session.roster = [Speaker("Sarah"), Speaker("Alex")]
+    session.assign_line = lambda line_id, index: None
+    state.session = session
+    subscriber = state.hub.subscribe()
+
+    state.assign_line({"id": 0, "index": 0})
+
+    assert state.lines[0]["label"] == "Sarah"
+    assert state.lines[0]["speaker_index"] == 0
+    # "manual" so the line renders confident rather than in the guess style.
+    assert state.lines[0]["attribution"] == "manual"
+    assert state.lines[1]["label"] == "Alex"  # untouched
+
+    event = subscriber.get_nowait()
+    assert event["type"] == "line_update"
+    assert event["id"] == 0
+    assert event["label"] == "Sarah"
+
+
+def test_assigning_a_line_needs_a_live_meeting():
+    state = _line_state()
+    assert state.assign_line({"id": 0, "index": 0}) == {"error": "not recording"}
+
+
+def test_assigning_a_line_validates_its_arguments():
+    state = _line_state()
+    state.session = FakeSession()
+
+    assert state.assign_line({"id": "0", "index": 0}) == {
+        "error": "id must be an integer"
+    }
+    # bool is an int subclass — it must not slip through as index 1.
+    assert state.assign_line({"id": 0, "index": True}) == {
+        "error": "index must be an integer or null"
+    }
+
+
+def test_a_session_refusal_to_assign_reaches_the_browser():
+    state = _line_state()
+    session = FakeSession()
+    session.assign_line = lambda line_id, index: "line not found"
+    state.session = session
+
+    assert state.assign_line({"id": 9, "index": 0}) == {"error": "line not found"}

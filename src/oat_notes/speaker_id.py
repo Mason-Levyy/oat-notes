@@ -176,12 +176,14 @@ class SpeakerResolver:
             # Manual enrollment is handled by the stability-gated learner,
             # independently from transcript attribution.
             return False
-        member_ids = [
-            self._roster[index].speaker_id
-            for index in self._members()
-            if self._roster[index].speaker_id
-        ]
-        return bool(self._store.match_vectors(member_ids, chunk.channel.value))
+        # Embed whenever the answer could matter — now or later. Requiring an
+        # already-enrolled profile to match against meant the turns taken
+        # before anyone was enrolled got no embedding at all, and those are
+        # exactly the ones worth naming once a profile firms up. The audio is
+        # gone by then; the embedding is the only remaining chance.
+        # A single-member roster always resolves to that member, so there is
+        # nothing to name and nothing to back-fill.
+        return len(self._members()) > 1
 
     def embed(self, chunk: AudioChunk) -> np.ndarray:
         if self._engine is None:

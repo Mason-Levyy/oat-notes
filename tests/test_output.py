@@ -209,3 +209,36 @@ def test_a_journal_another_process_holds_open_does_not_stop_startup(tmp_path, mo
 
     assert recovered == [tmp_path / "crashed_2026-07-09_1430_recovered.txt"]
     assert locked.exists()
+
+
+def test_relabel_moves_one_line_not_every_line_of_that_name():
+    # rename() is keyed by name, and every unattributed line is "Unknown", so
+    # it cannot express this at all.
+    log = MeetingLog(label_channels=False)
+    first = log.add(segment("who is this", 0.0, speaker="Unknown"))
+    second = log.add(segment("and this", 1.0, speaker="Unknown"))
+
+    assert log.relabel(first, "Sarah") is True
+
+    saved = [line_for(item, False) for item in log._segments]
+    assert "Sarah: who is this" in saved[0]
+    assert "Unknown: and this" in saved[1]
+    assert second == 1
+
+
+def test_relabel_reports_an_unknown_line_id():
+    log = MeetingLog(label_channels=False)
+    log.add(segment("hello", 0.0, speaker="Unknown"))
+    assert log.relabel(9, "Sarah") is False
+
+
+def test_a_relabelled_line_is_saved_under_the_new_speaker(tmp_path):
+    log = MeetingLog(label_channels=False)
+    line_id = log.add(segment("the churn number", 0.0, speaker="Unknown"))
+    log.relabel(line_id, "Priya")
+
+    path = log.save(tmp_path, datetime(2026, 7, 28, 9, 30), "standup")
+
+    # The journal is append-only and keeps what it flushed; the transcript is
+    # rebuilt from the segments, so the correction lands where it counts.
+    assert "Priya: the churn number" in path.read_text(encoding="utf-8")

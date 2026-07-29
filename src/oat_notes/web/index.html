@@ -597,7 +597,17 @@ body {
   font-size: 10px;
   text-align: center;
 }
-.line { word-wrap: break-word; }
+.line { word-wrap: break-word; position: relative; }
+.line[tabindex]:hover, .line[tabindex]:focus-visible {
+  outline: 2px solid var(--screen-dim); outline-offset: 2px; cursor: pointer;
+}
+/* Inside the screen, so it scrolls with the line it belongs to. */
+.line-picker {
+  position: absolute; z-index: 5; left: 0; top: 100%;
+  display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+  background: var(--paper); border: 3px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink); padding: 6px;
+}
 .line .t { color: var(--screen-dim); }
 .line .who { color: var(--screen-hi); font-weight: bold; }
 .line .who.guess { font-weight: normal; font-style: italic; opacity: 0.75; }
@@ -1642,7 +1652,17 @@ function addLine(line, preserveViewport = true) {
   $("empty").style.display = "none";
   const div = document.createElement("div");
   div.className = "line";
-  if (line.id !== undefined && line.id !== null) div.dataset.lineId = line.id;
+  if (line.id !== undefined && line.id !== null) {
+    div.dataset.lineId = line.id;
+    div.tabIndex = 0;
+    div.title = "Click to put this line on someone else";
+    div.onclick = () => openLinePicker(div, line.id);
+    div.onkeydown = (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      openLinePicker(div, line.id);
+    };
+  }
   div.innerHTML = lineHtml(line);
   const screen = $("screen");
   const cursor = $("live-cursor");
@@ -1654,6 +1674,42 @@ function addLine(line, preserveViewport = true) {
     if (wasAtTop) screen.scrollTop = 0;
     else screen.scrollTop += screen.scrollHeight - previousHeight;
   }
+}
+
+/* Whoever the worker guessed, you get the last word. The worker also names
+   Unknown lines by itself once a profile firms up, so this is the manual half
+   of the same job. */
+function openLinePicker(anchor, lineId) {
+  closeLinePicker();
+  if (!state.recording) return;
+  const picker = document.createElement("div");
+  picker.className = "line-picker";
+  picker.id = "line-picker";
+  const choices = (state.speakers || [])
+    .map((speaker, index) => ({ speaker, index }))
+    .filter(({ speaker }) => !speaker.removed)
+    .concat([{ speaker: { name: "Unknown" }, index: null }]);
+  choices.forEach(({ speaker, index }) => {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "mini";
+    option.textContent = speaker.name.toUpperCase();
+    option.onclick = (event) => {
+      event.stopPropagation();
+      closeLinePicker();
+      post("/api/lines/assign", { id: lineId, index }).then((result) => {
+        if (result.error) $("statusline").textContent = result.error.toUpperCase();
+      });
+    };
+    picker.appendChild(option);
+  });
+  anchor.appendChild(picker);
+  setTimeout(() => document.addEventListener("click", closeLinePicker, { once: true }), 0);
+}
+
+function closeLinePicker() {
+  const open = $("line-picker");
+  if (open) open.remove();
 }
 
 function escapeHtml(text) {

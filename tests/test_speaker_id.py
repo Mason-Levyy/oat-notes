@@ -526,3 +526,33 @@ def test_a_short_turn_is_still_worth_naming(tmp_path):
     assert MIN_ATTRIBUTION_SECONDS < MIN_ENROLLMENT_SECONDS
     assert resolver.wants_embedding(chunk(seconds=0.8)) is True
     assert resolver.wants_embedding(chunk(seconds=0.5)) is False
+
+
+def test_a_turn_is_embedded_before_anyone_is_enrolled(tmp_path):
+    # The regression this guards: embedding used to require an already-ready
+    # profile to match against, so the turns taken before anyone was enrolled
+    # got no embedding — and those are exactly the ones worth naming once a
+    # profile firms up. By then the audio is gone.
+    store = SpeakerStore(tmp_path / "speakers.db")
+    untrained = store.create_speaker("Sarah")
+    resolver = SpeakerResolver(
+        [Speaker("Sarah", speaker_id=untrained.speaker_id), Speaker("Guest 1")],
+        store,
+        FakeEngine([1, 0]),
+        16_000,
+    )
+    assert store.profile(untrained.speaker_id).state == "untrained"
+
+    assert resolver.wants_embedding(chunk(seconds=2.0)) is True
+    # Still refused where it could never help: too short, clipped, or a
+    # manual turn the stability-gated learner owns.
+    assert resolver.wants_embedding(chunk(seconds=0.3)) is False
+    assert resolver.wants_embedding(chunk(manual=0, seconds=2.0)) is False
+
+
+def test_a_lone_speaker_is_not_embedded(tmp_path):
+    # One member always resolves to that member, so there is nothing to name
+    # and nothing to back-fill later.
+    store = SpeakerStore(tmp_path / "speakers.db")
+    resolver = SpeakerResolver([Speaker("Solo")], store, FakeEngine([1, 0]), 16_000)
+    assert resolver.wants_embedding(chunk(seconds=2.0)) is False
