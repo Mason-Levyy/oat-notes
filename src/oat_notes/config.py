@@ -20,6 +20,12 @@ class Config:
     model_name: str = "distil-small.en"
     compute_type: str = "int8"
     language: str = "en"
+    # Greedy decoding will happily loop a phrase to the end of a chunk. The
+    # penalty discourages it; the compression bar is deliberately below
+    # faster-whisper's default 2.4, which a phrase repeated three to five
+    # times does not reach — so the temperature fallback never re-decoded it.
+    repetition_penalty: float = 1.1
+    compression_ratio_threshold: float = 2.0
     backend: str = "faster_whisper"
     openvino_model: str = "OpenVINO/whisper-small.en-int8-ov"
     openvino_device: str = "NPU"
