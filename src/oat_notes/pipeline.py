@@ -140,6 +140,7 @@ class Pipeline:
                     config.sample_rate,
                     config.speaker_window_seconds,
                     config.speaker_hop_seconds,
+                    config.speaker_min_speech_seconds,
                 )
                 for channel in channels
             }
@@ -631,17 +632,17 @@ class Pipeline:
                 if generation != self._tracking_generations[chunk.channel]:
                     continue
                 gate = self._tracking_gates[chunk.channel]
-                had_current = gate.current is not None
                 confirmed = gate.observe(decision)
             if confirmed is not None and confirmed.speaker_index is not None:
-                # A change away from an already-established speaker means the
-                # in-flight transcript chunk is misattributed right now; cut
-                # it instead of waiting for a silence gap or the 15s cap.
-                # The very first identification on a channel (had_current is
-                # False) has nothing to correct, so it only updates the live
-                # indicator.
-                if had_current:
-                    self.split_channel(chunk.channel)
+                # The in-flight transcript chunk is misattributed as of now, so
+                # cut it rather than waiting for a silence gap or the 15s cap.
+                # This fires on the first identification too: people answering
+                # each other leave no gap, so the opening chunk of a channel is
+                # exactly where two speakers get merged into one line.
+                # VadChunker.split returns None outside speech and _finalize
+                # drops anything under min_speech_seconds, so a fast flip
+                # between two candidates cannot emit fragments.
+                self.split_channel(chunk.channel)
                 sink(
                     confirmed.speaker_index,
                     chunk.channel,
