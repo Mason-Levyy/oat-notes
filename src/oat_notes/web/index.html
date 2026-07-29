@@ -26,22 +26,27 @@
   --px: 4px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
+html { height: 100%; overflow: hidden; }
 body {
   background: var(--paper);
   color: var(--ink);
   font-family: Consolas, "Cascadia Mono", monospace;
   font-size: 15px;
-  min-height: 100vh;
-  padding: 20px;
+  height: 100%;
+  /* The console fills the window and scrolls its own panes, so the page
+     itself never scrolls. */
+  overflow: hidden;
 }
 .pixel { font-family: "Pixel", Consolas, monospace; font-size: 10px; line-height: 1.6; }
 
+/* Full-bleed: the transcript is the point of the app, so it gets the whole
+   window rather than a centred card. */
 .console {
-  max-width: 1060px;
-  margin: 0 auto;
+  height: 100%;
   border: 3px solid var(--ink);
-  box-shadow: 6px 6px 0 var(--ink);
   background: var(--paper);
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------- header ---------- */
@@ -139,8 +144,8 @@ body {
 }
 .power:active { transform: translate(2px, 2px); box-shadow: none; }
 
-.console-body { display: flex; align-items: stretch; min-height: 520px; }
-.section-host { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.console-body { display: flex; align-items: stretch; flex: 1; min-height: 0; }
+.section-host { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .nav-rail {
   flex: none; width: 92px; background: #fff;
   border-right: 3px solid var(--ink);
@@ -186,7 +191,13 @@ body {
                      62% 80%, 62% 100%, 38% 100%, 38% 80%, 20% 80%, 20% 62%,
                      0 62%);
 }
-.info-view, .dictation-view { display: none; padding: 24px; }
+/* Right padding clears the fixed NOTES tab, which now sits against the
+   window edge rather than outside a centred card. */
+.info-view, .dictation-view, .settings-view {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 24px 42px 24px 24px;
+}
+.info-view, .dictation-view { display: none; }
 .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; }
 .status-grid .key { font-size: 8px; padding-top: 3px; }
 .status-grid .value { font-family: Consolas, monospace; font-size: 13px; }
@@ -205,15 +216,22 @@ body {
 #history-clear { margin-top: 14px; }
 
 /* ---------- layout ---------- */
-.body { display: flex; }
+.body { display: flex; flex: 1; min-height: 0; }
 .rail {
-  width: 300px; flex: none;
+  /* Grows a little on a wide window so speaker names fit on their chips. */
+  width: clamp(300px, 24vw, 420px); flex: none;
   padding: 18px;
   border-right: 3px solid var(--ink);
   display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto;
   position: relative; z-index: 1;
 }
-.stage { flex: 1; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* Right padding clears the fixed NOTES tab. */
+.stage {
+  flex: 1; min-width: 0; min-height: 0;
+  padding: 18px 42px 18px 18px;
+  display: flex; flex-direction: column; gap: 10px;
+}
 
 /* ---------- setup form ---------- */
 .field label { display: block; font-size: 8px; margin-bottom: 6px; }
@@ -227,7 +245,10 @@ body {
 }
 .field input[type="text"]:focus { outline: 3px solid var(--oat); outline-offset: 0; }
 .hint { font-size: 12px; color: #6b6558; margin-top: 5px; }
-.check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 8px; }
+/* The visually hidden input is positioned against its own label; without a
+   positioned ancestor it lands on the initial containing block and drags a
+   phantom scroll area onto a page that is meant to be exactly one screen. */
+.check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 8px; position: relative; }
 .check input { position: absolute; opacity: 0; }
 .check .box {
   width: 18px; height: 18px; flex: none;
@@ -256,7 +277,7 @@ body {
 .btn.stop { background: var(--rec); color: #fff; display: none; }
 
 /* ---------- settings ---------- */
-.settings-view { display: none; padding: 24px; min-height: 520px; }
+.settings-view { display: none; }
 .settings-card {
   width: min(760px, 100%); border: 3px solid var(--ink); background: #fff;
   box-shadow: 5px 5px 0 var(--ink); padding: 22px; margin-bottom: 22px;
@@ -265,7 +286,7 @@ body {
 .card-head { display: flex; align-items: center; gap: 12px; }
 .card-head h2 { flex: 1; margin-bottom: 0; }
 .card-body.off { opacity: 0.4; filter: grayscale(1); pointer-events: none; }
-.switch { display: flex; cursor: pointer; }
+.switch { display: flex; cursor: pointer; position: relative; }
 .switch input { position: absolute; opacity: 0; }
 .switch-track {
   box-sizing: border-box; position: relative; width: 40px; height: 20px;
@@ -286,7 +307,7 @@ body {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px; margin: 20px 0 8px;
 }
-.modifier-option { cursor: pointer; }
+.modifier-option { cursor: pointer; position: relative; }
 .modifier-option input { position: absolute; opacity: 0; }
 .modifier-option span {
   display: block; border: 3px solid var(--ink); padding: 12px 6px;
@@ -488,7 +509,7 @@ body {
 
 .players { display: flex; flex-direction: column; gap: 8px; }
 .chip {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   border: 3px solid var(--ink);
   background: #fff;
   padding: 10px;
@@ -500,9 +521,12 @@ body {
   width: 100%;
   overflow: hidden;
 }
+/* The name is the only part of a chip that carries meaning — the slot number
+   is implied by roster order — so it claims its full width and pushes the
+   enrollment counter onto a second line rather than being truncated away. */
 .chip .label {
-  flex: 1; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto; min-width: 0;
+  overflow-wrap: anywhere;
 }
 .chip:focus-visible { outline: 3px solid var(--oat); }
 .chip .slot { font-size: 8px; color: #6b6558; flex: none; }
@@ -520,10 +544,24 @@ body {
 .chip.ghost:hover { border-style: solid; background: #fff; color: var(--ink); }
 .chip.untrained, .chip.learning { background: #c9c7c1; color: #66625b; }
 .chip.learning { border-style: dashed; }
-.chip .progress { font-size: 7px; margin-left: auto; flex: none; white-space: nowrap; }
+.chip .progress {
+  font-size: 7px; margin-left: auto; flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .chip .progress + .dot { margin-left: 0; }
-.chip-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; }
-.chip-row .chip { flex: 1; width: auto; min-width: 0; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; container-type: inline-size; }
+/* The chip asks for enough room to hold a name; when EDIT/RESET/× can't fit
+   beside it they wrap to their own line instead of squeezing the name out. */
+.chip-row .chip { flex: 1 1 200px; width: auto; min-width: 0; }
+/* Too narrow for everything: drop the slot tag and the enrollment counter
+   before the name — both are on the chip's tooltip, the name is not
+   recoverable from anything else on screen. */
+@container (max-width: 240px) {
+  .chip .progress { display: none; }
+}
+@container (max-width: 190px) {
+  .chip .slot { display: none; }
+}
 .chip-row .mini { flex: none; }
 .chip-row.editing input {
   flex: 1; min-width: 0; border: 3px solid var(--ink); background: #fff;
@@ -535,6 +573,7 @@ body {
 /* ---------- notes sidebar ---------- */
 .notes-tab {
   position: fixed; top: 50%; right: 0; z-index: 30;
+  transition: right 0.2s ease;
   transform: translateY(-50%) rotate(90deg); transform-origin: right top;
   font-family: "Pixel", Consolas, monospace; font-size: 9px;
   border: 3px solid var(--ink); border-bottom: none;
@@ -550,6 +589,14 @@ body {
   padding: 18px; display: flex; flex-direction: column; gap: 12px;
 }
 .notes-drawer.open { transform: translateX(0); }
+/* Full-bleed means an open drawer would sit on top of the transcript, so on a
+   window with room to spare the console gives up the width instead. Narrower
+   than that it stays an overlay. */
+@media (min-width: 1050px) {
+  .console { transition: margin-right 0.2s ease; }
+  body.notes-open .console { margin-right: 320px; }
+  body.notes-open .notes-tab { right: 320px; }
+}
 .notes-header { font-size: 11px; }
 .notes-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .notes-entry { font-size: 12px; border-bottom: 1px solid #d8d3c6; padding-bottom: 6px; }
@@ -575,8 +622,8 @@ body {
   box-shadow: inset 0 0 0 4px #234323;
   padding: 16px;
   overflow-y: auto;
-  min-height: 420px;
-  max-height: 68vh;
+  /* Fills whatever height the window has instead of a fixed slice of it. */
+  min-height: 240px;
   color: var(--screen-mid);
   line-height: 1.75;
 }
@@ -615,13 +662,14 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .rec-dot, .chip.active .dot, .cursor { animation: none; }
 }
-@media (max-width: 1100px) {
-  .stage { padding-right: 42px; }
-}
 @media (max-width: 760px) {
-  body { padding: 8px; }
-  .body { flex-direction: column; }
-  .rail { width: 100%; border-right: none; border-bottom: 3px solid var(--ink); }
+  /* Stacked: the whole meeting view scrolls as one column instead of the
+     rail and the transcript scrolling separately. */
+  .body { flex-direction: column; overflow-y: auto; }
+  .rail {
+    width: 100%; overflow: visible;
+    border-right: none; border-bottom: 3px solid var(--ink);
+  }
   .screen { min-height: 300px; }
   .modifier-grid, .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -1747,7 +1795,8 @@ function renderPlayers() {
         progress = "SAMPLE SKIPPED";
       }
     }
-    chip.title = `Hotkey ${bankKey}; saved slot ${hotkeySlot + 1}`;
+    // Carries what a narrow chip hides: the slot tag and the enrollment state.
+    chip.title = `${speaker.name} — hotkey ${bankKey}; saved slot ${hotkeySlot + 1}; ${progress}`;
     chip.innerHTML = `<span class="slot">${slot}</span><span class="label">${escapeHtml(speaker.name.toUpperCase())}</span><span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
 
@@ -2254,6 +2303,8 @@ $("notes-tab").onclick = () => {
   const drawer = $("notes-drawer");
   const open = !drawer.classList.contains("open");
   drawer.classList.toggle("open", open);
+  // Lets the console shrink out from under the drawer on a wide window.
+  document.body.classList.toggle("notes-open", open);
   drawer.setAttribute("aria-hidden", String(!open));
   $("notes-tab").setAttribute("aria-expanded", String(open));
   if (open) $("notes-input").focus();

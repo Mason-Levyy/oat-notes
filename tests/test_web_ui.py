@@ -173,7 +173,7 @@ def test_secondary_buttons_stay_unfilled():
 def test_chip_controls_use_glyphs_the_bundled_pixel_font_actually_has():
     assert '"✎"' not in HTML
     assert 'rename.textContent = "EDIT";' in HTML
-    assert ".chip .label {\n  flex: 1; min-width: 0;" in HTML
+    assert ".chip .label {\n  flex: 1 1 auto; min-width: 0;" in HTML
 
 
 def test_profile_learning_feedback_uses_the_new_three_and_five_second_rules():
@@ -348,10 +348,20 @@ def test_info_is_pinned_to_the_bottom_of_the_rail():
 
 
 def test_roster_controls_stay_inside_the_rail():
-    assert ".chip-row .chip { flex: 1; width: auto; min-width: 0; }" in HTML
+    assert ".chip-row .chip { flex: 1 1 200px; width: auto; min-width: 0; }" in HTML
     assert ".chip-row { display: flex; flex-wrap: wrap;" in HTML
-    assert "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" in HTML
     assert "position: relative; z-index: 1;" in HTML
+
+
+def test_a_narrow_chip_keeps_the_name_and_drops_the_slot_tag():
+    # The slot number is implied by roster order and repeated on the tooltip;
+    # the name is not recoverable from anything else on screen, so it wraps
+    # rather than being ellipsised away.
+    assert ".chip .label {\n  flex: 1 1 auto; min-width: 0;\n  overflow-wrap: anywhere;\n}" in HTML
+    assert "container-type: inline-size;" in HTML
+    assert "@container (max-width: 240px) {\n  .chip .progress { display: none; }" in HTML
+    assert "@container (max-width: 190px) {\n  .chip .slot { display: none; }" in HTML
+    assert "chip.title = `${speaker.name} — hotkey ${bankKey}" in HTML
 
 
 def test_enter_files_a_note_and_shift_enter_writes_a_newline():
@@ -360,9 +370,28 @@ def test_enter_files_a_note_and_shift_enter_writes_a_newline():
     assert '$("notes-form").requestSubmit();' in HTML
 
 
+def test_an_open_notes_drawer_makes_room_instead_of_covering_the_transcript():
+    # Only where there is width to give up; a narrow window keeps the overlay.
+    assert '@media (min-width: 1050px) {' in HTML
+    assert "body.notes-open .console { margin-right: 320px; }" in HTML
+    assert "body.notes-open .notes-tab { right: 320px; }" in HTML
+    assert 'document.body.classList.toggle("notes-open", open);' in HTML
+
+
 def test_the_notes_tab_does_not_cover_the_transcript():
-    assert "@media (max-width: 1100px) {" in HTML
-    assert ".stage { padding-right: 42px; }" in HTML
+    # Full-bleed puts the transcript against the window edge at every width,
+    # so the gutter for the fixed tab is unconditional now.
+    assert "padding: 18px 42px 18px 18px;" in HTML
+    assert "padding: 24px 42px 24px 24px;" in HTML
+
+
+def test_the_console_fills_the_window():
+    assert "max-width: 1060px;" not in HTML
+    assert ".console {\n  height: 100%;" in HTML
+    assert ".console-body { display: flex; align-items: stretch; flex: 1; min-height: 0; }" in HTML
+    assert ".body { display: flex; flex: 1; min-height: 0; }" in HTML
+    # The transcript grows with the window rather than a fixed slice of it.
+    assert "max-height: 68vh;" not in HTML
 
 
 def test_the_transcription_model_is_pickable_from_settings():
