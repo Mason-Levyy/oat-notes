@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 
 from oat_notes.attribution import Speaker
 from oat_notes.speaker_id import (
@@ -430,3 +431,43 @@ def test_speaker_resolver_tracking_engine_avoids_shared_lock(tmp_path):
 
     assert not embed_thread.is_alive() and not tracking_thread.is_alive()
     assert "embed" in results and "tracking" in results
+
+
+def test_resetting_a_saved_profile_clears_every_stored_sample(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    person = store.create_speaker("Sarah")
+    resolver = SpeakerResolver(
+        [Speaker("Sarah", speaker_id=person.speaker_id)],
+        store,
+        FakeEngine([1, 0]),
+        16_000,
+    )
+    resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
+    )
+    assert store.profile(person.speaker_id).enrollment_seconds == 3.0
+
+    resolver.reset_profile(0)
+
+    assert store.profile(person.speaker_id).state == "untrained"
+    assert store.profile(person.speaker_id).enrollment_seconds == 0.0
+
+
+def test_resetting_a_guest_drops_their_unlinked_samples(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    resolver = SpeakerResolver([Speaker("Guest 1")], store, FakeEngine([1, 0]), 16_000)
+    resolver.add_manual_sample(
+        0, chunk(manual=0, seconds=3.0), np.array([1.0, 0.0], dtype=np.float32)
+    )
+    assert resolver.profile_status(0) == ("learning", 3.0)
+
+    resolver.reset_profile(0)
+
+    assert resolver.profile_status(0) == ("untrained", 0.0)
+
+
+def test_resetting_an_unknown_index_is_refused(tmp_path):
+    store = SpeakerStore(tmp_path / "speakers.db")
+    resolver = SpeakerResolver([Speaker("Guest 1")], store, FakeEngine([1, 0]), 16_000)
+    with pytest.raises(KeyError):
+        resolver.reset_profile(7)
