@@ -305,3 +305,16 @@ def test_detection_can_be_disabled():
 
 def test_empty_dictation_produces_nothing():
     assert format_dictation("   ", engine=FakeEngine()) == ("", TEXT_MODE)
+
+
+def test_a_looped_phrase_is_collapsed_before_it_reaches_the_target_window():
+    # An utterance is several transcribed chunks joined, so the loop can span
+    # a boundary no single decode ever saw.
+    assert (
+        apply_rules("Thanks for the update. Thanks for the update. Thanks for the update.")
+        == "Thanks for the update."
+    )
+
+
+def test_collapsing_a_loop_leaves_deliberate_repetition_alone():
+    assert apply_rules("no no, that won't work") == "No no, that won't work"
