@@ -308,8 +308,6 @@ def test_empty_dictation_produces_nothing():
 
 
 def test_a_looped_phrase_is_collapsed_before_it_reaches_the_target_window():
-    # An utterance is several transcribed chunks joined, so the loop can span
-    # a boundary no single decode ever saw.
     assert (
         apply_rules("Thanks for the update. Thanks for the update. Thanks for the update.")
         == "Thanks for the update."

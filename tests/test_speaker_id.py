@@ -477,9 +477,6 @@ def test_resetting_an_unknown_index_is_refused(tmp_path):
 
 
 def test_the_rolling_buffer_still_produces_windows_at_the_tracking_size():
-    # The regression this guards: RollingSpeakerBuffer used to default its
-    # speech floor to MIN_ENROLLMENT_SECONDS (1.0s). Inside a 1.0s window that
-    # demands 100% speech, and tracking would quietly stop emitting anything.
     config = Config()
     buffer = RollingSpeakerBuffer(
         Channel.MIC,
@@ -490,10 +487,9 @@ def test_the_rolling_buffer_still_produces_windows_at_the_tracking_size():
     )
     assert config.speaker_min_speech_seconds < config.speaker_window_seconds
 
-    block = config.sample_rate // 10  # 0.1s blocks
+    block = config.sample_rate // 10
     emitted = []
     for step in range(20):
-        # Four fifths speech: realistic for a window straddling a short pause.
         chunk = buffer.push(
             step * 0.1,
             np.zeros(block, dtype=np.float32),
@@ -506,8 +502,6 @@ def test_the_rolling_buffer_still_produces_windows_at_the_tracking_size():
 
 
 def test_a_short_turn_is_still_worth_naming(tmp_path):
-    # Splitting on a voice change makes genuinely short turns. Holding them to
-    # the enrollment floor would leave both halves Unknown.
     store = SpeakerStore(tmp_path / "speakers.db")
     person = store.create_speaker("Sarah")
     store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
@@ -529,10 +523,6 @@ def test_a_short_turn_is_still_worth_naming(tmp_path):
 
 
 def test_a_turn_is_embedded_before_anyone_is_enrolled(tmp_path):
-    # The regression this guards: embedding used to require an already-ready
-    # profile to match against, so the turns taken before anyone was enrolled
-    # got no embedding — and those are exactly the ones worth naming once a
-    # profile firms up. By then the audio is gone.
     store = SpeakerStore(tmp_path / "speakers.db")
     untrained = store.create_speaker("Sarah")
     resolver = SpeakerResolver(
@@ -544,15 +534,11 @@ def test_a_turn_is_embedded_before_anyone_is_enrolled(tmp_path):
     assert store.profile(untrained.speaker_id).state == "untrained"
 
     assert resolver.wants_embedding(chunk(seconds=2.0)) is True
-    # Still refused where it could never help: too short, clipped, or a
-    # manual turn the stability-gated learner owns.
     assert resolver.wants_embedding(chunk(seconds=0.3)) is False
     assert resolver.wants_embedding(chunk(manual=0, seconds=2.0)) is False
 
 
 def test_a_lone_speaker_is_not_embedded(tmp_path):
-    # One member always resolves to that member, so there is nothing to name
-    # and nothing to back-fill later.
     store = SpeakerStore(tmp_path / "speakers.db")
     resolver = SpeakerResolver([Speaker("Solo")], store, FakeEngine([1, 0]), 16_000)
     assert resolver.wants_embedding(chunk(seconds=2.0)) is False
