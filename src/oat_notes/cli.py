@@ -66,7 +66,9 @@ def main() -> None:
         help="meeting name used in the transcript filename (default: meeting)",
     )
     parser.add_argument(
-        "--model", default=None, help="whisper model name (default: distil-small.en)"
+        "--model",
+        default=None,
+        help="whisper model name; overrides the Settings choice (default: small.en)",
     )
     parser.add_argument(
         "--backend",
