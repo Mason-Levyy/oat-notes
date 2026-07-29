@@ -494,3 +494,48 @@ def test_settings_map_onto_dictation_options():
     assert options.tap_seconds == 0.25
     assert options.vocabulary == (("levya", "Mason"),)
     assert options.spoken_punctuation is True
+
+
+def test_the_saved_model_choice_reloads_the_transcriber():
+    saved = []
+    state = AppState(Config(), transcriber=object(), save_settings=saved.append)
+    reloads = []
+    state.reload_transcriber = lambda: reloads.append(state.config.model_name)
+
+    status = state.update_settings({"whisper_model": "medium.en"})
+
+    assert status["settings"]["whisper_model"] == "medium.en"
+    assert state.config.model_name == "medium.en"
+    # The old model is dropped immediately so a meeting cannot start on it
+    # while the new one is still loading.
+    assert state.transcriber is None
+    assert status["model_status"] == "loading"
+    assert reloads == ["medium.en"]
+
+
+def test_saving_other_settings_does_not_reload_the_model():
+    state = AppState(Config(), transcriber=object())
+    reloads = []
+    state.reload_transcriber = lambda: reloads.append(1)
+
+    state.update_settings({"hotkey_modifiers": ["shift"]})
+
+    assert reloads == []
+    assert state.transcriber is not None
+
+
+def test_the_model_cannot_change_during_a_meeting():
+    state = AppState(Config(), transcriber=object())
+    state.session = object()
+    response = state.update_settings({"whisper_model": "medium.en"})
+    assert response == {
+        "error": "end the meeting before changing the transcription model"
+    }
+    assert state.settings.whisper_model == "small.en"
+
+
+def test_an_unknown_model_is_rejected():
+    state = AppState(Config(), transcriber=None)
+    response = state.update_settings({"whisper_model": "large-v3"})
+    assert "error" in response
+    assert state.settings.whisper_model == "small.en"

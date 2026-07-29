@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 import webbrowser
+from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -347,15 +348,39 @@ class AppState:
             )
             if self.session is not None and changes_a_chord:
                 return {"error": "end the meeting before changing hotkeys"}
+            changes_the_model = settings.whisper_model != self.settings.whisper_model
+            if self.session is not None and changes_the_model:
+                return {
+                    "error": "end the meeting before changing the transcription model"
+                }
             try:
                 if self._save_settings is not None:
                     self._save_settings(settings)
             except OSError as error:
                 return {"error": f"could not save settings: {error}"}
             self.settings = settings
+            if changes_the_model:
+                self.config = replace(self.config, model_name=settings.whisper_model)
+                self.transcriber = None
+                self.model_status = "loading"
+                self.model_error = None
+                self.model_load_seconds = None
+        if changes_the_model:
+            self.reload_transcriber()
         self.apply_dictation_settings()
         self.hub.publish({"type": "status", "recording": False})
         return self.status()
+
+    def reload_transcriber(self) -> None:
+        """Rebuild the transcription model off the request thread — loading it
+        takes seconds, and a settings save must not block on that."""
+        thread = threading.Thread(
+            target=_load_transcriber,
+            args=(self, self.config),
+            name="model-reloader",
+            daemon=True,
+        )
+        thread.start()
 
     def _library_mutation(self, operation: Callable[[], object]) -> dict:
         with self.lock:
@@ -967,14 +992,15 @@ class Handler(BaseHTTPRequestHandler):
             self.state.hub.unsubscribe(subscriber)
 
 
-def _initialize_model(state: AppState, config: Config) -> None:
-    """Load both local inference engines off the UI thread."""
+def _load_transcriber(state: AppState, config: Config) -> None:
+    """Build and warm the transcription model, publishing the outcome. Called
+    once at startup and again whenever Settings picks a different model."""
     started = time.perf_counter()
     try:
         from .cli import warm_up
         from .transcriber import create_transcriber
 
-        print(f"Loading transcription model ({config.backend})…", flush=True)
+        print(f"Loading transcription model ({config.model_name})…", flush=True)
         transcriber = create_transcriber(config)
         warm_up(config, transcriber)
     except Exception as error:
@@ -985,6 +1011,11 @@ def _initialize_model(state: AppState, config: Config) -> None:
         elapsed = time.perf_counter() - started
         print(f"Transcription model ready in {elapsed:.1f}s", flush=True)
         state.model_ready(transcriber, elapsed)
+
+
+def _initialize_model(state: AppState, config: Config) -> None:
+    """Load both local inference engines off the UI thread."""
+    _load_transcriber(state, config)
 
     try:
         from .speaker_id import SherpaOnnxEmbeddingEngine
@@ -1098,6 +1129,10 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
     settings_store = SettingsStore()
     speaker_store = SpeakerStore()
     settings = settings_store.load()
+    # An explicit --model is the operator's choice for this run and outranks
+    # the saved preference; without one, Settings decides.
+    if getattr(args, "model", None) is None:
+        config = replace(config, model_name=settings.whisper_model)
     hotkey_listener = HotkeyListener()
     url = f"http://127.0.0.1:{args.port}"
     overlay = Overlay(

@@ -366,3 +366,11 @@ def test_enter_files_a_note_and_shift_enter_writes_a_newline():
 def test_the_notes_tab_does_not_cover_the_transcript():
     assert "@media (max-width: 1100px) {" in HTML
     assert ".stage { padding-right: 42px; }" in HTML
+
+
+def test_the_transcription_model_is_pickable_from_settings():
+    assert 'id="whisper-model-grid"' in HTML
+    assert "function renderModelSettings()" in HTML
+    assert 'post("/api/settings", { whisper_model: name })' in HTML
+    # Sits above DICTATION: which model runs is the more consequential choice.
+    assert HTML.index('id="whisper-model-grid"') < HTML.index('id="dictation-form"')

@@ -23,6 +23,15 @@ REPLAY_KEY = "z"
 MIN_TAP_MS = 50
 MAX_TAP_MS = 2000
 
+# Ordered fastest to most accurate. Accuracy here mostly means "copes with an
+# accent": the distil build is the quickest and the weakest at it.
+WHISPER_MODELS = ("distil-small.en", "small.en", "medium.en")
+WHISPER_MODEL_LABELS = {
+    "distil-small.en": "fastest",
+    "small.en": "balanced",
+    "medium.en": "best on accents",
+}
+
 
 def normalize_modifiers(value: Any, allow_empty: bool = False) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
@@ -90,6 +99,7 @@ def _chords_collide(
 @dataclass(frozen=True)
 class AppSettings:
     hotkey_modifiers: tuple[str, ...] = ("ctrl", "alt")
+    whisper_model: str = "small.en"
     dictation_enabled: bool = True
     dictation_modifiers: tuple[str, ...] = ("ctrl", "win")
     dictation_email_modifiers: tuple[str, ...] = ("ctrl", "shift", "win")
@@ -119,6 +129,9 @@ class AppSettings:
             )
         settings = cls(
             hotkey_modifiers=normalize_modifiers(pick("hotkey_modifiers")),
+            whisper_model=_choice(
+                pick("whisper_model"), WHISPER_MODELS, "whisper_model"
+            ),
             dictation_enabled=_flag(pick("dictation_enabled"), "dictation_enabled"),
             dictation_modifiers=normalize_modifiers(pick("dictation_modifiers")),
             dictation_email_modifiers=normalize_modifiers(
@@ -205,6 +218,11 @@ class AppSettings:
         return {
             "hotkey_modifiers": list(self.hotkey_modifiers),
             "hotkey_label": self.hotkey_label,
+            "whisper_model": self.whisper_model,
+            "whisper_models": [
+                {"name": name, "label": WHISPER_MODEL_LABELS[name]}
+                for name in WHISPER_MODELS
+            ],
             "dictation_enabled": self.dictation_enabled,
             "dictation_modifiers": list(self.dictation_modifiers),
             "dictation_label": self.dictation_label,

@@ -2,7 +2,12 @@ import json
 
 import pytest
 
-from oat_notes.settings import AppSettings, SettingsStore, normalize_modifiers
+from oat_notes.settings import (
+    WHISPER_MODELS,
+    AppSettings,
+    SettingsStore,
+    normalize_modifiers,
+)
 
 
 def test_default_settings_use_ctrl_alt():
@@ -200,3 +205,21 @@ def test_an_empty_replay_chord_disables_it():
     settings = AppSettings.from_dict({"dictation_replay_modifiers": []})
     assert settings.dictation_replay_modifiers == ()
     assert settings.dictation_replay_label == "off"
+
+
+def test_whisper_model_defaults_to_small_en_and_round_trips():
+    assert AppSettings().whisper_model == "small.en"
+    settings = AppSettings.from_dict({"whisper_model": "medium.en"})
+    assert settings.whisper_model == "medium.en"
+    assert AppSettings.from_dict(settings.to_dict()) == settings
+
+
+def test_the_model_list_travels_to_the_browser_fastest_first():
+    names = [entry["name"] for entry in AppSettings().to_dict()["whisper_models"]]
+    assert names == list(WHISPER_MODELS)
+    assert names[0] == "distil-small.en"
+
+
+def test_an_unknown_whisper_model_is_refused():
+    with pytest.raises(ValueError, match="whisper_model must be one of"):
+        AppSettings.from_dict({"whisper_model": "large-v3"})
