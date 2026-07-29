@@ -401,3 +401,20 @@ def test_a_poisoned_voice_profile_can_be_reset_without_ending_the_meeting():
     # nothing retrains automatically.
     assert "you retrain by pressing their hotkey." in HTML
     assert 'speaker.profile_state !== "untrained"' in HTML
+
+
+def test_an_unknown_line_can_be_put_on_someone_by_clicking_it():
+    assert "function openLinePicker(" in HTML
+    assert 'post("/api/lines/assign", { id: lineId, index })' in HTML
+    # Unknown is offered too, so a wrong assignment is undoable.
+    assert 'index: null }' in HTML or '{ speaker: { name: "Unknown" }, index: null }' in HTML
+    assert ".line-picker" in HTML
+    # Reachable without a mouse.
+    assert "div.tabIndex = 0;" in HTML
+
+
+def test_an_automatically_named_line_needs_no_new_browser_code():
+    # The worker's backfill publishes the line_update the cleanup pass already
+    # renders, so there is exactly one repaint path for a changed line.
+    assert 'event.type === "line_update"' in HTML
+    assert "div.innerHTML = lineHtml(event);" in HTML

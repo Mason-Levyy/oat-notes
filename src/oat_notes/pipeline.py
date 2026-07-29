@@ -22,7 +22,9 @@ from .transcriber import Transcriber
 from .types import AudioChunk, Channel, TranscriptSegment
 from .vad import SileroVad
 
-Sink = Callable[[TranscriptSegment, float], None]
+# The embedding travels with the segment so a turn that resolved to Unknown
+# can be re-scored later, once the profile that would have named it exists.
+Sink = Callable[[TranscriptSegment, float, "np.ndarray | None"], None]
 TrackingSink = Callable[[int, Channel, str, float | None], None]
 
 
@@ -733,8 +735,8 @@ class Pipeline:
                     continue
                 segment = replace(segment, turn_end=chunk.turn_end)
 
+                embedding = None
                 if self._speaker_resolver is not None:
-                    embedding = None
                     if future is not None:
                         try:
                             embedding = future.result()
@@ -767,4 +769,4 @@ class Pipeline:
                     self._speaker_resolver is not None and segment.turn_end
                 ):
                     latency = self._clock.now() - chunk.end
-                    self._sink(segment, latency)
+                    self._sink(segment, latency, embedding)

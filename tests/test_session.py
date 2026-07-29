@@ -1,7 +1,10 @@
+import math
 from types import SimpleNamespace
 
+import numpy as np
+
 from oat_notes.attribution import Speaker
-from oat_notes.session import Session
+from oat_notes.session import UNKNOWN_TURN_MEMORY, Session
 from oat_notes.types import Channel, TranscriptSegment
 
 
@@ -490,3 +493,155 @@ def test_resetting_a_profile_waits_for_an_in_flight_sample():
 def test_resetting_a_profile_needs_speaker_recognition():
     session = _reset_session([Speaker("Sarah", hotkey_slot=0)], resolver=None)
     assert session.reset_speaker_profile(0) == "speaker recognition is unavailable"
+
+
+def _backfill_session(roster, store, unknowns):
+    session = bare_session()
+    session.roster = list(roster)
+    session._options = SimpleNamespace(speaker_store=store)
+    session._speaker_resolver = object()  # only checked for presence
+    session._unknown_turns = dict(unknowns)
+    session.relabelled = []
+    session.log = SimpleNamespace(
+        relabel=lambda line_id, name: (
+            session.relabelled.append((line_id, name)) or True
+        )
+    )
+    session._events = SimpleNamespace(
+        on_line_relabelled=lambda line_id, name, index, score: None
+    )
+    return session
+
+
+class VectorStore:
+    """Stands in for SpeakerStore's matching surface."""
+
+    def __init__(self, vectors):
+        self.vectors = vectors  # speaker_id -> embedding
+
+    def profile_vector(self, speaker_id, source):
+        embedding = self.vectors.get(speaker_id)
+        if embedding is None:
+            return None
+        return SimpleNamespace(speaker_id=speaker_id, embedding=embedding)
+
+    def match_vectors(self, speaker_ids, source):
+        return tuple(
+            self.profile_vector(speaker_id, source)
+            for speaker_id in speaker_ids
+            if speaker_id in self.vectors
+        )
+
+
+def test_an_unknown_line_is_named_once_the_profile_explains_it():
+    store = VectorStore({"sp-sarah": np.array([1.0, 0.0], dtype=np.float32)})
+    session = _backfill_session(
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
+        store,
+        {7: (Channel.MIC, np.array([1.0, 0.0], dtype=np.float32))},
+    )
+
+    session._rescore_unknown_turns(0)
+
+    assert session.relabelled == [(7, "Sarah")]
+    # Named once and taken off the list, so it can't be reconsidered later.
+    assert session._unknown_turns == {}
+
+
+def test_a_near_miss_is_left_unknown_rather_than_guessed():
+    # 0.65 clears the live bar (SOURCE_THRESHOLD 0.60) but not the backfill
+    # one — rewriting a line the user already read demands more confidence.
+    weak = np.array([0.65, math.sqrt(1 - 0.65**2)], dtype=np.float32)
+    store = VectorStore({"sp-sarah": np.array([1.0, 0.0], dtype=np.float32)})
+    session = _backfill_session(
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)], store, {7: (Channel.MIC, weak)}
+    )
+
+    session._rescore_unknown_turns(0)
+
+    assert session.relabelled == []
+    assert 7 in session._unknown_turns
+
+
+def test_a_line_two_people_both_match_stays_unknown():
+    store = VectorStore(
+        {
+            "sp-sarah": np.array([1.0, 0.0], dtype=np.float32),
+            "sp-alex": np.array([0.99, 0.141], dtype=np.float32),
+        }
+    )
+    session = _backfill_session(
+        [
+            Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0),
+            Speaker("Alex", speaker_id="sp-alex", hotkey_slot=1),
+        ],
+        store,
+        {7: (Channel.MIC, np.array([1.0, 0.0], dtype=np.float32))},
+    )
+
+    session._rescore_unknown_turns(0)
+
+    assert session.relabelled == []
+
+
+def test_only_saved_samples_trigger_a_rescore():
+    session = bare_session()
+    rescored = []
+    session._rescore_unknown_turns = rescored.append
+    session.profile_learning = None
+    session._events = SimpleNamespace(on_profile_learning=lambda update: None)
+
+    session._handle_profile_learning(
+        SimpleNamespace(phase="collecting", speaker_index=2, to_dict=lambda: {})
+    )
+    assert rescored == []
+
+    session._handle_profile_learning(
+        SimpleNamespace(phase="saved", speaker_index=2, to_dict=lambda: {})
+    )
+    assert rescored == [2]
+
+
+def test_the_unknown_turn_memory_is_bounded():
+    session = bare_session()
+    session._unknown_turns = {}
+    for line_id in range(UNKNOWN_TURN_MEMORY + 25):
+        session._remember_unknown(
+            line_id, Channel.MIC, np.array([1.0, 0.0], dtype=np.float32)
+        )
+
+    assert len(session._unknown_turns) == UNKNOWN_TURN_MEMORY
+    # Oldest dropped first, so the recent, still-fixable turns are the ones kept.
+    assert 0 not in session._unknown_turns
+    assert UNKNOWN_TURN_MEMORY + 24 in session._unknown_turns
+
+
+def test_assigning_a_line_by_hand_validates_and_settles_it():
+    session = bare_session()
+    session.roster = [Speaker("Sarah", hotkey_slot=0), Speaker("Gone", hotkey_slot=1, active=False)]
+    session._unknown_turns = {4: (Channel.MIC, np.array([1.0, 0.0], dtype=np.float32))}
+    relabelled = []
+    session.log = SimpleNamespace(
+        relabel=lambda line_id, name: (relabelled.append((line_id, name)) or True)
+    )
+
+    assert session.assign_line(4, 9) == "speaker not found"
+    assert session.assign_line(4, 1) == "speaker already removed"
+    assert session.assign_line(4, 0) is None
+
+    assert relabelled == [(4, "Sarah")]
+    # A hand-assigned line is settled; the worker must not revisit it.
+    assert session._unknown_turns == {}
+
+
+def test_a_line_can_be_put_back_to_unknown():
+    session = bare_session()
+    session.roster = [Speaker("Sarah", hotkey_slot=0)]
+    session._unknown_turns = {}
+    relabelled = []
+    session.log = SimpleNamespace(
+        relabel=lambda line_id, name: (relabelled.append((line_id, name)) or True)
+    )
+
+    assert session.assign_line(4, None) is None
+    assert relabelled == [(4, "Unknown")]

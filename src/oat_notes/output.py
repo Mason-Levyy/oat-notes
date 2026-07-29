@@ -147,6 +147,22 @@ class MeetingLog:
             segment.speaker for segment in self._segments if segment.speaker
         }
 
+    def relabel(self, line_id: int, speaker: str) -> bool:
+        """Move one line to a different speaker, by id.
+
+        ``rename`` is keyed by name, so it cannot express this: every
+        unattributed line shares the name "Unknown" and renaming it would move
+        all of them at once.
+
+        The append-only journal keeps whatever it already flushed — it is a
+        crash artifact, not the transcript. ``save`` rebuilds from
+        ``_segments``, so the correction lands in the file that matters.
+        """
+        if not 0 <= line_id < len(self._segments):
+            return False
+        self._segments[line_id] = replace(self._segments[line_id], speaker=speaker)
+        return True
+
     def rename(self, renames: dict[str, str]) -> None:
         self._segments = [
             replace(segment, speaker=renames[segment.speaker])
