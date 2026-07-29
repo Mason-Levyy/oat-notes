@@ -173,7 +173,7 @@ def test_secondary_buttons_stay_unfilled():
 def test_chip_controls_use_glyphs_the_bundled_pixel_font_actually_has():
     assert '"✎"' not in HTML
     assert 'rename.textContent = "EDIT";' in HTML
-    assert '.chip .label { flex: 1; min-width: 0; }' in HTML
+    assert ".chip .label {\n  flex: 1; min-width: 0;" in HTML
 
 
 def test_profile_learning_feedback_uses_the_new_three_and_five_second_rules():
@@ -345,3 +345,24 @@ def test_info_is_pinned_to_the_bottom_of_the_rail():
     assert HTML.index('id="nav-info"') > HTML.index('id="nav-settings"')
     assert ".nav-btn.info {" in HTML
     assert "margin-top: auto;" in HTML
+
+
+def test_roster_controls_stay_inside_the_rail():
+    # The rail is a fixed 300px and .stage is a later sibling, so a chip row
+    # that cannot shrink pushes EDIT under the transcript's background, where
+    # only part of it is clickable.
+    assert ".chip-row .chip { flex: 1; width: auto; min-width: 0; }" in HTML
+    assert ".chip-row { display: flex; flex-wrap: wrap;" in HTML
+    assert "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" in HTML
+    assert "position: relative; z-index: 1;" in HTML
+
+
+def test_enter_files_a_note_and_shift_enter_writes_a_newline():
+    assert '$("notes-input").addEventListener("keydown"' in HTML
+    assert 'if (event.key !== "Enter" || event.shiftKey) return;' in HTML
+    assert '$("notes-form").requestSubmit();' in HTML
+
+
+def test_the_notes_tab_does_not_cover_the_transcript():
+    assert "@media (max-width: 1100px) {" in HTML
+    assert ".stage { padding-right: 42px; }" in HTML
