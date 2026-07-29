@@ -14,6 +14,7 @@ from .models import (
     openvino_cache_dir,
     resolve_openvino_model,
 )
+from .repetition import collapse_repeated_runs
 from .types import AudioChunk, TranscriptSegment
 
 
@@ -60,9 +61,11 @@ class FasterWhisperTranscriber(Transcriber):
                 condition_on_previous_text=False,
                 without_timestamps=True,
                 vad_filter=False,
+                repetition_penalty=self._config.repetition_penalty,
+                compression_ratio_threshold=self._config.compression_ratio_threshold,
             )
             spoken = [segment.text.strip() for segment in segments]
-        text = " ".join(spoken).strip()
+        text = collapse_repeated_runs(" ".join(spoken).strip())
         return TranscriptSegment(
             text=text, channel=chunk.channel, start=chunk.start, end=chunk.end
         )
@@ -95,7 +98,9 @@ class OpenVinoTranscriber(Transcriber):
     def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:
         with self._lock:
             result = self._pipeline.generate(chunk.samples)
-        text = " ".join(piece.strip() for piece in result.texts).strip()
+        text = collapse_repeated_runs(
+            " ".join(piece.strip() for piece in result.texts).strip()
+        )
         return TranscriptSegment(
             text=text, channel=chunk.channel, start=chunk.start, end=chunk.end
         )
