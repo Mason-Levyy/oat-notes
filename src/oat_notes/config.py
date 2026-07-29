@@ -17,7 +17,10 @@ class Config:
     speaker_confirmations: int = 2
     manual_enrollment_seconds: float = 3.0
     manual_enrollment_timeout_seconds: float = 10.0
-    model_name: str = "distil-small.en"
+    # The distil-* family is trained down for speed on standard English and
+    # is measurably weaker on an accent it wasn't distilled against — which
+    # is most of them. Settings can trade back for speed.
+    model_name: str = "small.en"
     compute_type: str = "int8"
     language: str = "en"
     # Greedy decoding will happily loop a phrase to the end of a chunk. The
