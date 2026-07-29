@@ -1739,6 +1739,26 @@ function renderPlayers() {
       renderPlayers();
     };
     row.appendChild(rename);
+    if (speaker.profile_state !== "untrained") {
+      const resetVoice = document.createElement("button");
+      resetVoice.type = "button";
+      resetVoice.className = "mini";
+      resetVoice.textContent = "RESET";
+      resetVoice.title =
+        `Clear ${speaker.name}'s voice profile. Press their hotkey afterwards to retrain.`;
+      resetVoice.setAttribute("aria-label", resetVoice.title);
+      resetVoice.onclick = () => {
+        if (!window.confirm(
+          `Clear ${speaker.name}'s voice profile? They go back to untrained, ` +
+          "and you retrain by pressing their hotkey."
+        )) return;
+        post("/api/roster/reset_profile", { index }).then((result) => {
+          if (result.error) $("statusline").textContent = result.error.toUpperCase();
+          else applyState(result);
+        });
+      };
+      row.appendChild(resetVoice);
+    }
     if (!speaker.spoken) {
       const remove = document.createElement("button");
       remove.type = "button";
