@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 
 from oat_notes.attribution import Speaker
+from oat_notes.config import Config
 from oat_notes.speaker_id import (
+    MIN_ATTRIBUTION_SECONDS,
+    MIN_ENROLLMENT_SECONDS,
     AttributionDecision,
     RollingSpeakerBuffer,
     SpeakerChangeGate,
@@ -471,3 +474,55 @@ def test_resetting_an_unknown_index_is_refused(tmp_path):
     resolver = SpeakerResolver([Speaker("Guest 1")], store, FakeEngine([1, 0]), 16_000)
     with pytest.raises(KeyError):
         resolver.reset_profile(7)
+
+
+def test_the_rolling_buffer_still_produces_windows_at_the_tracking_size():
+    # The regression this guards: RollingSpeakerBuffer used to default its
+    # speech floor to MIN_ENROLLMENT_SECONDS (1.0s). Inside a 1.0s window that
+    # demands 100% speech, and tracking would quietly stop emitting anything.
+    config = Config()
+    buffer = RollingSpeakerBuffer(
+        Channel.MIC,
+        config.sample_rate,
+        config.speaker_window_seconds,
+        config.speaker_hop_seconds,
+        config.speaker_min_speech_seconds,
+    )
+    assert config.speaker_min_speech_seconds < config.speaker_window_seconds
+
+    block = config.sample_rate // 10  # 0.1s blocks
+    emitted = []
+    for step in range(20):
+        # Four fifths speech: realistic for a window straddling a short pause.
+        chunk = buffer.push(
+            step * 0.1,
+            np.zeros(block, dtype=np.float32),
+            step % 5 != 0,
+        )
+        if chunk is not None:
+            emitted.append(chunk)
+
+    assert emitted, "tracking produced no windows at the configured size"
+
+
+def test_a_short_turn_is_still_worth_naming(tmp_path):
+    # Splitting on a voice change makes genuinely short turns. Holding them to
+    # the enrollment floor would leave both halves Unknown.
+    store = SpeakerStore(tmp_path / "speakers.db")
+    person = store.create_speaker("Sarah")
+    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    other = store.create_speaker("Alex")
+    store.add_sample(other.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    resolver = SpeakerResolver(
+        [
+            Speaker("Sarah", speaker_id=person.speaker_id),
+            Speaker("Alex", speaker_id=other.speaker_id),
+        ],
+        store,
+        FakeEngine([1, 0]),
+        16_000,
+    )
+
+    assert MIN_ATTRIBUTION_SECONDS < MIN_ENROLLMENT_SECONDS
+    assert resolver.wants_embedding(chunk(seconds=0.8)) is True
+    assert resolver.wants_embedding(chunk(seconds=0.5)) is False
