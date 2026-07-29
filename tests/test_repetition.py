@@ -23,7 +23,6 @@ def test_capitalisation_does_not_hide_a_loop():
 
 
 def test_a_phrase_said_twice_for_emphasis_survives():
-    # Two words twice is ordinary speech, not a decoder loop.
     assert collapse_repeated_runs("thank you thank you") == "thank you thank you"
     assert collapse_repeated_runs("no no") == "no no"
 

@@ -348,9 +348,6 @@ def test_info_is_pinned_to_the_bottom_of_the_rail():
 
 
 def test_roster_controls_stay_inside_the_rail():
-    # The rail is a fixed 300px and .stage is a later sibling, so a chip row
-    # that cannot shrink pushes EDIT under the transcript's background, where
-    # only part of it is clickable.
     assert ".chip-row .chip { flex: 1; width: auto; min-width: 0; }" in HTML
     assert ".chip-row { display: flex; flex-wrap: wrap;" in HTML
     assert "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" in HTML
@@ -372,23 +369,18 @@ def test_the_transcription_model_is_pickable_from_settings():
     assert 'id="whisper-model-grid"' in HTML
     assert "function renderModelSettings()" in HTML
     assert 'post("/api/settings", { whisper_model: name })' in HTML
-    # Sits above DICTATION: which model runs is the more consequential choice.
     assert HTML.index('id="whisper-model-grid"') < HTML.index('id="dictation-form"')
 
 
 def test_naming_a_guest_in_the_roster_also_identifies_them():
     assert "function speakerEditor(" in HTML
     assert "let editingSpeaker = null;" in HTML
-    # The roster's prompt() is gone; the library card keeps its own.
     assert 'post("/api/roster/rename", { index, name: name.trim() })' not in HTML
-    # A typed name that matches a saved person links to them.
     assert "const match = matchingSpeaker(name);" in HTML
     assert "speaker_id: match ? match.id : null," in HTML
 
 
 def test_the_inline_name_editor_survives_a_repaint():
-    # renderPlayers runs on every speaker event, so the draft and caret cannot
-    # live in the DOM node it replaces.
     assert "let speakerDraft" in HTML
     assert "let speakerCaret" in HTML
     assert "input.setSelectionRange(caret, caret);" in HTML
@@ -397,8 +389,6 @@ def test_the_inline_name_editor_survives_a_repaint():
 def test_a_poisoned_voice_profile_can_be_reset_without_ending_the_meeting():
     assert 'post("/api/roster/reset_profile", { index })' in HTML
     assert '>RESET<' in HTML or 'resetVoice.textContent = "RESET";' in HTML
-    # Destructive, so it asks first — and says what happens next, because
-    # nothing retrains automatically.
     assert "you retrain by pressing their hotkey." in HTML
     assert 'speaker.profile_state !== "untrained"' in HTML
 
@@ -406,15 +396,11 @@ def test_a_poisoned_voice_profile_can_be_reset_without_ending_the_meeting():
 def test_an_unknown_line_can_be_put_on_someone_by_clicking_it():
     assert "function openLinePicker(" in HTML
     assert 'post("/api/lines/assign", { id: lineId, index })' in HTML
-    # Unknown is offered too, so a wrong assignment is undoable.
     assert 'index: null }' in HTML or '{ speaker: { name: "Unknown" }, index: null }' in HTML
     assert ".line-picker" in HTML
-    # Reachable without a mouse.
     assert "div.tabIndex = 0;" in HTML
 
 
 def test_an_automatically_named_line_needs_no_new_browser_code():
-    # The worker's backfill publishes the line_update the cleanup pass already
-    # renders, so there is exactly one repaint path for a changed line.
     assert 'event.type === "line_update"' in HTML
     assert "div.innerHTML = lineHtml(event);" in HTML

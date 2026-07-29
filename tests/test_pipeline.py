@@ -13,8 +13,6 @@ from oat_notes.types import Channel, TranscriptSegment
 
 CONFIG = Config()
 WINDOW = CONFIG.vad_window_samples
-# Enough silence to close a chunk, derived so retuning the split can't leave
-# these tests pushing a gap that no longer splits.
 SILENCE_WINDOWS = math.ceil(
     CONFIG.silence_split_seconds * CONFIG.sample_rate / WINDOW
 )
@@ -198,8 +196,6 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     other = store.create_speaker("Bob")
     store.add_sample(saved.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
     store.add_sample(other.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
-    # Two people: a one-person roster resolves to them without consulting the
-    # embedding at all, so there would be no parallel work to observe.
     roster = [
         Speaker("Alice", speaker_id=saved.speaker_id),
         Speaker("Bob", speaker_id=other.speaker_id),
@@ -222,8 +218,6 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     )
     pipeline.finish()
 
-    # Reaching here at all is the assertion: the barrier only clears if the
-    # embed and the transcribe were in flight at the same time.
     assert received[0].speaker == "Alice"
     assert received[0].attribution == "auto"
     assert store.profile(saved.speaker_id).state == "ready"
@@ -285,8 +279,6 @@ def test_rolling_speaker_tracking_first_identification_splits(tmp_path):
     pipeline.split_channel = spy_split
 
     pipeline.start()
-    # 0.75, not 1.0: amplitude >= 0.999 reads as clipped and wants_embedding()
-    # would refuse to embed the chunk.
     pipeline.frame_queue.put(
         (Channel.MIC, 0.0, np.full(90 * WINDOW, 0.75, dtype=np.float32))
     )
@@ -302,7 +294,6 @@ def test_rolling_speaker_tracking_first_identification_splits(tmp_path):
 
     assert splits == [Channel.MIC]
     assert tracked == [(1, Channel.MIC, "auto", 1.0)]
-    # The cut lands, and the audio either side of it is continuous.
     assert [segment.speaker for segment in received] == ["Bob", "Bob"]
     assert received[1].start == received[0].end
 
