@@ -23,10 +23,6 @@ from .types import AudioChunk, Channel
 
 MODEL_FILENAME = "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
 MIN_ENROLLMENT_SECONDS = MIN_SAMPLE_SPEECH_SECONDS
-# What a turn needs before it is worth naming, as opposed to before it is
-# worth *saving*. Splitting on a voice change produces genuinely short turns —
-# a two-second answer cut in half is two turns of under a second — and holding
-# those to the enrollment floor would leave both of them Unknown.
 MIN_ATTRIBUTION_SECONDS = 0.7
 MANUAL_ENROLLMENT_SECONDS = 3.0
 MAX_CLIPPED_RATIO = 0.01
@@ -176,13 +172,6 @@ class SpeakerResolver:
             # Manual enrollment is handled by the stability-gated learner,
             # independently from transcript attribution.
             return False
-        # Embed whenever the answer could matter — now or later. Requiring an
-        # already-enrolled profile to match against meant the turns taken
-        # before anyone was enrolled got no embedding at all, and those are
-        # exactly the ones worth naming once a profile firms up. The audio is
-        # gone by then; the embedding is the only remaining chance.
-        # A single-member roster always resolves to that member, so there is
-        # nothing to name and nothing to back-fill.
         return len(self._members()) > 1
 
     def embed(self, chunk: AudioChunk) -> np.ndarray:

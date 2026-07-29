@@ -24,8 +24,6 @@ class FakeSession:
             is_empty=False,
             speakers_with_lines=lambda: {"Guest 1"} if guest_has_spoken else set(),
         )
-        # Enough shape for AppState.status(), which every roster mutation
-        # returns.
         self.active = {Channel.MIC: None, Channel.LOOPBACK: None}
         self.current_speaker = None
         self.profile_learning = None
@@ -520,8 +518,6 @@ def test_the_saved_model_choice_reloads_the_transcriber():
 
     assert status["settings"]["whisper_model"] == "medium.en"
     assert state.config.model_name == "medium.en"
-    # The old model is dropped immediately so a meeting cannot start on it
-    # while the new one is still loading.
     assert state.transcriber is None
     assert status["model_status"] == "loading"
     assert reloads == ["medium.en"]
@@ -592,8 +588,6 @@ def test_renaming_against_an_unknown_identity_is_refused():
 def test_a_named_guest_is_no_longer_pending_backfill():
     state = AppState(Config(), transcriber=None)
     session = FakeSession()
-    # Session.rename_speaker drops a named guest from guest_indices, which is
-    # the only thing _guests_with_lines reads.
     session.guest_indices = []
     state.awaiting_backfill = session
 
@@ -656,9 +650,8 @@ def test_assigning_a_line_updates_it_and_tells_the_browser():
 
     assert state.lines[0]["label"] == "Sarah"
     assert state.lines[0]["speaker_index"] == 0
-    # "manual" so the line renders confident rather than in the guess style.
     assert state.lines[0]["attribution"] == "manual"
-    assert state.lines[1]["label"] == "Alex"  # untouched
+    assert state.lines[1]["label"] == "Alex"
 
     event = subscriber.get_nowait()
     assert event["type"] == "line_update"
@@ -678,7 +671,6 @@ def test_assigning_a_line_validates_its_arguments():
     assert state.assign_line({"id": "0", "index": 0}) == {
         "error": "id must be an integer"
     }
-    # bool is an int subclass — it must not slip through as index 1.
     assert state.assign_line({"id": 0, "index": True}) == {
         "error": "index must be an integer or null"
     }

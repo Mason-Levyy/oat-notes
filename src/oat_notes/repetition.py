@@ -17,8 +17,6 @@ import re
 
 _TOKEN = re.compile(r"\S+")
 _STRIPPED = "\"'“”‘’.,!?;:—–-…()[]"
-# A loop is a short phrase said over and over. Bounding the window keeps the
-# scan linear enough on a long dictation and cannot miss a real one.
 _MAX_RUN_TOKENS = 60
 
 
@@ -60,8 +58,6 @@ def _collapse_line(line: str) -> str:
         longest = min(_MAX_RUN_TOKENS, (total - position) // 2)
         best_length = 0
         best_repeats = 0
-        # Ascending, keeping only a strict improvement: "A B. A B. A B."
-        # matches at both three and six tokens, and three is the real period.
         for run_length in range(1, longest + 1):
             repeats = _repeats_at(keys, position, run_length)
             if not _is_a_loop(run_length, repeats):
@@ -71,7 +67,6 @@ def _collapse_line(line: str) -> str:
         if not best_length:
             position += 1
             continue
-        # Cut from the end of the last kept token so the separator goes too.
         cuts.append(
             (
                 tokens[position + best_length - 1].end(),

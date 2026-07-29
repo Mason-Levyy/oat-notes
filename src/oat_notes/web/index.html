@@ -206,9 +206,6 @@ body {
 
 /* ---------- layout ---------- */
 .body { display: flex; }
-/* Stacked above .stage: the rail is a fixed 300px and the stage is a later
-   sibling, so anything that does overflow the rail would otherwise be painted
-   over — and silently unclickable — by the transcript screen's background. */
 .rail {
   width: 300px; flex: none;
   padding: 18px;
@@ -285,8 +282,6 @@ body {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px; margin: 20px 0 8px;
 }
-/* Same look, its own class: a modifier-grid is built on demand by a shortcut
-   editor, and this one is part of the page. */
 .model-grid {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px; margin: 20px 0 8px;
@@ -527,10 +522,6 @@ body {
 .chip.learning { border-style: dashed; }
 .chip .progress { font-size: 7px; margin-left: auto; flex: none; white-space: nowrap; }
 .chip .progress + .dot { margin-left: 0; }
-/* min-width:0 lets the chip shrink past its own min-content width so RESET,
-   EDIT and × always fit inside the 300px rail; wrap is the backstop for a row
-   carrying every button at once. Without both, the row overflowed the rail and
-   the buttons ended up underneath the transcript. */
 .chip-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; }
 .chip-row .chip { flex: 1; width: auto; min-width: 0; }
 .chip-row .mini { flex: none; }
@@ -601,7 +592,6 @@ body {
 .line[tabindex]:hover, .line[tabindex]:focus-visible {
   outline: 2px solid var(--screen-dim); outline-offset: 2px; cursor: pointer;
 }
-/* Inside the screen, so it scrolls with the line it belongs to. */
 .line-picker {
   position: absolute; z-index: 5; left: 0; top: 100%;
   display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
@@ -625,8 +615,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .rec-dot, .chip.active .dot, .cursor { animation: none; }
 }
-/* Below this width the console reaches the viewport edge, where the fixed
-   NOTES tab sits — leave it a lane rather than letting it cover transcript. */
 @media (max-width: 1100px) {
   .stage { padding-right: 42px; }
 }
@@ -872,8 +860,6 @@ let tick = null;
 let profileLearningTimer = null;
 let rosterFocus = null;
 let editingShortcut = null;
-// The live roster's inline name editor. Draft and caret sit outside the DOM
-// because renderPlayers replaces the row on every speaker event.
 let editingSpeaker = null;
 let speakerDraft = "";
 let speakerCaret = null;
@@ -1441,7 +1427,6 @@ function renderModelSettings() {
     message.textContent = (state.model_error || "MODEL FAILED TO LOAD").toUpperCase();
     message.className = "settings-message pixel error";
   } else {
-    // Ready. Say so, or the transient LOADING message never clears.
     message.textContent = `${String(chosen || "").toUpperCase()} READY`;
     message.className = "settings-message pixel saved";
   }
@@ -1676,9 +1661,6 @@ function addLine(line, preserveViewport = true) {
   }
 }
 
-/* Whoever the worker guessed, you get the last word. The worker also names
-   Unknown lines by itself once a profile firms up, so this is the manual half
-   of the same job. */
 function openLinePicker(anchor, lineId) {
   closeLinePicker();
   if (!state.recording) return;
@@ -1833,9 +1815,6 @@ function renderPlayers() {
   addGhost(players);
 }
 
-/* Naming someone here also identifies them: a typed name that matches a saved
-   person links to them, and one that doesn't creates them. Either way the
-   server takes the guest off the backfill queue, so END MEETING just saves. */
 function speakerEditor(index, speaker) {
   const wrap = document.createElement("div");
   wrap.className = "chip-row editing";
@@ -1886,9 +1865,6 @@ function speakerEditor(index, speaker) {
   };
 
   wrap.append(input, save, cancel);
-  // renderPlayers repaints on every SSE event, which replaces this node. The
-  // draft and caret live outside the DOM so a live speaker change mid-typing
-  // doesn't move the cursor under the user.
   setTimeout(() => {
     input.focus();
     const caret = speakerCaret === null ? input.value.length : speakerCaret;
@@ -2301,8 +2277,6 @@ function renderNotes() {
   $("notes-hint").style.display = state.recording ? "none" : "block";
 }
 
-// A textarea swallows Enter, so the note only ever filed by clicking. Enter
-// files it; Shift+Enter is how you get the newline the textarea is here for.
 $("notes-input").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey) return;
   event.preventDefault();

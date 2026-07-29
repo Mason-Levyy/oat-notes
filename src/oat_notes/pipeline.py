@@ -22,8 +22,6 @@ from .transcriber import Transcriber
 from .types import AudioChunk, Channel, TranscriptSegment
 from .vad import SileroVad
 
-# The embedding travels with the segment so a turn that resolved to Unknown
-# can be re-scored later, once the profile that would have named it exists.
 Sink = Callable[[TranscriptSegment, float, "np.ndarray | None"], None]
 TrackingSink = Callable[[int, Channel, str, float | None], None]
 
@@ -636,14 +634,6 @@ class Pipeline:
                 gate = self._tracking_gates[chunk.channel]
                 confirmed = gate.observe(decision)
             if confirmed is not None and confirmed.speaker_index is not None:
-                # The in-flight transcript chunk is misattributed as of now, so
-                # cut it rather than waiting for a silence gap or the 15s cap.
-                # This fires on the first identification too: people answering
-                # each other leave no gap, so the opening chunk of a channel is
-                # exactly where two speakers get merged into one line.
-                # VadChunker.split returns None outside speech and _finalize
-                # drops anything under min_speech_seconds, so a fast flip
-                # between two candidates cannot emit fragments.
                 self.split_channel(chunk.channel)
                 sink(
                     confirmed.speaker_index,

@@ -376,8 +376,6 @@ def test_naming_a_guest_identifies_them_and_clears_the_backfill_queue():
 
     assert session.rename_speaker(0, "Sarah") is None
     assert session.roster[0].name == "Sarah"
-    # Naming is identifying: a saved person now exists, the samples gathered
-    # while they were anonymous belong to them, and END MEETING won't ask.
     assert store.created == ["Sarah"]
     assert session.roster[0].speaker_id == "sp-sarah"
     assert persisted == [(0, "sp-sarah")]
@@ -429,7 +427,7 @@ def test_guest_numbering_survives_naming_an_earlier_guest():
     session._attributor = SimpleNamespace(add=lambda s: len(session.roster))
 
     session._create_guest(hotkey_slot=0)
-    session.guest_indices.remove(0)  # named mid-meeting
+    session.guest_indices.remove(0)
     session._create_guest(hotkey_slot=1)
 
     assert [speaker.name for speaker in session.roster] == ["Guest 1", "Guest 2"]
@@ -460,8 +458,6 @@ def test_resetting_a_profile_clears_it_and_the_live_tracking_state():
     assert session.reset_speaker_profile(0) is None
 
     assert reset == [0]
-    # The gate and rolling buffers still held matches against the centroid
-    # that no longer exists.
     assert session.tracking_resets == [None]
     assert session.current_speaker is None
     assert session._current_speaker_channel is None
@@ -499,7 +495,7 @@ def _backfill_session(roster, store, unknowns):
     session = bare_session()
     session.roster = list(roster)
     session._options = SimpleNamespace(speaker_store=store)
-    session._speaker_resolver = object()  # only checked for presence
+    session._speaker_resolver = object()
     session._unknown_turns = dict(unknowns)
     session.relabelled = []
     session.log = SimpleNamespace(
@@ -517,7 +513,7 @@ class VectorStore:
     """Stands in for SpeakerStore's matching surface."""
 
     def __init__(self, vectors):
-        self.vectors = vectors  # speaker_id -> embedding
+        self.vectors = vectors
 
     def profile_vector(self, speaker_id, source):
         embedding = self.vectors.get(speaker_id)
@@ -544,13 +540,10 @@ def test_an_unknown_line_is_named_once_the_profile_explains_it():
     session._rescore_unknown_turns(0)
 
     assert session.relabelled == [(7, "Sarah")]
-    # Named once and taken off the list, so it can't be reconsidered later.
     assert session._unknown_turns == {}
 
 
 def test_a_near_miss_is_left_unknown_rather_than_guessed():
-    # 0.65 clears the live bar (SOURCE_THRESHOLD 0.60) but not the backfill
-    # one — rewriting a line the user already read demands more confidence.
     weak = np.array([0.65, math.sqrt(1 - 0.65**2)], dtype=np.float32)
     store = VectorStore({"sp-sarah": np.array([1.0, 0.0], dtype=np.float32)})
     session = _backfill_session(
@@ -611,7 +604,6 @@ def test_the_unknown_turn_memory_is_bounded():
         )
 
     assert len(session._unknown_turns) == UNKNOWN_TURN_MEMORY
-    # Oldest dropped first, so the recent, still-fixable turns are the ones kept.
     assert 0 not in session._unknown_turns
     assert UNKNOWN_TURN_MEMORY + 24 in session._unknown_turns
 
@@ -630,7 +622,6 @@ def test_assigning_a_line_by_hand_validates_and_settles_it():
     assert session.assign_line(4, 0) is None
 
     assert relabelled == [(4, "Sarah")]
-    # A hand-assigned line is settled; the worker must not revisit it.
     assert session._unknown_turns == {}
 
 
