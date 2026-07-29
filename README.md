@@ -115,6 +115,11 @@ elevated window, so dictating into an admin console silently does nothing; and
 chords Windows reserves (Ctrl+Win+D, Ctrl+Win+arrows) cancel the recording
 rather than starting one.
 
+Only one copy runs at a time. Each instance installs a process-wide keyboard
+hook, so a second one arms on the same chord and dictates everything twice —
+launching the app again just opens the UI of the copy already running, whatever
+port it was started on.
+
 ## Usage
 
 ```
@@ -177,6 +182,7 @@ inject.py     Win32 clipboard paste / unicode SendInput into the focused window
 overlay.py    frameless, always-on-top, never-focused dictation HUD (tkinter)
 dictation/    recorder (mic → VAD → whisper), formatter (rules + email), controller
 session.py    one meeting: capture + pipeline + attribution + transcript log
+single_instance.py  named kernel mutex: one keyboard hook, one microphone
 server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
 ```
 
