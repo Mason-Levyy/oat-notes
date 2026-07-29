@@ -15,6 +15,7 @@ import sys
 from typing import Sequence
 
 from ..llm import LlmEngine
+from ..repetition import collapse_repeated_runs
 
 _FILLERS = ("um", "uhm", "uh", "erm", "er", "ah", "hmm", "mm", "mhm")
 _FILLER_WITH_SURROUNDING_COMMAS = re.compile(
@@ -77,6 +78,10 @@ def apply_rules(
 
     cleaned = _FILLER_WITH_SURROUNDING_COMMAS.sub(" ", cleaned)
     cleaned = _REPEAT_PATTERN.sub(_collapse_repeats, cleaned)
+    # After the word-level pass and before newlines exist: an utterance is
+    # several transcribed chunks joined, so a loop can span a boundary no
+    # single decode saw.
+    cleaned = collapse_repeated_runs(cleaned)
     for pattern, replacement in _LINE_COMMANDS:
         cleaned = pattern.sub(replacement, cleaned)
     if spoken_punctuation:
