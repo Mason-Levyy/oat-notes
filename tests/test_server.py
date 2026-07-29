@@ -598,3 +598,36 @@ def test_a_named_guest_is_no_longer_pending_backfill():
     state.awaiting_backfill = session
 
     assert state.status()["pending_backfill"] == []
+
+
+def test_resetting_a_profile_mid_meeting_reaches_the_session():
+    state = AppState(Config(), transcriber=None)
+    session = FakeSession()
+    calls = []
+    session.reset_speaker_profile = lambda index: calls.append(index) or None
+    state.session = session
+
+    state.reset_roster_profile({"index": 0})
+
+    assert calls == [0]
+
+
+def test_resetting_a_profile_needs_a_meeting_and_an_integer_index():
+    state = AppState(Config(), transcriber=None)
+    assert state.reset_roster_profile({"index": 0}) == {"error": "not recording"}
+
+    state.session = FakeSession()
+    assert state.reset_roster_profile({"index": "0"}) == {
+        "error": "index must be an integer"
+    }
+
+
+def test_a_session_error_reaches_the_browser_unchanged():
+    state = AppState(Config(), transcriber=None)
+    session = FakeSession()
+    session.reset_speaker_profile = lambda index: "speaker already removed"
+    state.session = session
+
+    assert state.reset_roster_profile({"index": 0}) == {
+        "error": "speaker already removed"
+    }

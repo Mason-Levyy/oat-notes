@@ -430,3 +430,63 @@ def test_guest_numbering_survives_naming_an_earlier_guest():
     session._create_guest(hotkey_slot=1)
 
     assert [speaker.name for speaker in session.roster] == ["Guest 1", "Guest 2"]
+
+
+def _reset_session(roster, resolver=None):
+    session = bare_session()
+    session.roster = list(roster)
+    session.profile_learning = None
+    session.current_speaker = 0
+    session._current_speaker_channel = Channel.MIC
+    session.active = {Channel.MIC: 0, Channel.LOOPBACK: 0}
+    session._speaker_resolver = resolver
+    session._pipeline = SimpleNamespace(
+        reset_speaker_tracking=lambda index=None: session.tracking_resets.append(index)
+    )
+    session.tracking_resets = []
+    return session
+
+
+def test_resetting_a_profile_clears_it_and_the_live_tracking_state():
+    reset = []
+    session = _reset_session(
+        [Speaker("Sarah", speaker_id="sp-1", hotkey_slot=0)],
+        resolver=SimpleNamespace(reset_profile=reset.append),
+    )
+
+    assert session.reset_speaker_profile(0) is None
+
+    assert reset == [0]
+    # The gate and rolling buffers still held matches against the centroid
+    # that no longer exists.
+    assert session.tracking_resets == [None]
+    assert session.current_speaker is None
+    assert session._current_speaker_channel is None
+    assert session.active == {Channel.MIC: None, Channel.LOOPBACK: None}
+
+
+def test_resetting_a_profile_validates_the_target():
+    session = _reset_session(
+        [Speaker("Sarah", hotkey_slot=0), Speaker("Gone", hotkey_slot=1, active=False)],
+        resolver=SimpleNamespace(reset_profile=lambda index: None),
+    )
+
+    assert session.reset_speaker_profile(9) == "speaker not found"
+    assert session.reset_speaker_profile(1) == "speaker already removed"
+
+
+def test_resetting_a_profile_waits_for_an_in_flight_sample():
+    session = _reset_session(
+        [Speaker("Sarah", hotkey_slot=0)],
+        resolver=SimpleNamespace(reset_profile=lambda index: None),
+    )
+    session.profile_learning = {"speaker_index": 0, "phase": "collecting"}
+
+    assert session.reset_speaker_profile(0) == (
+        "a voice sample is being captured for this speaker"
+    )
+
+
+def test_resetting_a_profile_needs_speaker_recognition():
+    session = _reset_session([Speaker("Sarah", hotkey_slot=0)], resolver=None)
+    assert session.reset_speaker_profile(0) == "speaker recognition is unavailable"
