@@ -770,7 +770,15 @@ class AppState:
                 if 0 <= index < len(session.roster)
                 else None
             )
-            error = session.rename_speaker(index, str(body.get("name", "")))
+            speaker_id = str(body.get("speaker_id") or "").strip() or None
+            if speaker_id is not None and self.speaker_store is not None:
+                try:
+                    self.speaker_store.profile(speaker_id)
+                except KeyError:
+                    return {"error": "speaker not found"}
+            error = session.rename_speaker(
+                index, str(body.get("name", "")), speaker_id
+            )
             if error:
                 return {"error": error}
             new_name = session.roster[index].name
