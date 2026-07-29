@@ -215,9 +215,12 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     assert store.profile(saved.speaker_id).state == "ready"
 
 
-def test_rolling_speaker_tracking_first_identification_does_not_split(tmp_path):
-    """Nothing to correct yet on a channel's very first identification, so it
-    only updates the live indicator and leaves the transcript chunk alone."""
+def test_rolling_speaker_tracking_first_identification_splits(tmp_path):
+    """A channel's opening chunk is exactly where two people answering each
+    other get merged onto one line — nobody is established yet, and there is
+    no silence to split on. The first confirmed identification has to cut."""
+    import threading as _threading
+
     from oat_notes.attribution import Speaker
     from oat_notes.speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
     from oat_notes.speaker_store import SpeakerStore
@@ -242,6 +245,12 @@ def test_rolling_speaker_tracking_first_identification_does_not_split(tmp_path):
     )
     received = []
     tracked = []
+    identified = _threading.Event()
+
+    def on_tracking(*event):
+        tracked.append(event)
+        identified.set()
+
     pipeline = Pipeline(
         CONFIG,
         SessionClock(),
@@ -250,21 +259,38 @@ def test_rolling_speaker_tracking_first_identification_does_not_split(tmp_path):
         channels=(Channel.MIC,),
         vad_factory=EnergyFakeVad,
         speaker_resolver=resolver,
-        speaker_tracking_sink=lambda *event: tracked.append(event),
+        speaker_tracking_sink=on_tracking,
     )
+    splits = []
+    real_split = pipeline.split_channel
+
+    def spy_split(channel):
+        splits.append(channel)
+        real_split(channel)
+
+    pipeline.split_channel = spy_split
+
     pipeline.start()
-    duration_windows = 90
+    # 0.75, not 1.0: amplitude >= 0.999 reads as clipped and wants_embedding()
+    # would refuse to embed the chunk.
+    pipeline.frame_queue.put(
+        (Channel.MIC, 0.0, np.full(90 * WINDOW, 0.75, dtype=np.float32))
+    )
+    assert identified.wait(timeout=3.0)
     pipeline.frame_queue.put(
         (
             Channel.MIC,
-            0.0,
-            np.full(duration_windows * WINDOW, 0.75, dtype=np.float32),
+            90 * WINDOW / CONFIG.sample_rate,
+            np.full(40 * WINDOW, 0.75, dtype=np.float32),
         )
     )
     pipeline.finish()
 
-    assert len(received) == 1
+    assert splits == [Channel.MIC]
     assert tracked == [(1, Channel.MIC, "auto", 1.0)]
+    # The cut lands, and the audio either side of it is continuous.
+    assert [segment.speaker for segment in received] == ["Bob", "Bob"]
+    assert received[1].start == received[0].end
 
 
 def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):

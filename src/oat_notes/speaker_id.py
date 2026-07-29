@@ -23,6 +23,11 @@ from .types import AudioChunk, Channel
 
 MODEL_FILENAME = "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
 MIN_ENROLLMENT_SECONDS = MIN_SAMPLE_SPEECH_SECONDS
+# What a turn needs before it is worth naming, as opposed to before it is
+# worth *saving*. Splitting on a voice change produces genuinely short turns —
+# a two-second answer cut in half is two turns of under a second — and holding
+# those to the enrollment floor would leave both of them Unknown.
+MIN_ATTRIBUTION_SECONDS = 0.7
 MANUAL_ENROLLMENT_SECONDS = 3.0
 MAX_CLIPPED_RATIO = 0.01
 SOURCE_THRESHOLD = 0.60
@@ -160,7 +165,10 @@ class SpeakerResolver:
         return list(range(len(self._roster)))
 
     def wants_embedding(self, chunk: AudioChunk) -> bool:
-        if self._engine is None or chunk_speech_seconds(chunk) < MIN_ENROLLMENT_SECONDS:
+        if (
+            self._engine is None
+            or chunk_speech_seconds(chunk) < MIN_ATTRIBUTION_SECONDS
+        ):
             return False
         if chunk_quality(chunk) < 1.0 - MAX_CLIPPED_RATIO:
             return False

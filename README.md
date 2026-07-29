@@ -74,7 +74,7 @@ meetings or when a virtual audio device is already mixing all sources.
 uv run oat-notes --ui
 ```
 
-Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until they have five seconds of usable enrollment speech. A manual speaker press starts a one-time, source-specific profile sample: it waits for three seconds of detected speech within ten seconds, then saves one quality-checked embedding. Voice embedding and transcription run locally in parallel on separate model instances; ready profiles are checked in overlapping 1.5-second windows about every 0.25 seconds, with two consecutive matches required before the live speaker changes. Once a change is confirmed, the transcript cuts to the new speaker immediately rather than waiting for a pause or the 15-second chunk cap.
+Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until they have five seconds of usable enrollment speech. A manual speaker press starts a one-time, source-specific profile sample: it waits for three seconds of detected speech within ten seconds, then saves one quality-checked embedding. Voice embedding and transcription run locally in parallel on separate model instances; ready profiles are checked in overlapping 1-second windows about every 0.15 seconds, with two consecutive matches required before the live speaker changes. Once a match is confirmed the transcript cuts to that speaker immediately, rather than waiting for a pause or the 15-second chunk cap — including the first identification on a channel, since people answering each other leave no pause to split on.
 
 The **Settings** tab holds the transcription model, the local speaker directory
 and reusable groups. Transcription defaults to `small.en`; `distil-small.en` is
@@ -156,7 +156,7 @@ On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--n
 capture.py    WASAPI capture (pyaudiowpatch); callback only stamps + enqueues
 clock.py      one monotonic session clock — all timestamps stamped at capture
 vad.py        streaming Silero VAD (ONNX model bundled with faster-whisper)
-chunker.py    state machine: split at 0.5s silence, force-split at 15s, drop blips
+chunker.py    state machine: split at 0.35s silence, force-split at 15s, drop blips
 transcriber.py  Transcriber ABC + faster-whisper and OpenVINO backends
 models.py     model download/cache resolution shared by whisper and the LLM
 llm.py        one lock-serialized local LLM shared by cleanup and dictation

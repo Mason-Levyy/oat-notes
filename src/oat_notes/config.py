@@ -8,12 +8,20 @@ class Config:
     sample_rate: int = 16_000
     vad_window_samples: int = 512
     vad_threshold: float = 0.5
-    silence_split_seconds: float = 0.5
+    silence_split_seconds: float = 0.35
     max_chunk_seconds: float = 15.0
     min_speech_seconds: float = 0.25
     pre_roll_windows: int = 2
-    speaker_window_seconds: float = 1.5
-    speaker_hop_seconds: float = 0.25
+    # People answering each other leave no silence to split on, so the turn
+    # boundary has to come from the voice itself. A shorter window and hop
+    # notice the change in about a third of a second.
+    speaker_window_seconds: float = 1.0
+    speaker_hop_seconds: float = 0.15
+    # How much of a tracking window has to be speech before it is worth
+    # embedding. Distinct from the enrollment floor: inside a 1.0s window,
+    # demanding a full second of speech would mean 100% and stop tracking
+    # producing windows at all.
+    speaker_min_speech_seconds: float = 0.6
     speaker_confirmations: int = 2
     manual_enrollment_seconds: float = 3.0
     manual_enrollment_timeout_seconds: float = 10.0
