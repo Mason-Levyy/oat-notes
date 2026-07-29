@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
 from .attribution import Attributor, Speaker, SwitchLog
 from .capture import AudioCapture, find_default_loopback
 from .cleanup import CleanupWorker, LineCleaner
@@ -26,6 +28,15 @@ from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
 from .speaker_store import SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
 from .types import Channel, TranscriptSegment
+
+# How many unattributed turns stay eligible for naming. Embeddings are small,
+# but a long meeting shouldn't grow without limit.
+UNKNOWN_TURN_MEMORY = 400
+# Stricter than live attribution (SOURCE_THRESHOLD 0.60, MATCH_MARGIN 0.05) on
+# purpose: this rewrites a line the user has already read, so a near-miss is
+# left as Unknown rather than guessed at.
+BACKFILL_THRESHOLD = 0.70
+BACKFILL_MARGIN = 0.10
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,9 @@ class SessionEvents:
     )
     on_line_cleaned: Callable[[int, "str | None"], None] = (
         lambda line_id, text: None
+    )
+    on_line_relabelled: Callable[[int, str, int, float], None] = (
+        lambda line_id, name, index, score: None
     )
     on_speaker: Callable[[int], None] = lambda index: None
     on_attribution: Callable[[int | None, Channel, str, float | None], None] = (
@@ -88,6 +102,8 @@ class Session:
         # second guest would be called "Guest 1" all over again.
         self.guest_indices: list[int] = []
         self._guests_created = 0
+        # line id -> (channel, embedding) for turns nobody could name yet.
+        self._unknown_turns: dict[int, tuple[Channel, np.ndarray]] = {}
         self.hotkey_bank = 0
 
         self._pa = pyaudio.PyAudio()
@@ -506,7 +522,12 @@ class Session:
             self._options.out_dir, self._started_at, self._options.meeting_name
         )
 
-    def _handle_segment(self, segment: TranscriptSegment, latency: float) -> None:
+    def _handle_segment(
+        self,
+        segment: TranscriptSegment,
+        latency: float,
+        embedding: "np.ndarray | None" = None,
+    ) -> None:
         # A long utterance may produce several max-duration transcript
         # chunks. Keep its turn connected; rolling tracking updates the live
         # chip independently while turn attribution closes on natural silence.
@@ -552,6 +573,8 @@ class Session:
         if not segment.text:
             return
         line_id = self.log.add(segment)
+        if embedding is not None and segment.attribution == "unknown":
+            self._remember_unknown(line_id, segment.channel, embedding)
         if self._cleanup is not None:
             self._cleanup.submit(line_id, segment.text)
         if segment.speaker:
@@ -577,9 +600,81 @@ class Session:
         self._current_speaker_channel = channel
         self._events.on_attribution(index, channel, source, confidence)
 
+    def _remember_unknown(
+        self, line_id: int, channel: Channel, embedding: "np.ndarray"
+    ) -> None:
+        """Hold an unattributed turn's embedding so it can be named later.
+
+        Embeddings only, in memory only — the same thing the profile store
+        keeps, and never the audio. Bounded so a long meeting cannot grow
+        without limit.
+        """
+        self._unknown_turns[line_id] = (channel, np.array(embedding, copy=True))
+        while len(self._unknown_turns) > UNKNOWN_TURN_MEMORY:
+            self._unknown_turns.pop(next(iter(self._unknown_turns)))
+
+    def _rescore_unknown_turns(self, index: int) -> None:
+        """Name the earlier Unknown lines this person's new profile explains.
+
+        Deliberately stricter than live attribution: this rewrites text the
+        user has already read, so a near-miss stays Unknown rather than
+        guessing. Nothing here ever overwrites a line that already has a name.
+        """
+        if not self._unknown_turns or self._speaker_resolver is None:
+            return
+        if not 0 <= index < len(self.roster):
+            return
+        speaker = self.roster[index]
+        store = self._options.speaker_store
+        if not speaker.speaker_id or store is None:
+            return
+
+        rivals = [
+            other.speaker_id
+            for position, other in enumerate(self.roster)
+            if position != index and other.speaker_id and other.active
+        ]
+        for line_id, (channel, embedding) in list(self._unknown_turns.items()):
+            own = store.profile_vector(speaker.speaker_id, channel.value)
+            if own is None or own.embedding.shape != embedding.shape:
+                continue
+            score = float(np.dot(embedding, own.embedding))
+            if score < BACKFILL_THRESHOLD:
+                continue
+            rival_scores = [
+                float(np.dot(embedding, vector.embedding))
+                for vector in store.match_vectors(rivals, channel.value)
+                if vector.embedding.shape == embedding.shape
+            ]
+            if rival_scores and score - max(rival_scores) < BACKFILL_MARGIN:
+                continue
+            if self.log.relabel(line_id, speaker.name):
+                del self._unknown_turns[line_id]
+                self._events.on_line_relabelled(line_id, speaker.name, index, score)
+
+    def assign_line(self, line_id: int, index: int | None) -> str | None:
+        """Put one transcript line on a chosen person by hand. ``None`` puts it
+        back to Unknown. Returns an error message, or ``None`` on success."""
+        if index is None:
+            name = "Unknown"
+        else:
+            if not 0 <= index < len(self.roster):
+                return "speaker not found"
+            if not self.roster[index].active:
+                return "speaker already removed"
+            name = self.roster[index].name
+        if not self.log.relabel(line_id, name):
+            return "line not found"
+        # A hand-assigned line is settled; automatic backfill must not
+        # reconsider it later.
+        self._unknown_turns.pop(line_id, None)
+        return None
+
     def _handle_profile_learning(self, update: ProfileLearningUpdate) -> None:
         self.profile_learning = update.to_dict() if update.phase == "collecting" else None
         self._events.on_profile_learning(update)
+        if update.phase == "saved":
+            self._rescore_unknown_turns(update.speaker_index)
 
     def _handle_line_cleaned(self, line_id: int, text: str | None) -> None:
         """Fires on the cleanup worker thread — forward only."""
