@@ -285,6 +285,12 @@ body {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px; margin: 20px 0 8px;
 }
+/* Same look, its own class: a modifier-grid is built on demand by a shortcut
+   editor, and this one is part of the page. */
+.model-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px; margin: 20px 0 8px;
+}
 .modifier-option { cursor: pointer; }
 .modifier-option input { position: absolute; opacity: 0; }
 .modifier-option span {
@@ -614,7 +620,7 @@ body {
   .body { flex-direction: column; }
   .rail { width: 100%; border-right: none; border-bottom: 3px solid var(--ink); }
   .screen { min-height: 300px; }
-  .modifier-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modifier-grid, .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
 </head>
@@ -761,6 +767,12 @@ body {
       <div class="hint">Global to Windows. Two shortcuts can't share the same modifiers.</div>
       <div class="shortcut-list" id="shortcut-list"></div>
       <div class="settings-message pixel" id="settings-message" role="status"></div>
+    </div>
+    <div class="settings-card">
+      <h2 class="pixel">TRANSCRIPTION</h2>
+      <div class="hint">A bigger model copes better with accents and costs more time per chunk. Takes effect on the next meeting; the first use of a new model downloads it.</div>
+      <div class="model-grid" id="whisper-model-grid" role="radiogroup" aria-label="Transcription model"></div>
+      <div class="settings-message pixel" id="model-message" role="status"></div>
     </div>
     <div class="settings-card">
       <div class="card-head">
@@ -1377,8 +1389,56 @@ function renderSettings() {
     message.textContent = "END THE MEETING TO CHANGE THE SPEAKER SHORTCUT";
     message.className = "settings-message pixel";
   }
+  renderModelSettings();
   renderDictationSettings();
   renderLibrarySettings();
+}
+
+function renderModelSettings() {
+  const settings = state.settings || {};
+  const models = settings.whisper_models || [];
+  const chosen = settings.whisper_model;
+  const grid = $("whisper-model-grid");
+  grid.innerHTML = "";
+  models.forEach((model) => {
+    const option = document.createElement("label");
+    option.className = "modifier-option pixel";
+    option.innerHTML =
+      `<input type="radio" name="whisper-model" value="${escapeHtml(model.name)}"` +
+      `${model.name === chosen ? " checked" : ""}${state.recording ? " disabled" : ""}>` +
+      `<span>${escapeHtml(model.name.toUpperCase())}<br>${escapeHtml(model.label.toUpperCase())}</span>`;
+    option.querySelector("input").onchange = () => saveModel(model.name);
+    grid.appendChild(option);
+  });
+  const message = $("model-message");
+  if (state.recording) {
+    message.textContent = "END THE MEETING TO CHANGE THE MODEL";
+    message.className = "settings-message pixel";
+  } else if (state.model_status === "loading") {
+    message.textContent = "LOADING MODEL…";
+    message.className = "settings-message pixel";
+  } else if (state.model_status === "error") {
+    message.textContent = (state.model_error || "MODEL FAILED TO LOAD").toUpperCase();
+    message.className = "settings-message pixel error";
+  } else {
+    // Ready. Say so, or the transient LOADING message never clears.
+    message.textContent = `${String(chosen || "").toUpperCase()} READY`;
+    message.className = "settings-message pixel saved";
+  }
+}
+
+function saveModel(name) {
+  const message = $("model-message");
+  message.textContent = "LOADING MODEL…";
+  message.className = "settings-message pixel";
+  post("/api/settings", { whisper_model: name }).then((result) => {
+    if (result.error) {
+      message.textContent = result.error.toUpperCase();
+      message.className = "settings-message pixel error";
+      return;
+    }
+    applyState(result);
+  });
 }
 
 function renderDictationSettings() {

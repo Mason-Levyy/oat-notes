@@ -76,7 +76,10 @@ uv run oat-notes --ui
 
 Opens `http://127.0.0.1:8737`: name the meeting, build the roster from saved people or groups, START MEETING, and the transcript streams onto the screen live. New people are gray until they have five seconds of usable enrollment speech. A manual speaker press starts a one-time, source-specific profile sample: it waits for three seconds of detected speech within ten seconds, then saves one quality-checked embedding. Voice embedding and transcription run locally in parallel on separate model instances; ready profiles are checked in overlapping 1.5-second windows about every 0.25 seconds, with two consecutive matches required before the live speaker changes. Once a change is confirmed, the transcript cuts to the new speaker immediately rather than waiting for a pause or the 15-second chunk cap.
 
-The **Settings** tab holds the local speaker directory and reusable groups. Groups remember order but stay editable per meeting. Someone unexpected joins? Click `+ GUEST`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
+The **Settings** tab holds the transcription model, the local speaker directory
+and reusable groups. Transcription defaults to `small.en`; `distil-small.en` is
+faster and `medium.en` copes better with accents, and the choice applies to the
+next meeting. `--model` overrides it for one run. Groups remember order but stay editable per meeting. Someone unexpected joins? Click `+ GUEST`, then link the Guest to an existing profile or create a new saved person during backfill. END MEETING writes the named `.txt` and shows the path. `--port` and `--no-browser` are available.
 
 ## Dictation
 
@@ -127,7 +130,7 @@ uv run oat-notes --out-dir D:\notes  # transcript folder (default: ./transcripts
 uv run oat-notes --no-file           # console only, skip the transcript file
 uv run oat-notes --wav clip.m4a      # transcribe a file (any format PyAV decodes)
 uv run oat-notes --debug             # show per-chunk transcription latency
-uv run oat-notes --model small.en    # swap whisper models
+uv run oat-notes --model medium.en   # swap whisper models for this run
 uv run oat-notes --backend openvino  # offload to the Intel NPU (see below)
 uv run oat-notes --backend openvino --ov-device GPU   # or the Arc GPU
 uv run oat-notes --offline           # never touch the network; fails if the model isn't cached yet
