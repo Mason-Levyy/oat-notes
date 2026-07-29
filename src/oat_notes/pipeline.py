@@ -300,7 +300,18 @@ class Pipeline:
         if resume is not None:
             self._reset_tracking(*resume)
 
-    def _reset_tracking(self, channel: Channel, speaker_index: int) -> None:
+    def reset_speaker_tracking(self, speaker_index: int | None = None) -> None:
+        """Drop live tracking state on every channel.
+
+        Called when a voice profile is wiped mid-meeting: the rolling buffers
+        and the change gate still hold matches made against a centroid that no
+        longer exists. ``None`` genuinely clears the current speaker rather
+        than pinning a stale one.
+        """
+        for channel in self._channels:
+            self._reset_tracking(channel, speaker_index)
+
+    def _reset_tracking(self, channel: Channel, speaker_index: int | None) -> None:
         if self._tracking_queue is None:
             return
         with self._tracking_lock:

@@ -43,7 +43,7 @@ def test_cleanup_updates_lines_in_place_with_a_toggle():
 
 def test_chips_offer_mid_meeting_rename():
     assert '"/api/roster/rename"' in HTML
-    assert "Speaker name" in HTML  # the rename prompt
+    assert 'rename.title = `Name ${speaker.name}`;' in HTML
 
 
 def test_recovered_transcripts_are_surfaced_in_the_status_line():
@@ -392,3 +392,12 @@ def test_the_inline_name_editor_survives_a_repaint():
     assert "let speakerDraft" in HTML
     assert "let speakerCaret" in HTML
     assert "input.setSelectionRange(caret, caret);" in HTML
+
+
+def test_a_poisoned_voice_profile_can_be_reset_without_ending_the_meeting():
+    assert 'post("/api/roster/reset_profile", { index })' in HTML
+    assert '>RESET<' in HTML or 'resetVoice.textContent = "RESET";' in HTML
+    # Destructive, so it asks first — and says what happens next, because
+    # nothing retrains automatically.
+    assert "you retrain by pressing their hotkey." in HTML
+    assert 'speaker.profile_state !== "untrained"' in HTML

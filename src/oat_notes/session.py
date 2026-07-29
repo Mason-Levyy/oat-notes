@@ -402,6 +402,36 @@ class Session:
             return existing.speaker_id
         return store.create_speaker(name).speaker_id
 
+    def reset_speaker_profile(self, index: int) -> str | None:
+        """Wipe a person's voice profile without ending the meeting.
+
+        A bad first clip otherwise poisons them for the whole call: every
+        later sample is measured against that centroid and rejected as
+        inconsistent. Deliberately does not start a new capture — pressing
+        their hotkey is how you retrain, same as always. Returns an error
+        message, or ``None`` on success.
+        """
+        if not 0 <= index < len(self.roster):
+            return "speaker not found"
+        if not self.roster[index].active:
+            return "speaker already removed"
+        if self.profile_learning and self.profile_learning.get("speaker_index") == index:
+            return "a voice sample is being captured for this speaker"
+        if self._speaker_resolver is None:
+            return "speaker recognition is unavailable"
+        try:
+            self._speaker_resolver.reset_profile(index)
+        except (KeyError, ValueError) as error:
+            return str(error).strip("'")
+        self._pipeline.reset_speaker_tracking()
+        if self.current_speaker == index:
+            self.current_speaker = None
+            self._current_speaker_channel = None
+        for channel, active_index in list(self.active.items()):
+            if active_index == index:
+                self.active[channel] = None
+        return None
+
     def cancel_profile_learning(self) -> None:
         self._pipeline.cancel_profile_learning()
 

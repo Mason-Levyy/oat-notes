@@ -330,6 +330,21 @@ class SpeakerResolver:
         )
         return ManualSampleResult(True)
 
+    def reset_profile(self, index: int) -> None:
+        """Throw away everything learned about this person's voice.
+
+        One bad first clip drags the centroid far enough that every later
+        sample fails the consistency check in ``add_manual_sample`` and is
+        rejected — so the profile can only get worse. Starting over is the
+        only way back.
+        """
+        if not 0 <= index < len(self._roster):
+            raise KeyError("speaker not found")
+        speaker = self._roster[index]
+        self._temporary.pop(index, None)
+        if speaker.speaker_id:
+            self._store.reset_profile(speaker.speaker_id)
+
     def profile_status(self, index: int) -> tuple[str, float]:
         speaker = self._roster[index]
         if speaker.speaker_id:

@@ -790,6 +790,22 @@ class AppState:
         self.hub.publish({"type": "status", "recording": True})
         return self.status()
 
+    def reset_roster_profile(self, body: dict) -> dict:
+        """The in-meeting counterpart to /api/library/speakers/reset, which
+        _library_mutation refuses while a session is live."""
+        with self.lock:
+            session = self.session
+            if session is None:
+                return {"error": "not recording"}
+            index = body.get("index")
+            if not isinstance(index, int):
+                return {"error": "index must be an integer"}
+            error = session.reset_speaker_profile(index)
+            if error:
+                return {"error": error}
+        self.hub.publish({"type": "status", "recording": True})
+        return self.status()
+
     def cancel_profile_learning(self) -> dict:
         with self.lock:
             session = self.session
@@ -938,6 +954,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.state.remove_roster_speaker(body))
         elif self.path == "/api/roster/rename":
             self._send_json(self.state.rename_roster_speaker(body))
+        elif self.path == "/api/roster/reset_profile":
+            self._send_json(self.state.reset_roster_profile(body))
         elif self.path == "/api/profile_learning/cancel":
             self._send_json(self.state.cancel_profile_learning())
         elif self.path == "/api/notes/add":
