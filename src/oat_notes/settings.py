@@ -23,8 +23,6 @@ REPLAY_KEY = "z"
 MIN_TAP_MS = 50
 MAX_TAP_MS = 2000
 
-# Ordered fastest to most accurate. Accuracy here mostly means "copes with an
-# accent": the distil build is the quickest and the weakest at it.
 WHISPER_MODELS = ("distil-small.en", "small.en", "medium.en")
 WHISPER_MODEL_LABELS = {
     "distil-small.en": "fastest",

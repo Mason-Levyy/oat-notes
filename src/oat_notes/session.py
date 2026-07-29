@@ -29,12 +29,7 @@ from .speaker_store import SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
 from .types import Channel, TranscriptSegment
 
-# How many unattributed turns stay eligible for naming. Embeddings are small,
-# but a long meeting shouldn't grow without limit.
 UNKNOWN_TURN_MEMORY = 400
-# Stricter than live attribution (SOURCE_THRESHOLD 0.60, MATCH_MARGIN 0.05) on
-# purpose: this rewrites a line the user has already read, so a near-miss is
-# left as Unknown rather than guessed at.
 BACKFILL_THRESHOLD = 0.70
 BACKFILL_MARGIN = 0.10
 
@@ -97,12 +92,8 @@ class Session:
         self._saved = False
         self.clock = SessionClock()
         self.roster = self._assign_hotkey_slots(options.speakers)
-        # Guests still waiting for a name at save time. Naming one mid-meeting
-        # removes it from here, so the numbering needs its own counter or the
-        # second guest would be called "Guest 1" all over again.
         self.guest_indices: list[int] = []
         self._guests_created = 0
-        # line id -> (channel, embedding) for turns nobody could name yet.
         self._unknown_turns: dict[int, tuple[Channel, np.ndarray]] = {}
         self.hotkey_bank = 0
 
@@ -391,7 +382,6 @@ class Session:
                 try:
                     self._speaker_resolver.persist_guest(index, linked_id)
                 except (KeyError, ValueError):
-                    # An unusable sample must not cost them the name.
                     pass
             self.guest_indices.remove(index)
         elif speaker.speaker_id and self._options.speaker_store is not None:
@@ -665,8 +655,6 @@ class Session:
             name = self.roster[index].name
         if not self.log.relabel(line_id, name):
             return "line not found"
-        # A hand-assigned line is settled; automatic backfill must not
-        # reconsider it later.
         self._unknown_turns.pop(line_id, None)
         return None
 

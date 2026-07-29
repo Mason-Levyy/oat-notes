@@ -831,7 +831,6 @@ class AppState:
             index = body.get("index")
             if not isinstance(line_id, int):
                 return {"error": "id must be an integer"}
-            # bool is an int subclass, so it has to be excluded explicitly.
             if index is not None and (
                 isinstance(index, bool) or not isinstance(index, int)
             ):
@@ -1210,8 +1209,6 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
     settings_store = SettingsStore()
     speaker_store = SpeakerStore()
     settings = settings_store.load()
-    # An explicit --model is the operator's choice for this run and outranks
-    # the saved preference; without one, Settings decides.
     if getattr(args, "model", None) is None:
         config = replace(config, model_name=settings.whisper_model)
     hotkey_listener = HotkeyListener()

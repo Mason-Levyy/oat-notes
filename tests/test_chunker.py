@@ -12,9 +12,6 @@ from oat_notes.types import Channel
 CONFIG = Config()
 WINDOW = CONFIG.vad_window_samples
 WINDOW_SECONDS = WINDOW / CONFIG.sample_rate  # 0.032 s
-# First count where silence_run (n * 0.032) reaches silence_split_seconds.
-# Derived rather than written down, so retuning the split doesn't silently
-# leave these tests asserting against the old boundary.
 SILENCE_WINDOWS = math.ceil(CONFIG.silence_split_seconds / WINDOW_SECONDS)
 
 
