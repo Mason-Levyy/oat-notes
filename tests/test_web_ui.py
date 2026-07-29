@@ -374,3 +374,21 @@ def test_the_transcription_model_is_pickable_from_settings():
     assert 'post("/api/settings", { whisper_model: name })' in HTML
     # Sits above DICTATION: which model runs is the more consequential choice.
     assert HTML.index('id="whisper-model-grid"') < HTML.index('id="dictation-form"')
+
+
+def test_naming_a_guest_in_the_roster_also_identifies_them():
+    assert "function speakerEditor(" in HTML
+    assert "let editingSpeaker = null;" in HTML
+    # The roster's prompt() is gone; the library card keeps its own.
+    assert 'post("/api/roster/rename", { index, name: name.trim() })' not in HTML
+    # A typed name that matches a saved person links to them.
+    assert "const match = matchingSpeaker(name);" in HTML
+    assert "speaker_id: match ? match.id : null," in HTML
+
+
+def test_the_inline_name_editor_survives_a_repaint():
+    # renderPlayers runs on every speaker event, so the draft and caret cannot
+    # live in the DOM node it replaces.
+    assert "let speakerDraft" in HTML
+    assert "let speakerCaret" in HTML
+    assert "input.setSelectionRange(caret, caret);" in HTML

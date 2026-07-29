@@ -133,9 +133,11 @@ def test_cancel_profile_learning_delegates_to_pipeline():
     assert calls == [True]
 
 
-def _rename_session(roster):
+def _rename_session(roster, guest_indices=()):
     session = bare_session()
     session.roster = list(roster)
+    session.guest_indices = list(guest_indices)
+    session._speaker_resolver = None
     session.renamed = []
     session.log_renames = []
     session._attributor = SimpleNamespace(
@@ -144,6 +146,23 @@ def _rename_session(roster):
     session.log = SimpleNamespace(rename=lambda mapping: session.log_renames.append(mapping))
     session._options = SimpleNamespace(speaker_store=None)
     return session
+
+
+class FakeStore:
+    """Stands in for SpeakerStore — the speaker directory, no SQLite."""
+
+    def __init__(self, speakers=()):
+        self.speakers = list(speakers)
+        self.created = []
+
+    def list_speakers(self):
+        return tuple(self.speakers)
+
+    def create_speaker(self, name):
+        self.created.append(name)
+        profile = SimpleNamespace(speaker_id=f"sp-{name.lower()}", name=name)
+        self.speakers.append(profile)
+        return profile
 
 
 def test_rename_speaker_renames_roster_attributor_and_past_lines():
@@ -341,3 +360,73 @@ def test_unknown_on_other_channel_does_not_clear_current_speaker():
     assert session.active[Channel.LOOPBACK] is None
     assert session.current_speaker == 1
     assert attributed[-1][:3] == (None, Channel.LOOPBACK, "unknown")
+
+
+def test_naming_a_guest_identifies_them_and_clears_the_backfill_queue():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)], guest_indices=[0])
+    store = FakeStore()
+    session._options = SimpleNamespace(speaker_store=store)
+    persisted = []
+    session._speaker_resolver = SimpleNamespace(
+        persist_guest=lambda index, sid: persisted.append((index, sid))
+    )
+
+    assert session.rename_speaker(0, "Sarah") is None
+    assert session.roster[0].name == "Sarah"
+    # Naming is identifying: a saved person now exists, the samples gathered
+    # while they were anonymous belong to them, and END MEETING won't ask.
+    assert store.created == ["Sarah"]
+    assert session.roster[0].speaker_id == "sp-sarah"
+    assert persisted == [(0, "sp-sarah")]
+    assert session.guest_indices == []
+
+
+def test_naming_a_guest_an_existing_person_links_rather_than_duplicating():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)], guest_indices=[0])
+    store = FakeStore([SimpleNamespace(speaker_id="sp-priya", name="Priya")])
+    session._options = SimpleNamespace(speaker_store=store)
+    session._speaker_resolver = SimpleNamespace(persist_guest=lambda index, sid: None)
+
+    assert session.rename_speaker(0, "priya") is None
+    assert store.created == []
+    assert session.roster[0].speaker_id == "sp-priya"
+    assert session.guest_indices == []
+
+
+def test_an_explicit_identity_wins_over_the_typed_name():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)], guest_indices=[0])
+    store = FakeStore()
+    session._options = SimpleNamespace(speaker_store=store)
+    session._speaker_resolver = SimpleNamespace(persist_guest=lambda index, sid: None)
+
+    assert session.rename_speaker(0, "Sarah", speaker_id="sp-chosen") is None
+    assert store.created == []
+    assert session.roster[0].speaker_id == "sp-chosen"
+
+
+def test_an_unusable_voice_sample_does_not_cost_the_guest_their_name():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)], guest_indices=[0])
+    session._options = SimpleNamespace(speaker_store=FakeStore())
+
+    def explode(index, sid):
+        raise ValueError("voice samples require at least one second of speech")
+
+    session._speaker_resolver = SimpleNamespace(persist_guest=explode)
+
+    assert session.rename_speaker(0, "Sarah") is None
+    assert session.roster[0].name == "Sarah"
+    assert session.guest_indices == []
+
+
+def test_guest_numbering_survives_naming_an_earlier_guest():
+    session = bare_session()
+    session.roster = []
+    session.guest_indices = []
+    session._guests_created = 0
+    session._attributor = SimpleNamespace(add=lambda s: len(session.roster))
+
+    session._create_guest(hotkey_slot=0)
+    session.guest_indices.remove(0)  # named mid-meeting
+    session._create_guest(hotkey_slot=1)
+
+    assert [speaker.name for speaker in session.roster] == ["Guest 1", "Guest 2"]

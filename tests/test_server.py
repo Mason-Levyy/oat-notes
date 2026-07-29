@@ -8,6 +8,7 @@ from oat_notes.enrollment import EnrollmentProgress
 from oat_notes.server import AppState, EventHub, is_trusted_request
 from oat_notes.settings import AppSettings
 from oat_notes.speaker_store import SpeakerStore
+from oat_notes.types import Channel
 
 
 class FakeSession:
@@ -23,6 +24,19 @@ class FakeSession:
             is_empty=False,
             speakers_with_lines=lambda: {"Guest 1"} if guest_has_spoken else set(),
         )
+        # Enough shape for AppState.status(), which every roster mutation
+        # returns.
+        self.active = {Channel.MIC: None, Channel.LOOPBACK: None}
+        self.current_speaker = None
+        self.profile_learning = None
+        self.channels = (Channel.MIC,)
+        self.hotkey_bank = 0
+
+    def elapsed(self):
+        return 0.0
+
+    def profile_status(self, index):
+        return "untrained", 0.0
 
     def stop(self):
         self.stopped = True
@@ -539,3 +553,48 @@ def test_an_unknown_model_is_rejected():
     response = state.update_settings({"whisper_model": "large-v3"})
     assert "error" in response
     assert state.settings.whisper_model == "small.en"
+
+
+def test_renaming_a_roster_member_passes_the_chosen_identity_through():
+    state = AppState(Config(), transcriber=None)
+    calls = []
+
+    session = FakeSession()
+    session.rename_speaker = lambda index, name, speaker_id=None: (
+        calls.append((index, name, speaker_id)) or None
+    )
+    state.session = session
+    state.speaker_store = SimpleNamespace(
+        profile=lambda sid: SimpleNamespace(name="Sarah"),
+        library=lambda: {"speakers": [], "groups": [], "ready_seconds": 5.0},
+    )
+
+    state.rename_roster_speaker({"index": 0, "name": "Sarah", "speaker_id": "sp-1"})
+
+    assert calls == [(0, "Sarah", "sp-1")]
+
+
+def test_renaming_against_an_unknown_identity_is_refused():
+    state = AppState(Config(), transcriber=None)
+    state.session = FakeSession()
+
+    def missing(_sid):
+        raise KeyError("speaker not found")
+
+    state.speaker_store = SimpleNamespace(profile=missing)
+
+    response = state.rename_roster_speaker(
+        {"index": 0, "name": "Sarah", "speaker_id": "sp-gone"}
+    )
+    assert response == {"error": "speaker not found"}
+
+
+def test_a_named_guest_is_no_longer_pending_backfill():
+    state = AppState(Config(), transcriber=None)
+    session = FakeSession()
+    # Session.rename_speaker drops a named guest from guest_indices, which is
+    # the only thing _guests_with_lines reads.
+    session.guest_indices = []
+    state.awaiting_backfill = session
+
+    assert state.status()["pending_backfill"] == []

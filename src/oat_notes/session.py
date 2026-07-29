@@ -83,7 +83,11 @@ class Session:
         self._saved = False
         self.clock = SessionClock()
         self.roster = self._assign_hotkey_slots(options.speakers)
+        # Guests still waiting for a name at save time. Naming one mid-meeting
+        # removes it from here, so the numbering needs its own counter or the
+        # second guest would be called "Guest 1" all over again.
         self.guest_indices: list[int] = []
+        self._guests_created = 0
         self.hotkey_bank = 0
 
         self._pa = pyaudio.PyAudio()
@@ -279,8 +283,9 @@ class Session:
         return index
 
     def _create_guest(self, hotkey_slot: int | None = None) -> int:
+        self._guests_created += 1
         guest = Speaker(
-            f"Guest {len(self.guest_indices) + 1}",
+            f"Guest {self._guests_created}",
             hotkey_slot=hotkey_slot,
         )
         index = self._attributor.add(guest)
@@ -328,11 +333,21 @@ class Session:
                 self.active[channel] = None
         return None
 
-    def rename_speaker(self, index: int, name: str) -> str | None:
-        """Rename a roster member mid-meeting (e.g. name a Guest once you
-        know who they are). Renames past lines and, for an enrolled speaker,
-        keeps the saved library profile name in sync. Returns an error
-        message or ``None`` on success."""
+    def rename_speaker(
+        self, index: int, name: str, speaker_id: str | None = None
+    ) -> str | None:
+        """Rename a roster member mid-meeting, and for a Guest, identify them.
+
+        Naming a Guest *is* identifying them — being asked who they were again
+        at save time is the bug. So a rename links them to a saved person
+        (creating one, or reusing an existing person of that name), flushes the
+        voice samples collected while they were anonymous into that profile,
+        and drops them from the backfill queue.
+
+        Renames past lines and, for someone already enrolled, keeps the saved
+        library profile name in sync. Returns an error message, or ``None`` on
+        success.
+        """
         name = name.strip()
         if not 0 <= index < len(self.roster):
             return "speaker not found"
@@ -340,17 +355,52 @@ class Session:
             return "a name is required"
         speaker = self.roster[index]
         old = speaker.name
-        if old == name:
+        if old == name and speaker_id in (None, speaker.speaker_id):
             return None
-        self.roster[index] = replace(speaker, name=name)
+
+        is_guest = index in self.guest_indices
+        linked_id = speaker_id or speaker.speaker_id
+        if linked_id is None and is_guest:
+            try:
+                linked_id = self._identity_for(name)
+            except (KeyError, ValueError) as error:
+                return str(error).strip("'")
+
+        self.roster[index] = replace(speaker, name=name, speaker_id=linked_id)
         self._attributor.rename(index, name)
         self.log.rename({old: name})
-        if speaker.speaker_id and self._options.speaker_store is not None:
+
+        if is_guest and linked_id is not None:
+            if self._speaker_resolver is not None:
+                try:
+                    self._speaker_resolver.persist_guest(index, linked_id)
+                except (KeyError, ValueError):
+                    # An unusable sample must not cost them the name.
+                    pass
+            self.guest_indices.remove(index)
+        elif speaker.speaker_id and self._options.speaker_store is not None:
             try:
                 self._options.speaker_store.rename_speaker(speaker.speaker_id, name)
             except (KeyError, ValueError):
                 pass
         return None
+
+    def _identity_for(self, name: str) -> str | None:
+        """The saved person with this name, created if there isn't one."""
+        store = self._options.speaker_store
+        if store is None:
+            return None
+        existing = next(
+            (
+                profile
+                for profile in store.list_speakers()
+                if profile.name.casefold() == name.casefold()
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing.speaker_id
+        return store.create_speaker(name).speaker_id
 
     def cancel_profile_learning(self) -> None:
         self._pipeline.cancel_profile_learning()
