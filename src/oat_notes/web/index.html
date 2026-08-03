@@ -622,6 +622,9 @@ body {
   box-shadow: inset 0 0 0 4px #234323;
   padding: 16px;
   overflow-y: auto;
+  /* Lines arrive at the top and addLine compensates the scroll itself, so the
+     browser doing it too shifted whatever was being read up by a line. */
+  overflow-anchor: none;
   /* Fills whatever height the window has instead of a fixed slice of it. */
   min-height: 240px;
   color: var(--screen-mid);
@@ -639,9 +642,12 @@ body {
 .line[tabindex]:hover, .line[tabindex]:focus-visible {
   outline: 2px solid var(--screen-dim); outline-offset: 2px; cursor: pointer;
 }
+/* Fixed, and parked on <body> rather than inside the line: the transcript
+   scrollbox would otherwise clip it, and every repaint of the line would
+   take it down with it. */
 .line-picker {
-  position: absolute; z-index: 5; left: 0; top: 100%;
-  display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+  position: fixed; z-index: 60; top: 0; left: 0;
+  display: flex; flex-wrap: wrap; gap: 4px;
   background: var(--paper); border: 3px solid var(--ink);
   box-shadow: 3px 3px 0 var(--ink); padding: 6px;
 }
@@ -920,6 +926,8 @@ let dragIndex = null;
 let groupOptionsOpen = false;
 let personResults = [];
 let personActive = -1;
+let linePicker = null;
+const LINE_HINT = "Click to put this line on someone else";
 const openGroups = new Set();
 const LIBRARY_FILTER_THRESHOLD = 6;
 
@@ -1681,65 +1689,212 @@ function lineHtml(line) {
   return `<span class="t">[${line.time}]</span> ${who}${escapeHtml(line.text)}`;
 }
 
+function lineElement(lineId) {
+  return $("screen").querySelector(`.line[data-line-id="${lineId}"]`);
+}
+
 function addLine(line, preserveViewport = true) {
   $("empty").style.display = "none";
   const div = document.createElement("div");
   div.className = "line";
   if (line.id !== undefined && line.id !== null) {
     div.dataset.lineId = line.id;
-    div.tabIndex = 0;
-    div.title = "Click to put this line on someone else";
-    div.onclick = () => openLinePicker(div, line.id);
-    div.onkeydown = (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      openLinePicker(div, line.id);
-    };
+    // Reassigning writes through the live session, so a stopped meeting gets
+    // the text without the affordance rather than a click that does nothing.
+    if (state.recording) {
+      div.tabIndex = 0;
+      div.title = LINE_HINT;
+      div.onclick = () => toggleLinePicker(line.id);
+      div.onkeydown = (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        toggleLinePicker(line.id);
+      };
+    }
   }
   div.innerHTML = lineHtml(line);
   const screen = $("screen");
   const cursor = $("live-cursor");
   const wasAtTop = screen.scrollTop < 12;
   const previousHeight = screen.scrollHeight;
+  const held = pickerAnchorTop();
   const anchor = cursor ? cursor.nextSibling : screen.firstChild;
   screen.insertBefore(div, anchor);
   if (preserveViewport) {
-    if (wasAtTop) screen.scrollTop = 0;
+    // Lines land at the top, so snapping back there while a picker is open
+    // would slide the line — and its picker — out from under the pointer.
+    // Hold the transcript still instead and catch up once the picker closes.
+    if (wasAtTop && !linePicker) screen.scrollTop = 0;
     else screen.scrollTop += screen.scrollHeight - previousHeight;
+    holdPickerAnchor(held);
+    markPickerScroll();
+    syncLinePicker();
   }
 }
 
-function openLinePicker(anchor, lineId) {
+function toggleLinePicker(lineId) {
+  if (linePicker && linePicker.lineId === lineId) closeLinePicker();
+  else openLinePicker(lineId);
+}
+
+function openLinePicker(lineId) {
   closeLinePicker();
-  if (!state.recording) return;
-  const picker = document.createElement("div");
-  picker.className = "line-picker";
-  picker.id = "line-picker";
+  if (!state.recording || !lineElement(lineId)) return;
+  const screen = $("screen");
+  const element = document.createElement("div");
+  element.className = "line-picker";
+  element.setAttribute("role", "menu");
+  document.body.appendChild(element);
+  linePicker = {
+    element,
+    lineId,
+    signature: "",
+    // Only true while the transcript is parked on the newest line and the
+    // user hasn't scrolled themselves.
+    returnToTop: screen.scrollTop < 12,
+    scrollTop: screen.scrollTop,
+  };
+  renderLinePickerOptions();
+  positionLinePicker();
+  // Capture, so a click on another line closes this picker before that line's
+  // own handler opens its own. A listener added mid-dispatch never sees the
+  // click that opened the picker, which is what the old setTimeout was for.
+  document.addEventListener("click", onLinePickerClick, true);
+  document.addEventListener("keydown", onLinePickerKeydown, true);
+  window.addEventListener("resize", positionLinePicker);
+  screen.addEventListener("scroll", onLinePickerScroll);
+  const first = element.querySelector("button");
+  if (first) first.focus({ preventScroll: true });
+}
+
+function renderLinePickerOptions() {
+  if (!linePicker) return;
+  const lineId = linePicker.lineId;
   const choices = (state.speakers || [])
     .map((speaker, index) => ({ speaker, index }))
     .filter(({ speaker }) => !speaker.removed)
     .concat([{ speaker: { name: "Unknown" }, index: null }]);
+  const focused = Array.prototype.indexOf.call(
+    linePicker.element.children,
+    document.activeElement
+  );
+  linePicker.element.innerHTML = "";
+  linePicker.signature = linePickerSignature();
   choices.forEach(({ speaker, index }) => {
     const option = document.createElement("button");
     option.type = "button";
     option.className = "mini";
     option.textContent = speaker.name.toUpperCase();
-    option.onclick = (event) => {
-      event.stopPropagation();
+    option.onclick = () => {
       closeLinePicker();
       post("/api/lines/assign", { id: lineId, index }).then((result) => {
         if (result.error) $("statusline").textContent = result.error.toUpperCase();
       });
     };
-    picker.appendChild(option);
+    linePicker.element.appendChild(option);
   });
-  anchor.appendChild(picker);
-  setTimeout(() => document.addEventListener("click", closeLinePicker, { once: true }), 0);
+  const restore = linePicker.element.children[focused];
+  if (restore) restore.focus({ preventScroll: true });
+}
+
+function linePickerSignature() {
+  return (state.speakers || [])
+    .map((speaker, index) => (speaker.removed ? "" : `${index}:${speaker.name}`))
+    .join("|");
+}
+
+function positionLinePicker() {
+  if (!linePicker) return;
+  const anchor = lineElement(linePicker.lineId);
+  if (!anchor) {
+    closeLinePicker();
+    return;
+  }
+  const element = linePicker.element;
+  const view = $("screen").getBoundingClientRect();
+  const line = anchor.getBoundingClientRect();
+  element.style.maxWidth = `${Math.max(160, view.width - 12)}px`;
+  const size = element.getBoundingClientRect();
+  // Below the line by default, above it when the transcript's bottom edge is
+  // in the way — a fixed box can overhang the window, and used to.
+  let top = line.bottom + 4;
+  if (top + size.height > view.bottom) top = line.top - size.height - 4;
+  top = Math.max(4, Math.min(top, window.innerHeight - size.height - 4));
+  const left = Math.max(view.left + 6, Math.min(line.left, view.right - size.width - 6));
+  element.style.top = `${Math.round(top)}px`;
+  element.style.left = `${Math.round(left)}px`;
+  const offscreen = line.bottom < view.top || line.top > view.bottom;
+  element.style.visibility = offscreen ? "hidden" : "visible";
+}
+
+/* Re-anchors an open picker after a repaint: the line it belongs to may have
+   been rebuilt, moved, relabelled or dropped since it opened. */
+function syncLinePicker() {
+  if (!linePicker) return;
+  if (!state.recording || !lineElement(linePicker.lineId)) {
+    closeLinePicker();
+    return;
+  }
+  if (linePickerSignature() !== linePicker.signature) renderLinePickerOptions();
+  positionLinePicker();
+}
+
+function pickerAnchorTop() {
+  const anchor = linePicker && lineElement(linePicker.lineId);
+  return anchor ? anchor.getBoundingClientRect().top : null;
+}
+
+/* Nails the picked line back to the pixel it was on before the transcript
+   changed under it. The scroll-height arithmetic alone leaves it a line out,
+   because the browser's own scroll anchoring has already had a go. */
+function holdPickerAnchor(top) {
+  if (top === null) return;
+  const now = pickerAnchorTop();
+  if (now !== null) $("screen").scrollTop += now - top;
+}
+
+function markPickerScroll() {
+  if (linePicker) linePicker.scrollTop = $("screen").scrollTop;
+}
+
+function onLinePickerScroll() {
+  if (!linePicker) return;
+  // Anything this handler didn't already account for came from the user, and
+  // means they no longer want to be pulled back to the newest line.
+  if (Math.abs($("screen").scrollTop - linePicker.scrollTop) > 1) linePicker.returnToTop = false;
+  markPickerScroll();
+  positionLinePicker();
+}
+
+function onLinePickerClick(event) {
+  const target = event.target;
+  if (!linePicker || !target || !target.closest) return;
+  if (target.closest(".line-picker")) return;
+  const line = target.closest(".line[data-line-id]");
+  // The line's own handler toggles it shut; closing here too would reopen it.
+  if (line && Number(line.dataset.lineId) === linePicker.lineId) return;
+  closeLinePicker();
+}
+
+function onLinePickerKeydown(event) {
+  if (!linePicker || event.key !== "Escape") return;
+  event.preventDefault();
+  const anchor = lineElement(linePicker.lineId);
+  closeLinePicker();
+  if (anchor) anchor.focus({ preventScroll: true });
 }
 
 function closeLinePicker() {
-  const open = $("line-picker");
-  if (open) open.remove();
+  if (!linePicker) return;
+  const screen = $("screen");
+  const returnToTop = linePicker.returnToTop;
+  document.removeEventListener("click", onLinePickerClick, true);
+  document.removeEventListener("keydown", onLinePickerKeydown, true);
+  window.removeEventListener("resize", positionLinePicker);
+  screen.removeEventListener("scroll", onLinePickerScroll);
+  linePicker.element.remove();
+  linePicker = null;
+  if (returnToTop) screen.scrollTop = 0;
 }
 
 function escapeHtml(text) {
@@ -1862,6 +2017,8 @@ function renderPlayers() {
     players.appendChild(row);
   });
   addGhost(players);
+  // A guest joining or a chip being renamed changes what the picker offers.
+  syncLinePicker();
 }
 
 function speakerEditor(index, speaker) {
@@ -2010,12 +2167,18 @@ function applyState(s) {
   const previousScrollTop = screen.scrollTop;
   const previousScrollHeight = screen.scrollHeight;
   const wasAtTop = previousScrollTop < 12;
+  const held = pickerAnchorTop();
   screen.querySelectorAll(".line").forEach((el) => el.remove());
   $("empty").style.display = "";
   setRecording(!!s.recording);
   (s.lines || []).forEach((line) => addLine(line, false));
-  if (wasAtTop) screen.scrollTop = 0;
+  // Same deal as a line arriving: an open picker outranks following the top.
+  if (wasAtTop && !linePicker) screen.scrollTop = 0;
   else screen.scrollTop = previousScrollTop + Math.max(0, screen.scrollHeight - previousScrollHeight);
+  holdPickerAnchor(held);
+  markPickerScroll();
+  // The rebuild above replaced the node the open picker was anchored to.
+  syncLinePicker();
 
   if (pending) {
     renderBackfill(s.pending_backfill);
@@ -2432,18 +2595,23 @@ events.onmessage = (message) => {
     }
   }
   else if (event.type === "line_update") {
-    const div = $("screen").querySelector(`.line[data-line-id="${event.id}"]`);
+    const div = lineElement(event.id);
     if (div) {
       div.innerHTML = lineHtml(event);
-      div.title = event.original || "";
+      div.title = event.original || (state.recording ? LINE_HINT : "");
       div.classList.remove("cleaned");
       void div.offsetWidth; // restart the flash animation
       div.classList.add("cleaned");
+      // Cleaned-up text can be a line shorter or taller than what it replaced.
+      syncLinePicker();
     }
   }
   else if (event.type === "line_drop") {
-    const div = $("screen").querySelector(`.line[data-line-id="${event.id}"]`);
-    if (div) div.remove();
+    const div = lineElement(event.id);
+    if (div) {
+      div.remove();
+      syncLinePicker();
+    }
   }
   else if (event.type === "speaker") {
     if (event.channel) state.actives[event.channel] = event.index;

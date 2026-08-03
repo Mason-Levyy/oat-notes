@@ -433,3 +433,41 @@ def test_an_unknown_line_can_be_put_on_someone_by_clicking_it():
 def test_an_automatically_named_line_needs_no_new_browser_code():
     assert 'event.type === "line_update"' in HTML
     assert "div.innerHTML = lineHtml(event);" in HTML
+
+
+def test_one_click_opens_the_line_picker_and_the_next_one_closes_it():
+    # The old close-on-next-click listener was armed on a timeout and only
+    # disarmed by firing, so a picker closed any other way left it behind to
+    # eat the click that opened the next one.
+    assert "once: true" not in HTML
+    assert 'document.addEventListener("click", onLinePickerClick, true);' in HTML
+    assert 'document.removeEventListener("click", onLinePickerClick, true);' in HTML
+    assert "function toggleLinePicker(lineId)" in HTML
+    assert "if (linePicker && linePicker.lineId === lineId) closeLinePicker();" in HTML
+
+
+def test_the_line_picker_outlives_the_line_it_was_opened_on():
+    # Parented to <body> and placed from the line's rect: a repaint of the
+    # line, a rebuild of the transcript, or the scrollbox's own clipping used
+    # to take the picker with it.
+    assert "document.body.appendChild(element);" in HTML
+    assert "anchor.appendChild(picker);" not in HTML
+    assert "function positionLinePicker()" in HTML
+    assert "function syncLinePicker()" in HTML
+    assert "position: fixed; z-index: 60" in HTML
+
+
+def test_a_line_arriving_holds_an_open_picker_still():
+    # Lines land at the top of the transcript, which would otherwise slide the
+    # picked line out from under the pointer mid-selection.
+    assert "if (wasAtTop && !linePicker) screen.scrollTop = 0;" in HTML
+    assert "function holdPickerAnchor(top)" in HTML
+    assert "holdPickerAnchor(held);" in HTML
+    # The browser compensating too is what left the shift a line out.
+    assert "overflow-anchor: none;" in HTML
+
+
+def test_lines_only_advertise_a_speaker_picker_while_the_meeting_runs():
+    assert "if (state.recording) {" in HTML
+    assert "div.title = LINE_HINT;" in HTML
+    assert "if (!state.recording || !lineElement(lineId)) return;" in HTML
