@@ -18,6 +18,7 @@ DICTATION_MODULES = [
     PACKAGE / "dictation" / "controller.py",
     PACKAGE / "dictation" / "format.py",
     PACKAGE / "dictation" / "recorder.py",
+    PACKAGE / "dictation" / "stitch.py",
     PACKAGE / "inject.py",
     PACKAGE / "overlay.py",
     PACKAGE / "hotkeys.py",

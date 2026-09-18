@@ -33,6 +33,10 @@ class Config:
     cleanup_context_after: int = 2
     cleanup_max_wait_seconds: float = 15.0
     dictation_max_chunk_seconds: float = 8.0
+    dictation_silence_split_seconds: float = 0.6
+    dictation_clause_gap_seconds: float = 0.7
+    dictation_sentence_gap_seconds: float = 1.2
+    dictation_prompt_chars: int = 200
     offline: bool = False
     debug: bool = False
 

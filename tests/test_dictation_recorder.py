@@ -3,13 +3,15 @@ import pytest
 
 from oat_notes.config import Config
 from oat_notes.dictation.recorder import UtteranceRecorder
-from oat_notes.transcriber import Transcriber
+from oat_notes.transcriber import NO_HINTS, Transcriber
 from oat_notes.types import Channel, TranscriptSegment
 
 WINDOW = 512
 CONFIG = Config(
     vad_window_samples=WINDOW,
-    silence_split_seconds=0.05,
+    dictation_silence_split_seconds=0.05,
+    dictation_clause_gap_seconds=0.25,
+    dictation_sentence_gap_seconds=0.3,
     min_speech_seconds=0.02,
     pre_roll_windows=1,
     dictation_max_chunk_seconds=0.5,
@@ -34,9 +36,11 @@ class EnergyFakeVad:
 class CountingTranscriber(Transcriber):
     def __init__(self, texts=None):
         self.calls = 0
+        self.hints = []
         self._texts = list(texts) if texts else None
 
-    def transcribe(self, chunk):
+    def transcribe(self, chunk, hints=NO_HINTS):
+        self.hints.append(hints)
         if self._texts:
             text = self._texts[self.calls % len(self._texts)]
         else:
@@ -48,7 +52,7 @@ class CountingTranscriber(Transcriber):
 
 
 class ExplodingTranscriber(Transcriber):
-    def transcribe(self, chunk):
+    def transcribe(self, chunk, hints=NO_HINTS):
         raise RuntimeError("model fell over")
 
 
@@ -60,12 +64,13 @@ def silence(windows):
     return np.zeros(windows * WINDOW, dtype=np.float32)
 
 
-def make_recorder(transcriber=None, level_sink=None):
+def make_recorder(transcriber=None, level_sink=None, hotwords=None):
     return UtteranceRecorder(
         CONFIG,
         transcriber or CountingTranscriber(),
         level_sink=level_sink,
         vad=EnergyFakeVad(),
+        hotwords=hotwords,
     )
 
 
@@ -81,6 +86,53 @@ def test_utterance_joins_chunks_in_order():
     recorder.start_worker()
     feed(recorder, [speech(6), silence(6), speech(6), silence(6)])
     assert recorder.stop() == "hello there second part"
+
+
+def test_a_breath_between_chunks_does_not_end_the_sentence():
+    recorder = make_recorder(CountingTranscriber(["So I think.", "We should ship."]))
+    recorder.start_worker()
+    feed(recorder, [speech(6), silence(6), speech(6), silence(6)])
+    assert recorder.stop() == "So I think we should ship."
+
+
+def test_a_long_silence_between_chunks_ends_the_sentence():
+    recorder = make_recorder(CountingTranscriber(["Let us ship it", "QA is done."]))
+    recorder.start_worker()
+    quiet = int(CONFIG.dictation_sentence_gap_seconds / CONFIG.window_seconds) + 2
+    feed(recorder, [speech(6), silence(quiet), speech(6), silence(quiet)])
+    assert recorder.stop() == "Let us ship it. QA is done."
+
+
+def test_each_chunk_hears_what_came_before_it_and_the_vocabulary():
+    transcriber = CountingTranscriber(["hello there", "second part"])
+    recorder = make_recorder(transcriber, hotwords="Mason, Oat Notes")
+    recorder.start_worker()
+    feed(recorder, [speech(6), silence(6), speech(6), silence(6)])
+    recorder.stop()
+    first, second = transcriber.hints
+    assert (first.prompt, first.hotwords) == (None, "Mason, Oat Notes")
+    assert (second.prompt, second.hotwords) == ("hello there", "Mason, Oat Notes")
+
+
+def test_the_prompt_is_only_the_tail_of_a_long_utterance():
+    transcriber = CountingTranscriber(["x" * 300, "tail"])
+    recorder = make_recorder(transcriber)
+    recorder.start_worker()
+    feed(recorder, [speech(6), silence(6), speech(6), silence(6)])
+    recorder.stop()
+    assert len(transcriber.hints[1].prompt) == CONFIG.dictation_prompt_chars
+
+
+def test_the_prompt_resets_between_utterances():
+    transcriber = CountingTranscriber(["first", "second"])
+    recorder = make_recorder(transcriber)
+    recorder.start_worker()
+    feed(recorder, [speech(6), silence(6)])
+    recorder.stop()
+    recorder.start_worker()
+    feed(recorder, [speech(6), silence(6)])
+    recorder.stop()
+    assert [hints.prompt for hints in transcriber.hints] == [None, None]
 
 
 def test_tail_chunk_is_flushed_on_stop():
