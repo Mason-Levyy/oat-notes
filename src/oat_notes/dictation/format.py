@@ -25,8 +25,8 @@ _WORDS_THAT_LEGITIMATELY_DOUBLE = {"had", "that", "is", "no", "very", "really"}
 _REPEAT_PATTERN = re.compile(r"\b(\w+)(\s+\1\b)+", re.IGNORECASE)
 
 _LINE_COMMANDS = (
-    (re.compile(r"(?<!\w)new\s+paragraph(?!\w)\s*,?\s*", re.IGNORECASE), "\n\n"),
-    (re.compile(r"(?<!\w)new\s+line(?!\w)\s*,?\s*", re.IGNORECASE), "\n"),
+    (re.compile(r"\s*(?<!\w)new\s+paragraph(?!\w)[.,]?\s*", re.IGNORECASE), "\n\n"),
+    (re.compile(r"\s*(?<!\w)new\s+line(?!\w)[.,]?\s*", re.IGNORECASE), "\n"),
 )
 _SPOKEN_PUNCTUATION = (
     (re.compile(r"\s*(?<!\w)question\s+mark(?!\w)", re.IGNORECASE), "?"),
@@ -36,8 +36,30 @@ _SPOKEN_PUNCTUATION = (
     (re.compile(r"\s*(?<!\w)period(?!\w)", re.IGNORECASE), "."),
     (re.compile(r"\s*(?<!\w)comma(?!\w)", re.IGNORECASE), ","),
     (re.compile(r"\s*(?<!\w)colon(?!\w)", re.IGNORECASE), ":"),
+    (re.compile(r"\s*(?<!\w)(?:close|end)\s+quotes?(?!\w)", re.IGNORECASE), '"'),
+    (re.compile(r"(?<!\w)(?:open|begin)\s+quotes?(?!\w)\s*", re.IGNORECASE), '"'),
+    (re.compile(r"\s*(?<!\w)close\s+(?:paren|parenthesis|bracket)(?!\w)", re.IGNORECASE), ")"),
+    (re.compile(r"(?<!\w)open\s+(?:paren|parenthesis|bracket)(?!\w)\s*", re.IGNORECASE), "("),
+    (re.compile(r"\s*(?<!\w)(?:dash|hyphen)(?!\w)\s*", re.IGNORECASE), "-"),
 )
-_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([,.;:!?])")
+_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([,.;:!?)])")
+_COMMA_AFTER_PUNCTUATION = re.compile(r"([,.;:!?])\s*,")
+_COMMA_BEFORE_STOP = re.compile(r",\s*([.!?])")
+_DOUBLE_STOP = re.compile(r"(?<!\.)\.\s*\.(?!\.)")
+_SENTENCE_START = re.compile(r"(^|\n\n)([a-z])")
+_MIN_WORDS_FOR_FULL_STOP = 3
+
+
+def _end_paragraphs(text: str) -> str:
+    """A spoken "new paragraph" ends a sentence, whether or not Whisper
+    heard a full stop before it. Fragments too short to be sentences —
+    a greeting, a sign-off — are left as they are."""
+    paragraphs = text.split("\n\n")
+    for position, paragraph in enumerate(paragraphs[:-1]):
+        is_sentence_length = len(paragraph.split()) >= _MIN_WORDS_FOR_FULL_STOP
+        if paragraph and paragraph[-1].isalnum() and is_sentence_length:
+            paragraphs[position] = paragraph + "."
+    return "\n\n".join(paragraphs)
 
 
 def _collapse_repeats(match: re.Match) -> str:
@@ -45,6 +67,15 @@ def _collapse_repeats(match: re.Match) -> str:
     if word.lower() in _WORDS_THAT_LEGITIMATELY_DOUBLE:
         return match.group(0)
     return word
+
+
+def vocabulary_hotwords(vocabulary: Sequence[tuple[str, str]]) -> str | None:
+    """The written forms, for Whisper to bias towards while decoding —
+    cheaper than mis-hearing a name and patching it afterwards."""
+    written = [
+        item.strip() for heard, item in vocabulary if heard.strip() and item.strip()
+    ]
+    return ", ".join(dict.fromkeys(written)) or None
 
 
 def apply_vocabulary(text: str, vocabulary: Sequence[tuple[str, str]]) -> str:
@@ -89,10 +120,11 @@ def apply_rules(
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r" *\n *", "\n", cleaned)
     cleaned = _SPACE_BEFORE_PUNCTUATION.sub(r"\1", cleaned)
-    cleaned = cleaned.strip()
-    if cleaned:
-        cleaned = cleaned[0].upper() + cleaned[1:]
-    return cleaned
+    cleaned = _COMMA_AFTER_PUNCTUATION.sub(r"\1", cleaned)
+    cleaned = _COMMA_BEFORE_STOP.sub(r"\1", cleaned)
+    cleaned = _DOUBLE_STOP.sub(".", cleaned)
+    cleaned = _end_paragraphs(cleaned.strip())
+    return _SENTENCE_START.sub(lambda match: match.group(1) + match.group(2).upper(), cleaned)
 
 
 _EXPLICIT_EMAIL = re.compile(

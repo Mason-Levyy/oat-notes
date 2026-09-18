@@ -21,7 +21,7 @@ from ..config import Config
 from ..hotkeys import Chord, HotkeyListener
 from ..settings import REPLAY_KEY
 from ..transcriber import Transcriber
-from .format import format_dictation
+from .format import format_dictation, vocabulary_hotwords
 from .phases import (
     CANCELLED,
     ERROR,
@@ -131,6 +131,7 @@ class DictationController:
             transcriber,
             device_index=self.options.device_index,
             level_sink=self._level_sink,
+            hotwords=vocabulary_hotwords(self.options.vocabulary),
         )
         try:
             self._recorder.prepare()
@@ -201,6 +202,8 @@ class DictationController:
         # about to stop existing, so it ends here rather than hanging.
         self._post(_CANCEL)
         self.options = options
+        if self._recorder is not None:
+            self._recorder.hotwords = vocabulary_hotwords(options.vocabulary)
         if self._listener is not None:
             self.unbind(self._listener)
             self.bind(self._listener)

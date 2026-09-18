@@ -22,8 +22,9 @@ from ..capture import AudioCapture, FrameBlock
 from ..chunker import VadChunker
 from ..clock import SessionClock
 from ..config import Config
-from ..transcriber import Transcriber
+from ..transcriber import Transcriber, TranscriptionHints
 from ..types import AudioChunk, Channel
+from .stitch import Piece, stitch_pieces
 
 _JOIN_TIMEOUT_SECONDS = 30.0
 
@@ -40,13 +41,17 @@ class UtteranceRecorder:
         device_index: int | None = None,
         level_sink: Callable[[float], None] | None = None,
         vad=None,
+        hotwords: str | None = None,
     ) -> None:
         self._config = replace(
-            config, max_chunk_seconds=config.dictation_max_chunk_seconds
+            config,
+            max_chunk_seconds=config.dictation_max_chunk_seconds,
+            silence_split_seconds=config.dictation_silence_split_seconds,
         )
         self._transcriber = transcriber
         self._device_index = device_index
         self._level_sink = level_sink
+        self.hotwords = hotwords or None
 
         self._pa = None
         self._vad = vad
@@ -54,7 +59,8 @@ class UtteranceRecorder:
         self._capture: AudioCapture | None = None
         self._thread: threading.Thread | None = None
         self.frame_queue: queue.Queue[FrameBlock | None] = queue.Queue(maxsize=512)
-        self._pieces: list[str] = []
+        self._pieces: list[Piece] = []
+        self._speech_resumes_at: float | None = None
         self._speech_seconds = 0.0
         self._cancelled = False
 
@@ -111,7 +117,11 @@ class UtteranceRecorder:
     def stop(self) -> str:
         """Flush the tail chunk, drain the worker, and return the utterance."""
         self._teardown()
-        return " ".join(self._pieces).strip()
+        return stitch_pieces(
+            self._pieces,
+            self._config.dictation_clause_gap_seconds,
+            self._config.dictation_sentence_gap_seconds,
+        )
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -121,6 +131,7 @@ class UtteranceRecorder:
     def _reset(self) -> None:
         self._cancelled = False
         self._pieces = []
+        self._speech_resumes_at = None
         self._speech_seconds = 0.0
         self.frame_queue = queue.Queue(maxsize=512)
         if self._vad is not None:
@@ -160,7 +171,7 @@ class UtteranceRecorder:
         if self._cancelled:
             return
         try:
-            segment = self._transcriber.transcribe(chunk)
+            segment = self._transcriber.transcribe(chunk, self._hints())
         except Exception as error:
             print(
                 f"dictation transcription error: {type(error).__name__}",
@@ -169,7 +180,27 @@ class UtteranceRecorder:
             return
         text = segment.text.strip()
         if text:
-            self._pieces.append(text)
+            self._pieces.append(Piece(text, self._pause_before(chunk)))
+        self._speech_resumes_at = chunk.end if chunk.turn_end else None
+
+    def _pause_before(self, chunk: AudioChunk) -> float:
+        """Silence between the last speech and this chunk's first speech. A
+        chunk closed by silence carries ``silence_split_seconds`` of quiet at
+        its tail, and the next opens with pre-roll, so both are given back."""
+        if self._speech_resumes_at is None:
+            return 0.0
+        boundary_quiet = (
+            self._config.silence_split_seconds
+            + self._config.pre_roll_windows * self._config.window_seconds
+        )
+        return max(0.0, chunk.start - self._speech_resumes_at + boundary_quiet)
+
+    def _hints(self) -> TranscriptionHints:
+        """What was just said, so Whisper continues the sentence rather than
+        opening a new one, plus the vocabulary spellings for every chunk."""
+        spoken = " ".join(piece.text for piece in self._pieces)
+        prompt = spoken[-self._config.dictation_prompt_chars :] or None
+        return TranscriptionHints(prompt=prompt, hotwords=self.hotwords)
 
     def _note_window(self, window_time: float, window, is_speech: bool) -> None:
         if is_speech:
