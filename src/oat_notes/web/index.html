@@ -534,7 +534,6 @@ body {
 .chip.active { background: var(--oat); box-shadow: 3px 3px 0 var(--ink); }
 .chip.active .slot { color: var(--ink); }
 .chip.active .dot { visibility: visible; background: var(--rec); animation: blink 1s steps(2, start) infinite; }
-.chip.fallback { cursor: default; }
 .chip.ghost {
   border-style: dashed;
   background: transparent;
@@ -617,6 +616,7 @@ body {
 .statusline .saved { color: var(--sprout); }
 .screen {
   flex: 1;
+  position: relative;
   background: var(--screen);
   border: 3px solid var(--ink);
   box-shadow: inset 0 0 0 4px #234323;
@@ -640,14 +640,22 @@ body {
   outline: 2px solid var(--screen-dim); outline-offset: 2px; cursor: pointer;
 }
 .line-picker {
-  position: absolute; z-index: 5; left: 0; top: 100%;
-  display: flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+  position: absolute; z-index: 5; left: 16px; right: 16px;
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
   background: var(--paper); border: 3px solid var(--ink);
   box-shadow: 3px 3px 0 var(--ink); padding: 6px;
 }
+.line-picker input {
+  flex: 1 1 140px; min-width: 0;
+  border: 2px solid var(--ink); background: #fff; padding: 6px;
+  font-family: "Pixel", Consolas, monospace; font-size: 7px;
+}
+.line-picker .hint { flex-basis: 100%; font-size: 6px; color: var(--ink); opacity: 0.7; }
 .line .t { color: var(--screen-dim); }
 .line .who { color: var(--screen-hi); font-weight: bold; }
 .line .who.guess { font-weight: normal; font-style: italic; opacity: 0.75; }
+.line .who.unknown { color: var(--screen-mid); text-decoration: underline dotted; }
+.line.picking { outline: 2px solid var(--screen-hi); outline-offset: 2px; }
 .line.cleaned { animation: cleanflash 1.2s ease-out 1; }
 @keyframes cleanflash {
   0% { color: var(--screen-hi); }
@@ -1674,8 +1682,11 @@ function lineHtml(line) {
   let who = "";
   if (line.label) {
     const guess = line.attribution === "nearest";
-    const cls = guess ? "who guess" : "who";
-    const title = guess ? ' title="best-guess speaker (low confidence)"' : "";
+    const unknown = line.label === "Unknown";
+    const cls = guess ? "who guess" : unknown ? "who unknown" : "who";
+    let title = "";
+    if (guess) title = ' title="best-guess speaker (low confidence)"';
+    else if (unknown) title = ' title="Click to name this speaker"';
     who = `<span class="${cls}"${title}>${escapeHtml(line.label)}${guess ? "?" : ""}:</span> `;
   }
   return `<span class="t">[${line.time}]</span> ${who}${escapeHtml(line.text)}`;
@@ -1688,7 +1699,7 @@ function addLine(line, preserveViewport = true) {
   if (line.id !== undefined && line.id !== null) {
     div.dataset.lineId = line.id;
     div.tabIndex = 0;
-    div.title = "Click to put this line on someone else";
+    div.title = LINE_CLICK_HINT;
     div.onclick = () => openLinePicker(div, line.id);
     div.onkeydown = (event) => {
       if (event.key !== "Enter") return;
@@ -1709,12 +1720,34 @@ function addLine(line, preserveViewport = true) {
   }
 }
 
+const LINE_CLICK_HINT = "Click to put this line on someone else";
+let pickingLineId = null;
+
 function openLinePicker(anchor, lineId) {
   closeLinePicker();
   if (!state.recording) return;
+  pickingLineId = lineId;
   const picker = document.createElement("div");
   picker.className = "line-picker";
   picker.id = "line-picker";
+  picker.onclick = (event) => event.stopPropagation();
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.setAttribute("list", "live-person-options");
+  input.placeholder = "Type a name";
+  input.setAttribute("aria-label", "Name the speaker of this line");
+  input.onkeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeLinePicker();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      assignLineToName(lineId, input.value);
+    }
+  };
+  picker.appendChild(input);
+
   const choices = (state.speakers || [])
     .map((speaker, index) => ({ speaker, index }))
     .filter(({ speaker }) => !speaker.removed)
@@ -1724,22 +1757,53 @@ function openLinePicker(anchor, lineId) {
     option.type = "button";
     option.className = "mini";
     option.textContent = speaker.name.toUpperCase();
-    option.onclick = (event) => {
-      event.stopPropagation();
-      closeLinePicker();
-      post("/api/lines/assign", { id: lineId, index }).then((result) => {
-        if (result.error) $("statusline").textContent = result.error.toUpperCase();
-      });
-    };
+    option.onclick = () => assignLine({ id: lineId, index });
     picker.appendChild(option);
   });
-  anchor.appendChild(picker);
+
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = "ENTER SAVES A NEW PERSON AND PUTS THE LINE ON THEM";
+  picker.appendChild(hint);
+
+  $("screen").appendChild(picker);
+  anchorLinePicker();
+  input.focus();
   setTimeout(() => document.addEventListener("click", closeLinePicker, { once: true }), 0);
+}
+
+function anchorLinePicker() {
+  const picker = $("line-picker");
+  if (!picker || pickingLineId === null) return;
+  const line = $("screen").querySelector(`.line[data-line-id="${pickingLineId}"]`);
+  if (!line) {
+    closeLinePicker();
+    return;
+  }
+  line.classList.add("picking");
+  picker.style.top = `${line.offsetTop + line.offsetHeight + 4}px`;
+}
+
+function assignLineToName(lineId, typed) {
+  const name = typed.trim();
+  if (!name) return;
+  const match = matchingSpeaker(name);
+  assignLine({ id: lineId, name, speaker_id: match ? match.id : null });
+}
+
+function assignLine(payload) {
+  closeLinePicker();
+  post("/api/lines/assign", payload).then((result) => {
+    if (result.error) $("statusline").textContent = result.error.toUpperCase();
+  });
 }
 
 function closeLinePicker() {
   const open = $("line-picker");
   if (open) open.remove();
+  document.removeEventListener("click", closeLinePicker);
+  $("screen").querySelectorAll(".line.picking").forEach((el) => el.classList.remove("picking"));
+  pickingLineId = null;
 }
 
 function escapeHtml(text) {
@@ -1926,7 +1990,7 @@ function addGhost(players) {
   const chip = document.createElement("button");
   chip.type = "button";
   chip.className = "chip ghost";
-  chip.title = "Unexpected speaker? Click to switch to them now; name them after the meeting.";
+  chip.title = "Someone new is talking right now? Switch to them and learn their voice. To name a line that already scrolled past, click the line instead.";
   chip.innerHTML = `<span class="slot">P?</span> + GUEST`;
   chip.onclick = () => post("/api/add_guest", {});
   players.appendChild(chip);
@@ -2016,6 +2080,8 @@ function applyState(s) {
   (s.lines || []).forEach((line) => addLine(line, false));
   if (wasAtTop) screen.scrollTop = 0;
   else screen.scrollTop = previousScrollTop + Math.max(0, screen.scrollHeight - previousScrollHeight);
+  if (s.recording) anchorLinePicker();
+  else closeLinePicker();
 
   if (pending) {
     renderBackfill(s.pending_backfill);
@@ -2075,7 +2141,6 @@ $("discard-btn").onclick = () => {
 };
 
 $("finalize-btn").onclick = () => {
-  const renames = {};
   const guestProfiles = {};
   $("guest-fields").querySelectorAll("input[data-guest]").forEach((input) => {
     const name = input.value.trim();
@@ -2083,7 +2148,7 @@ $("finalize-btn").onclick = () => {
     if (select && select.value) guestProfiles[input.dataset.guest] = { speaker_id: select.value };
     else if (name) guestProfiles[input.dataset.guest] = { name };
   });
-  post("/api/finalize", { renames, guest_profiles: guestProfiles }).then(applyState);
+  post("/api/finalize", { guest_profiles: guestProfiles }).then(applyState);
 };
 
 function attachTabComplete(input, getNames) {
@@ -2287,7 +2352,7 @@ $("bank-next").onclick = () => post("/api/hotkey_bank", { direction: 1 }).then(a
 $("live-add-btn").onclick = () => {
   const query = $("live-person-search").value.trim();
   if (!query) return;
-  const speaker = librarySpeakers().find((item) => item.name.toLowerCase() === query.toLowerCase());
+  const speaker = matchingSpeaker(query);
   const payload = speaker ? { speaker_id: speaker.id } : { name: query };
   post("/api/roster/add", payload).then((result) => {
     if (result.error) {
@@ -2435,7 +2500,7 @@ events.onmessage = (message) => {
     const div = $("screen").querySelector(`.line[data-line-id="${event.id}"]`);
     if (div) {
       div.innerHTML = lineHtml(event);
-      div.title = event.original || "";
+      if (event.original) div.title = event.original;
       div.classList.remove("cleaned");
       void div.offsetWidth; // restart the flash animation
       div.classList.add("cleaned");
