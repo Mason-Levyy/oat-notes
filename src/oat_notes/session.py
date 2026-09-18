@@ -25,13 +25,23 @@ from .output import (
 )
 from .pipeline import Pipeline, ProfileLearningUpdate
 from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
-from .speaker_store import SpeakerProfile, SpeakerStore
+from .speaker_store import MIN_SAMPLE_SPEECH_SECONDS, SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
 from .types import Channel, TranscriptSegment
 
 UNKNOWN_TURN_MEMORY = 400
+CLEAN_TURN_QUALITY = 1.0
 BACKFILL_THRESHOLD = 0.70
 BACKFILL_MARGIN = 0.10
+
+
+@dataclass(frozen=True)
+class UnknownTurn:
+    """What a line without a name keeps in memory: never the audio."""
+
+    channel: Channel
+    embedding: np.ndarray
+    speech_seconds: float
 
 
 @dataclass(frozen=True)
@@ -94,7 +104,7 @@ class Session:
         self.roster = self._assign_hotkey_slots(options.speakers)
         self.guest_indices: list[int] = []
         self._guests_created = 0
-        self._unknown_turns: dict[int, tuple[Channel, np.ndarray]] = {}
+        self._unknown_turns: dict[int, UnknownTurn] = {}
         self.hotkey_bank = 0
 
         self._pa = pyaudio.PyAudio()
@@ -301,7 +311,11 @@ class Session:
         return index
 
     def add_speaker(self, name: str, speaker_id: str | None = None) -> int:
-        """Add a known person to the live roster without switching to them."""
+        """Add a person to the live roster without switching to them. A name
+        with no saved identity gets one, so whatever their voice teaches the
+        meeting is kept rather than thrown away with the session."""
+        if speaker_id is None:
+            speaker_id = self._identity_for(name)
         used = {speaker.hotkey_slot for speaker in self.roster}
         start = self.hotkey_bank * 9
         slot = next((item for item in range(start, start + 9) if item not in used), None)
@@ -384,6 +398,7 @@ class Session:
                 except (KeyError, ValueError):
                     pass
             self.guest_indices.remove(index)
+            self._rescore_unknown_turns(index)
         elif speaker.speaker_id and self._options.speaker_store is not None:
             try:
                 self._options.speaker_store.rename_speaker(speaker.speaker_id, name)
@@ -564,7 +579,9 @@ class Session:
             return
         line_id = self.log.add(segment)
         if embedding is not None and segment.attribution == "unknown":
-            self._remember_unknown(line_id, segment.channel, embedding)
+            self._remember_unknown(
+                line_id, segment.channel, embedding, segment.end - segment.start
+            )
         if self._cleanup is not None:
             self._cleanup.submit(line_id, segment.text)
         if segment.speaker:
@@ -591,7 +608,11 @@ class Session:
         self._events.on_attribution(index, channel, source, confidence)
 
     def _remember_unknown(
-        self, line_id: int, channel: Channel, embedding: "np.ndarray"
+        self,
+        line_id: int,
+        channel: Channel,
+        embedding: "np.ndarray",
+        speech_seconds: float,
     ) -> None:
         """Hold an unattributed turn's embedding so it can be named later.
 
@@ -599,7 +620,9 @@ class Session:
         keeps, and never the audio. Bounded so a long meeting cannot grow
         without limit.
         """
-        self._unknown_turns[line_id] = (channel, np.array(embedding, copy=True))
+        self._unknown_turns[line_id] = UnknownTurn(
+            channel, np.array(embedding, copy=True), speech_seconds
+        )
         while len(self._unknown_turns) > UNKNOWN_TURN_MEMORY:
             self._unknown_turns.pop(next(iter(self._unknown_turns)))
 
@@ -624,7 +647,8 @@ class Session:
             for position, other in enumerate(self.roster)
             if position != index and other.speaker_id and other.active
         ]
-        for line_id, (channel, embedding) in list(self._unknown_turns.items()):
+        for line_id, turn in list(self._unknown_turns.items()):
+            channel, embedding = turn.channel, turn.embedding
             own = store.profile_vector(speaker.speaker_id, channel.value)
             if own is None or own.embedding.shape != embedding.shape:
                 continue
@@ -644,7 +668,11 @@ class Session:
 
     def assign_line(self, line_id: int, index: int | None) -> str | None:
         """Put one transcript line on a chosen person by hand. ``None`` puts it
-        back to Unknown. Returns an error message, or ``None`` on success."""
+        back to Unknown. Returns an error message, or ``None`` on success.
+
+        The correction is also a lesson: the turn's voice goes into that
+        person's profile, and any other Unknown line it now explains is named
+        too — the point of fixing one line is not having to fix the next."""
         if index is None:
             name = "Unknown"
         else:
@@ -655,8 +683,57 @@ class Session:
             name = self.roster[index].name
         if not self.log.relabel(line_id, name):
             return "line not found"
-        self._unknown_turns.pop(line_id, None)
+        turn = self._unknown_turns.pop(line_id, None)
+        if index is not None and turn is not None:
+            self._learn_from_turn(index, turn)
         return None
+
+    def assign_line_to_name(
+        self, line_id: int, name: str, speaker_id: str | None = None
+    ) -> tuple[int | None, str | None]:
+        """Put a line on someone by name — already on the roster, saved in
+        the library, or brand new — without switching the live speaker to
+        them. Returns ``(roster index, error)``."""
+        name = name.strip()
+        if not name:
+            return None, "a name is required"
+        if not self.log.has_line(line_id):
+            return None, "line not found"
+        index = self._roster_index_for(name, speaker_id)
+        if index is None:
+            try:
+                index = self.add_speaker(name, speaker_id)
+            except ValueError as error:
+                return None, str(error).strip("'")
+        return index, self.assign_line(line_id, index)
+
+    def _roster_index_for(self, name: str, speaker_id: str | None) -> int | None:
+        for index, speaker in enumerate(self.roster):
+            if not speaker.active:
+                continue
+            same_identity = speaker_id is not None and speaker.speaker_id == speaker_id
+            if same_identity or speaker.name.casefold() == name.casefold():
+                return index
+        return None
+
+    def _learn_from_turn(self, index: int, turn: UnknownTurn) -> None:
+        speaker = self.roster[index]
+        store = self._options.speaker_store
+        if not speaker.speaker_id or store is None:
+            return
+        if turn.speech_seconds < MIN_SAMPLE_SPEECH_SECONDS:
+            return
+        try:
+            store.add_sample(
+                speaker.speaker_id,
+                turn.embedding,
+                turn.channel.value,
+                turn.speech_seconds,
+                CLEAN_TURN_QUALITY,
+            )
+        except (KeyError, ValueError):
+            return
+        self._rescore_unknown_turns(index)
 
     def _handle_profile_learning(self, update: ProfileLearningUpdate) -> None:
         self.profile_learning = update.to_dict() if update.phase == "collecting" else None
