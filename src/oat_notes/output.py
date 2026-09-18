@@ -147,6 +147,9 @@ class MeetingLog:
             segment.speaker for segment in self._segments if segment.speaker
         }
 
+    def has_line(self, line_id: int) -> bool:
+        return 0 <= line_id < len(self._segments)
+
     def relabel(self, line_id: int, speaker: str) -> bool:
         """Move one line to a different speaker, by id.
 
@@ -158,7 +161,7 @@ class MeetingLog:
         crash artifact, not the transcript. ``save`` rebuilds from
         ``_segments``, so the correction lands in the file that matters.
         """
-        if not 0 <= line_id < len(self._segments):
+        if not self.has_line(line_id):
             return False
         self._segments[line_id] = replace(self._segments[line_id], speaker=speaker)
         return True
