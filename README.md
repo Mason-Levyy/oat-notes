@@ -92,14 +92,19 @@ the window you were typing in.
   **Esc** cancels without inserting. `--activation` equivalents live in Settings.
 - **Cleanup is deterministic and instant** by default — filler words, stutters,
   spoken `new line`/`new paragraph`, and your own vocabulary substitutions.
-  Whisper already punctuates, so no model runs on the common path.
+  Whisper already punctuates, so no model runs on the common path. Speech is
+  transcribed in fragments while you talk; each fragment hears the words
+  before it, and the length of the pause between them decides whether a
+  boundary is a breath or a full stop, so a sentence never ends mid-thought.
 - **Emails are detected and reformatted.** Text that opens with a salutation and
   reads like a message ("Hey Sarah, following up on…") is rewritten into a
   greeting, paragraphs and a sign-off by the local LLM. A free heuristic decides
   the clear cases; only genuinely ambiguous text costs a model call.
   **Ctrl+Shift+Win** forces email formatting regardless.
 - **Vocabulary** is the setting worth filling in first. Whisper is reliable on
-  ordinary English and hopeless on colleague and product names.
+  ordinary English and hopeless on colleague and product names. The written
+  forms are also handed to Whisper as hotwords, so names are usually right
+  before the substitution ever runs.
 
 Everything runs on this machine. Dictated text goes to the target window and
 nowhere else — the clipboard write is even marked excluded from Win+V history

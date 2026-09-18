@@ -12,6 +12,7 @@ from oat_notes.dictation.format import (
     format_dictation,
     format_email,
     postprocess_email,
+    vocabulary_hotwords,
 )
 
 
@@ -72,7 +73,7 @@ def test_spoken_line_commands():
     assert apply_rules("first line new line second line") == (
         "First line\nsecond line"
     )
-    assert apply_rules("one new paragraph two") == "One\n\ntwo"
+    assert apply_rules("one new paragraph two") == "One\n\nTwo"
 
 
 def test_spoken_punctuation_is_off_by_default():
@@ -105,6 +106,12 @@ def test_vocabulary_runs_inside_apply_rules():
 
 def test_vocabulary_ignores_blank_entries():
     assert apply_vocabulary("hello", (("", "x"), ("  ", "y"))) == "hello"
+
+
+def test_vocabulary_hotwords_are_the_written_forms_once_each():
+    vocabulary = (("levya", "Mason"), ("oat notes", "Oat Notes"), ("mace in", "Mason"), ("", "x"))
+    assert vocabulary_hotwords(vocabulary) == "Mason, Oat Notes"
+    assert vocabulary_hotwords(()) is None
 
 
 def test_vocabulary_replacement_with_backslashes_is_literal():
@@ -316,3 +323,44 @@ def test_a_looped_phrase_is_collapsed_before_it_reaches_the_target_window():
 
 def test_collapsing_a_loop_leaves_deliberate_repetition_alone():
     assert apply_rules("no no, that won't work") == "No no, that won't work"
+
+
+# -- punctuation repair ----------------------------------------------------
+
+
+def test_a_paragraph_break_ends_the_sentence_before_it():
+    assert apply_rules("I think we should ship it new paragraph thanks") == (
+        "I think we should ship it.\n\nThanks"
+    )
+    assert apply_rules("So that is done. New paragraph. Next point") == (
+        "So that is done.\n\nNext point"
+    )
+
+
+def test_punctuation_before_a_line_command_is_the_users():
+    assert apply_rules("hello sarah, new line thanks for the update") == (
+        "Hello sarah,\nthanks for the update"
+    )
+
+
+def test_short_paragraphs_get_no_invented_full_stop():
+    assert apply_rules("hi dave new paragraph the build is green") == (
+        "Hi dave\n\nThe build is green"
+    )
+
+
+def test_doubled_punctuation_is_collapsed():
+    assert apply_rules("that works., and so does this") == "That works. and so does this"
+    assert apply_rules("no,, wait") == "No, wait"
+    assert apply_rules("done. . next") == "Done. next"
+    assert apply_rules("well... maybe") == "Well... maybe"
+
+
+def test_spoken_quotes_parens_and_dashes():
+    assert apply_rules(
+        "he said open quote fine close quote and left", spoken_punctuation=True
+    ) == 'He said "fine" and left'
+    assert apply_rules(
+        "the total open paren before tax close paren is ten", spoken_punctuation=True
+    ) == "The total (before tax) is ten"
+    assert apply_rules("a dash b", spoken_punctuation=True) == "A-b"

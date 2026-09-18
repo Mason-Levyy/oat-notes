@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from .config import Config
 from .models import (
@@ -18,13 +19,28 @@ from .repetition import collapse_repeated_runs
 from .types import AudioChunk, TranscriptSegment
 
 
+@dataclass(frozen=True)
+class TranscriptionHints:
+    """Text Whisper sees before the audio. ``prompt`` is what was just said,
+    so a fragment continues the sentence instead of starting a new one;
+    ``hotwords`` are spellings worth biasing towards for every chunk."""
+
+    prompt: str | None = None
+    hotwords: str | None = None
+
+
+NO_HINTS = TranscriptionHints()
+
+
 class Transcriber(ABC):
     """Implementations wrap a single model handle and are called from more
     than one thread — the meeting worker and dictation can overlap — so each
     serializes ``transcribe`` on its own lock."""
 
     @abstractmethod
-    def transcribe(self, chunk: AudioChunk) -> TranscriptSegment: ...
+    def transcribe(
+        self, chunk: AudioChunk, hints: TranscriptionHints = NO_HINTS
+    ) -> TranscriptSegment: ...
 
 
 class FasterWhisperTranscriber(Transcriber):
@@ -52,7 +68,9 @@ class FasterWhisperTranscriber(Transcriber):
                 config.model_name, device="cpu", compute_type=config.compute_type
             )
 
-    def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:
+    def transcribe(
+        self, chunk: AudioChunk, hints: TranscriptionHints = NO_HINTS
+    ) -> TranscriptSegment:
         with self._lock:
             segments, _ = self._model.transcribe(
                 chunk.samples,
@@ -63,6 +81,8 @@ class FasterWhisperTranscriber(Transcriber):
                 vad_filter=False,
                 repetition_penalty=self._config.repetition_penalty,
                 compression_ratio_threshold=self._config.compression_ratio_threshold,
+                initial_prompt=hints.prompt,
+                hotwords=hints.hotwords,
             )
             spoken = [segment.text.strip() for segment in segments]
         text = collapse_repeated_runs(" ".join(spoken).strip())
@@ -95,15 +115,29 @@ class OpenVinoTranscriber(Transcriber):
             "transcription model",
         )
 
-    def transcribe(self, chunk: AudioChunk) -> TranscriptSegment:
+    def transcribe(
+        self, chunk: AudioChunk, hints: TranscriptionHints = NO_HINTS
+    ) -> TranscriptSegment:
         with self._lock:
-            result = self._pipeline.generate(chunk.samples)
+            result = self._pipeline.generate(
+                chunk.samples, **_openvino_hint_kwargs(hints)
+            )
         text = collapse_repeated_runs(
             " ".join(piece.strip() for piece in result.texts).strip()
         )
         return TranscriptSegment(
             text=text, channel=chunk.channel, start=chunk.start, end=chunk.end
         )
+
+
+def _openvino_hint_kwargs(hints: TranscriptionHints) -> dict[str, str]:
+    """WhisperPipeline rejects ``None`` for these, so only pass what is set."""
+    kwargs = {}
+    if hints.prompt:
+        kwargs["initial_prompt"] = hints.prompt
+    if hints.hotwords:
+        kwargs["hotwords"] = hints.hotwords
+    return kwargs
 
 
 def create_transcriber(config: Config) -> Transcriber:
