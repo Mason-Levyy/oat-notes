@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from oat_notes.attribution import Speaker
-from oat_notes.session import UNKNOWN_TURN_MEMORY, Session
+from oat_notes.session import UNKNOWN_TURN_MEMORY, Session, UnknownTurn
 from oat_notes.types import Channel, TranscriptSegment
 
 
@@ -13,6 +13,8 @@ def bare_session():
     session.hotkey_bank = 0
     session.roster = []
     session._cleanup = None
+    session._unknown_turns = {}
+    session._options = SimpleNamespace(speaker_store=None)
     session._events = SimpleNamespace(on_hotkey_bank=lambda bank: None)
     return session
 
@@ -534,7 +536,7 @@ def test_an_unknown_line_is_named_once_the_profile_explains_it():
     session = _backfill_session(
         [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
         store,
-        {7: (Channel.MIC, np.array([1.0, 0.0], dtype=np.float32))},
+        {7: UnknownTurn(Channel.MIC, np.array([1.0, 0.0], dtype=np.float32), 2.0)},
     )
 
     session._rescore_unknown_turns(0)
@@ -547,7 +549,9 @@ def test_a_near_miss_is_left_unknown_rather_than_guessed():
     weak = np.array([0.65, math.sqrt(1 - 0.65**2)], dtype=np.float32)
     store = VectorStore({"sp-sarah": np.array([1.0, 0.0], dtype=np.float32)})
     session = _backfill_session(
-        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)], store, {7: (Channel.MIC, weak)}
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
+        store,
+        {7: UnknownTurn(Channel.MIC, weak, 2.0)},
     )
 
     session._rescore_unknown_turns(0)
@@ -569,7 +573,7 @@ def test_a_line_two_people_both_match_stays_unknown():
             Speaker("Alex", speaker_id="sp-alex", hotkey_slot=1),
         ],
         store,
-        {7: (Channel.MIC, np.array([1.0, 0.0], dtype=np.float32))},
+        {7: UnknownTurn(Channel.MIC, np.array([1.0, 0.0], dtype=np.float32), 2.0)},
     )
 
     session._rescore_unknown_turns(0)
@@ -600,7 +604,7 @@ def test_the_unknown_turn_memory_is_bounded():
     session._unknown_turns = {}
     for line_id in range(UNKNOWN_TURN_MEMORY + 25):
         session._remember_unknown(
-            line_id, Channel.MIC, np.array([1.0, 0.0], dtype=np.float32)
+            line_id, Channel.MIC, np.array([1.0, 0.0], dtype=np.float32), 2.0
         )
 
     assert len(session._unknown_turns) == UNKNOWN_TURN_MEMORY
@@ -611,7 +615,9 @@ def test_the_unknown_turn_memory_is_bounded():
 def test_assigning_a_line_by_hand_validates_and_settles_it():
     session = bare_session()
     session.roster = [Speaker("Sarah", hotkey_slot=0), Speaker("Gone", hotkey_slot=1, active=False)]
-    session._unknown_turns = {4: (Channel.MIC, np.array([1.0, 0.0], dtype=np.float32))}
+    session._unknown_turns = {
+        4: UnknownTurn(Channel.MIC, np.array([1.0, 0.0], dtype=np.float32), 2.0)
+    }
     relabelled = []
     session.log = SimpleNamespace(
         relabel=lambda line_id, name: (relabelled.append((line_id, name)) or True)
@@ -623,6 +629,156 @@ def test_assigning_a_line_by_hand_validates_and_settles_it():
 
     assert relabelled == [(4, "Sarah")]
     assert session._unknown_turns == {}
+
+
+class LearningStore(VectorStore):
+    def __init__(self, vectors, speakers=()):
+        super().__init__(vectors)
+        self.samples = []
+        self.speakers = list(speakers)
+        self.created = []
+
+    def add_sample(self, speaker_id, embedding, source, speech_seconds, quality):
+        if speech_seconds < 1.0:
+            raise ValueError("voice samples require at least one second of speech")
+        self.samples.append((speaker_id, source, speech_seconds, quality))
+        self.vectors[speaker_id] = np.array(embedding, dtype=np.float32)
+
+    def list_speakers(self):
+        return tuple(self.speakers)
+
+    def create_speaker(self, name):
+        self.created.append(name)
+        profile = SimpleNamespace(speaker_id=f"sp-{name.lower()}", name=name)
+        self.speakers.append(profile)
+        return profile
+
+
+def _learning_session(roster, store, unknowns):
+    session = _backfill_session(roster, store, unknowns)
+    session.log.has_line = lambda line_id: True
+    session._attributor = SimpleNamespace(add=lambda speaker: len(session.roster))
+    return session
+
+
+def unit(x, y):
+    return np.array([x, y], dtype=np.float32)
+
+
+def test_assigning_a_line_by_hand_teaches_the_profile_and_names_its_siblings():
+    store = LearningStore({})
+    session = _learning_session(
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
+        store,
+        {4: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 2.0), 5: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 1.5)},
+    )
+
+    assert session.assign_line(4, 0) is None
+
+    assert store.samples == [("sp-sarah", "mic", 2.0, 1.0)]
+    assert session.relabelled == [(4, "Sarah"), (5, "Sarah")]
+    assert session._unknown_turns == {}
+
+
+def test_a_turn_too_short_to_be_a_sample_is_still_settled():
+    store = LearningStore({})
+    session = _learning_session(
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
+        store,
+        {4: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 0.4)},
+    )
+
+    assert session.assign_line(4, 0) is None
+    assert store.samples == []
+    assert session.relabelled == [(4, "Sarah")]
+
+
+def test_putting_a_line_back_to_unknown_teaches_nothing():
+    store = LearningStore({})
+    session = _learning_session(
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
+        store,
+        {4: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 2.0)},
+    )
+
+    assert session.assign_line(4, None) is None
+    assert store.samples == []
+
+
+def test_assigning_a_line_to_a_new_name_saves_the_person_without_switching():
+    store = LearningStore({})
+    session = _learning_session(
+        [Speaker("Alex", speaker_id="sp-alex", hotkey_slot=0)],
+        store,
+        {4: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 2.0)},
+    )
+    session.current_speaker = 0
+
+    index, error = session.assign_line_to_name(4, "  Sarah ")
+
+    assert (index, error) == (1, None)
+    assert store.created == ["Sarah"]
+    assert session.roster[1] == Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=1)
+    assert session.current_speaker == 0
+    assert session.relabelled == [(4, "Sarah")]
+    assert store.samples == [("sp-sarah", "mic", 2.0, 1.0)]
+
+
+def test_assigning_a_line_to_a_name_already_on_the_roster_reuses_them():
+    store = LearningStore({})
+    session = _learning_session(
+        [Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=0)],
+        store,
+        {4: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 2.0)},
+    )
+
+    assert session.assign_line_to_name(4, "sarah") == (0, None)
+    assert len(session.roster) == 1
+    assert store.created == []
+
+
+def test_assigning_a_line_to_a_library_person_links_rather_than_duplicating():
+    store = LearningStore({}, [SimpleNamespace(speaker_id="sp-priya", name="Priya")])
+    session = _learning_session(
+        [], store, {4: UnknownTurn(Channel.MIC, unit(1.0, 0.0), 2.0)}
+    )
+
+    assert session.assign_line_to_name(4, "priya") == (0, None)
+    assert store.created == []
+    assert session.roster[0].speaker_id == "sp-priya"
+
+
+def test_assigning_a_missing_line_to_a_name_adds_nobody():
+    store = LearningStore({})
+    session = _learning_session([], store, {})
+    session.log.has_line = lambda line_id: False
+
+    assert session.assign_line_to_name(9, "Sarah") == (None, "line not found")
+    assert session.assign_line_to_name(9, "   ") == (None, "a name is required")
+    assert session.roster == []
+
+
+def test_adding_a_new_name_to_the_roster_gives_them_a_saved_identity():
+    session = bare_session()
+    store = FakeStore()
+    session._options = SimpleNamespace(speaker_store=store)
+    session._attributor = SimpleNamespace(add=lambda speaker: len(session.roster))
+
+    index = session.add_speaker("Jordan")
+
+    assert store.created == ["Jordan"]
+    assert session.roster[index].speaker_id == "sp-jordan"
+
+
+def test_naming_a_guest_rescores_the_unknown_lines_their_samples_explain():
+    session = _rename_session([Speaker("Guest 1", hotkey_slot=0)], guest_indices=[0])
+    session._options = SimpleNamespace(speaker_store=FakeStore())
+    session._speaker_resolver = SimpleNamespace(persist_guest=lambda index, sid: None)
+    rescored = []
+    session._rescore_unknown_turns = rescored.append
+
+    assert session.rename_speaker(0, "Sarah") is None
+    assert rescored == [0]
 
 
 def test_a_line_can_be_put_back_to_unknown():

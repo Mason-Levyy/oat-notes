@@ -819,7 +819,9 @@ class AppState:
             return
 
     def assign_line(self, body: dict) -> dict:
-        """Put a transcript line on a person by hand.
+        """Put a transcript line on a person by hand: a roster ``index``, or
+        a ``name`` (with an optional library ``speaker_id``) for someone who
+        is not on the roster yet.
 
         Recording only: once the meeting stops the session — and with it the
         log this writes through to — is gone.
@@ -829,16 +831,30 @@ class AppState:
             if session is None:
                 return {"error": "not recording"}
             line_id = body.get("id")
-            index = body.get("index")
-            if not isinstance(line_id, int):
+            if not isinstance(line_id, int) or isinstance(line_id, bool):
                 return {"error": "id must be an integer"}
-            if index is not None and (
-                isinstance(index, bool) or not isinstance(index, int)
-            ):
-                return {"error": "index must be an integer or null"}
-            error = session.assign_line(line_id, index)
-            if error:
-                return {"error": error}
+            if "name" in body:
+                name = str(body.get("name") or "")
+                speaker_id = str(body.get("speaker_id") or "").strip() or None
+                if speaker_id and self.speaker_store is not None:
+                    try:
+                        name = self.speaker_store.profile(speaker_id).name
+                    except KeyError:
+                        return {"error": "speaker not found"}
+                index, error = session.assign_line_to_name(line_id, name, speaker_id)
+                if error:
+                    return {"error": error}
+                self.roster = tuple(session.roster)
+                self.hub.publish({"type": "status", "recording": True})
+            else:
+                index = body.get("index")
+                if index is not None and (
+                    isinstance(index, bool) or not isinstance(index, int)
+                ):
+                    return {"error": "index must be an integer or null"}
+                error = session.assign_line(line_id, index)
+                if error:
+                    return {"error": error}
             name = "Unknown" if index is None else session.roster[index].name
             self._publish_line_label(line_id, name, index, "manual", None)
         return self.status()

@@ -683,3 +683,75 @@ def test_a_session_refusal_to_assign_reaches_the_browser():
     state.session = session
 
     assert state.assign_line({"id": 9, "index": 0}) == {"error": "line not found"}
+
+
+def test_assigning_a_line_to_a_new_name_adds_them_and_tells_the_browser():
+    state = _line_state()
+    session = FakeSession()
+    session.roster = [Speaker("Alex")]
+    asked = []
+
+    def assign_line_to_name(line_id, name, speaker_id=None):
+        asked.append((line_id, name, speaker_id))
+        session.roster.append(Speaker(name.strip(), speaker_id="sp-sarah"))
+        return 1, None
+
+    session.assign_line_to_name = assign_line_to_name
+    state.session = session
+    subscriber = state.hub.subscribe()
+
+    response = state.assign_line({"id": 0, "name": " Sarah "})
+
+    assert "error" not in response
+    assert asked == [(0, " Sarah ", None)]
+    assert state.roster[1].name == "Sarah"
+    assert state.lines[0]["label"] == "Sarah"
+    assert state.lines[0]["speaker_index"] == 1
+    events = [subscriber.get_nowait()["type"] for _ in range(2)]
+    assert events == ["status", "line_update"]
+
+
+def test_assigning_a_line_to_a_library_person_uses_their_saved_name():
+    state = _line_state()
+    state.speaker_store = SimpleNamespace(
+        profile=lambda speaker_id: SimpleNamespace(name="Priya", speaker_id=speaker_id),
+        library=lambda: {},
+    )
+    session = FakeSession()
+    session.roster = [Speaker("Alex")]
+    asked = []
+
+    def assign_line_to_name(line_id, name, speaker_id=None):
+        asked.append((name, speaker_id))
+        session.roster.append(Speaker(name, speaker_id=speaker_id))
+        return 1, None
+
+    session.assign_line_to_name = assign_line_to_name
+    state.session = session
+
+    state.assign_line({"id": 0, "name": "pri", "speaker_id": "sp-priya"})
+
+    assert asked == [("Priya", "sp-priya")]
+
+
+def test_assigning_a_line_to_an_unknown_library_id_is_refused():
+    state = _line_state()
+
+    def missing(speaker_id):
+        raise KeyError(speaker_id)
+
+    state.speaker_store = SimpleNamespace(profile=missing)
+    state.session = FakeSession()
+
+    assert state.assign_line({"id": 0, "name": "x", "speaker_id": "nope"}) == {
+        "error": "speaker not found"
+    }
+
+
+def test_a_session_refusal_to_assign_by_name_reaches_the_browser():
+    state = _line_state()
+    session = FakeSession()
+    session.assign_line_to_name = lambda line_id, name, speaker_id=None: (None, "a name is required")
+    state.session = session
+
+    assert state.assign_line({"id": 0, "name": ""}) == {"error": "a name is required"}

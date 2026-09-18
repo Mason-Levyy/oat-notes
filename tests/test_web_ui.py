@@ -424,10 +424,29 @@ def test_a_poisoned_voice_profile_can_be_reset_without_ending_the_meeting():
 
 def test_an_unknown_line_can_be_put_on_someone_by_clicking_it():
     assert "function openLinePicker(" in HTML
-    assert 'post("/api/lines/assign", { id: lineId, index })' in HTML
-    assert 'index: null }' in HTML or '{ speaker: { name: "Unknown" }, index: null }' in HTML
+    assert 'assignLine({ id: lineId, index })' in HTML
+    assert '{ speaker: { name: "Unknown" }, index: null }' in HTML
     assert ".line-picker" in HTML
     assert "div.tabIndex = 0;" in HTML
+
+
+def test_a_new_person_can_be_named_right_from_the_line():
+    assert 'input.placeholder = "Type a name";' in HTML
+    assert 'input.setAttribute("list", "live-person-options");' in HTML
+    assert 'assignLine({ id: lineId, name, speaker_id: match ? match.id : null });' in HTML
+    assert 'if (event.key === "Escape")' in HTML
+    assert '.line .who.unknown' in HTML
+
+
+def test_the_line_picker_survives_a_status_repaint():
+    assert '$("screen").appendChild(picker);' in HTML
+    assert "function anchorLinePicker()" in HTML
+    assert "if (s.recording) anchorLinePicker();" in HTML
+
+
+def test_relabelling_a_line_keeps_its_click_hint():
+    assert "if (event.original) div.title = event.original;" in HTML
+    assert 'div.title = event.original || "";' not in HTML
 
 
 def test_an_automatically_named_line_needs_no_new_browser_code():

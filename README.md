@@ -158,14 +158,18 @@ Output, one line per speech chunk:
 
 On exit the session is written to `transcripts/<name>_YYYY-MM-DD_HHMM.txt` (`--name "stand-up"` → `stand-up_…​.txt`), merged across channels and sorted by timestamp — ready to paste into OneNote or Claude for summarization.
 
-`--speakers` accepts a comma-separated roster. In the UI, the saved roster determines stable hotkey slots. **Ctrl+Alt+1..9** by default selects a speaker in the active bank, while **Ctrl+Alt+[** and **Ctrl+Alt+]** page through larger rosters. The Settings tab can change the modifier combination. A manual press is authoritative for the current VAD turn on either audio source, cuts in-flight audio cleanly, and is the only event allowed to improve a saved voice profile. Automatic low-confidence matches are labeled `Unknown` rather than guessed.
+`--speakers` accepts a comma-separated roster. In the UI, the saved roster determines stable hotkey slots. **Ctrl+Alt+1..9** by default selects a speaker in the active bank, while **Ctrl+Alt+[** and **Ctrl+Alt+]** page through larger rosters. The Settings tab can change the modifier combination. A manual press is authoritative for the current VAD turn on either audio source, cuts in-flight audio cleanly, and captures a quality-checked profile sample. Automatic low-confidence matches are labeled `Unknown` rather than guessed.
 
 An `Unknown` line doesn't have to stay that way. Each unnamed turn keeps its
 voice embedding in memory for the meeting, and once a profile firms up the
 worker re-scores them and renames the ones it is now sure about — to a stricter
 bar than live attribution, since it is rewriting a line you have already read.
-Clicking any transcript line puts it on someone by hand, or back to `Unknown`.
-Both corrections reach the saved `.txt`.
+Click any transcript line to put it on someone by hand: pick a name from the
+roster, or type a new one and press Enter — that person is saved to the
+library and added to the roster without switching the live speaker. The
+correction is also a lesson: the turn's voice goes into that person's profile
+and any other `Unknown` line it now explains is renamed too. Putting a line
+back to `Unknown` teaches nothing. All corrections reach the saved `.txt`.
 
 ## Architecture
 
