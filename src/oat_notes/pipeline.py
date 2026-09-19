@@ -7,9 +7,9 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
-from typing import Callable
 
 import numpy as np
 
@@ -155,7 +155,7 @@ class Pipeline:
             if tracking_enabled
             else {}
         )
-        self._tracking_generations = {channel: 0 for channel in channels}
+        self._tracking_generations = dict.fromkeys(channels, 0)
         self._chunkers = {
             channel: VadChunker(
                 vad_factory(),
@@ -170,17 +170,13 @@ class Pipeline:
             )
             for channel in channels
         }
-        self._pending_manual: dict[Channel, int | None] = {
-            channel: None for channel in channels
-        }
+        self._pending_manual: dict[Channel, int | None] = dict.fromkeys(channels)
         self._manual_turns: dict[tuple[Channel, int], int] = {}
         self._learning_lock = threading.Lock()
         self._learning_generation = 0
         self._profile_candidate: _ProfileCandidate | None = None
         self._learning_blocked_channels: set[Channel] = set()
-        self._recent_speech: dict[Channel, float | None] = {
-            channel: None for channel in channels
-        }
+        self._recent_speech: dict[Channel, float | None] = dict.fromkeys(channels)
         self._profile_queue: queue.Queue | None = (
             queue.Queue(maxsize=4) if learning_enabled else None
         )
@@ -530,8 +526,6 @@ class Pipeline:
         try:
             tracking_queue.put_nowait(item)
         except queue.Full:
-            # Tracking is live state, so a fresh window is more useful than a
-            # stale backlog when inference briefly falls behind.
             try:
                 tracking_queue.get_nowait()
             except queue.Empty:
@@ -736,7 +730,6 @@ class Pipeline:
                                 file=sys.stderr,
                             )
                     decision = self._speaker_resolver.resolve(chunk, embedding)
-                    profile = decision.profile
                     segment = replace(
                         segment,
                         speaker=decision.name,
@@ -744,17 +737,11 @@ class Pipeline:
                         speaker_index=decision.speaker_index,
                         attribution=decision.source,
                         confidence=decision.confidence,
-                        profile_state=profile.state if profile else None,
-                        enrollment_seconds=(
-                            profile.enrollment_seconds if profile else None
-                        ),
                     )
                 elif self._attributor is not None:
                     segment = replace(
                         segment, speaker=self._attributor.for_chunk(chunk)
                     )
-                # A turn-end decision still matters to active-speaker state
-                # even when transcription produced no printable text.
                 if segment.text or (
                     self._speaker_resolver is not None and segment.turn_end
                 ):

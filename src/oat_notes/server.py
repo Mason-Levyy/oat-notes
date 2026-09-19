@@ -11,12 +11,13 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Callable
 from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING
 
 from .attribution import Speaker
 from .config import Config
@@ -28,6 +29,11 @@ from .settings import AppSettings, SettingsStore
 from .single_instance import SingleInstance
 from .speaker_store import SpeakerStore
 from .types import Channel, TranscriptSegment
+
+if TYPE_CHECKING:
+    from .session import Session
+
+DEFAULT_SETTINGS = AppSettings()
 
 
 def dictation_options(settings: AppSettings) -> DictationOptions:
@@ -81,13 +87,14 @@ class AppState:
         config: Config,
         transcriber,
         out_dir: Path = Path("transcripts"),
-        settings: AppSettings = AppSettings(),
+        settings: AppSettings = DEFAULT_SETTINGS,
         save_settings: Callable[[AppSettings], None] | None = None,
         speaker_store: SpeakerStore | None = None,
         embedding_engine=None,
         tracking_embedding_engine=None,
         hotkey_listener=None,
         dictation=None,
+        shutdown: threading.Event | None = None,
     ) -> None:
         self.config = config
         self.transcriber = transcriber
@@ -122,7 +129,7 @@ class AppState:
         self.notes: list[dict] = []
         self.last_saved: str | None = None
         self.recovered: list[str] = []
-        self.shutdown = threading.Event()
+        self.shutdown = shutdown or threading.Event()
 
     def status(self) -> dict:
         with self.lock:
@@ -391,7 +398,7 @@ class AppState:
                 return {"error": "speaker library is unavailable"}
             try:
                 operation()
-            except (KeyError, ValueError) as error:
+            except (KeyError, TypeError, ValueError) as error:
                 return {"error": str(error).strip("'")}
         self.hub.publish({"type": "status", "recording": False})
         return self.status()
@@ -422,7 +429,7 @@ class AppState:
     def _group_members(body: dict) -> list[dict]:
         members = body.get("members", [])
         if not isinstance(members, list):
-            raise ValueError("group members must be a list")
+            raise TypeError("group members must be a list")
         return members
 
     def create_library_group(self, body: dict) -> dict:
@@ -935,11 +942,11 @@ def _load_asset(name: str) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
-    state: AppState  # assigned by serve()
-    port: int  # assigned by serve()
+    state: AppState
+    port: int
 
     def log_message(self, format: str, *log_args) -> None:
-        pass  # keep the console clean; transcript lines matter more
+        pass
 
     def _send(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
         self.send_response(status)
@@ -991,10 +998,13 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
-            if not isinstance(body, dict):
-                raise ValueError("request body must be a JSON object")
         except ValueError as error:
             self._send_json({"error": str(error)}, status=HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(body, dict):
+            self._send_json(
+                {"error": "request body must be a JSON object"}, status=HTTPStatus.BAD_REQUEST
+            )
             return
 
         if self.path == "/api/start":
@@ -1125,9 +1135,6 @@ def _initialize_model(state: AppState, config: Config) -> None:
         )
         state.speaker_model_failed(error)
     else:
-        # A second extractor instance lets live speaker tracking run
-        # without queuing behind per-turn attribution on the same model
-        # session; fall back to sharing one instance if it won't load.
         tracking_engine = engine
         try:
             tracking_engine = SherpaOnnxEmbeddingEngine()
@@ -1240,8 +1247,9 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
         config = replace(config, model_name=settings.whisper_model)
     hotkey_listener = HotkeyListener()
     url = f"http://127.0.0.1:{args.port}"
+    shutdown = threading.Event()
     overlay = Overlay(
-        on_quit=lambda: state.shutdown.set(),
+        on_quit=shutdown.set,
         on_open_ui=lambda: webbrowser.open(url),
     )
     last_phase_sent_to_browser: list[str] = [""]
@@ -1267,6 +1275,7 @@ def serve(config: Config, args: argparse.Namespace, open_browser: bool = True) -
         speaker_store=speaker_store,
         hotkey_listener=hotkey_listener,
         dictation=dictation,
+        shutdown=shutdown,
     )
     recovered = recover_journals(args.out_dir)
     if recovered:

@@ -15,8 +15,8 @@ from __future__ import annotations
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .inject import VK_NONAME
 from .settings import MODIFIER_ORDER as MODIFIERS
@@ -26,6 +26,8 @@ BRACKET = "bracket"
 
 _NUMPAD_ONE_VK = 97
 _NUMPAD_NINE_VK = 105
+_VK_OEM_4_LEFT_BRACKET = 219
+_VK_OEM_6_RIGHT_BRACKET = 221
 
 
 @dataclass(frozen=True)
@@ -41,7 +43,7 @@ class Chord:
         requested = frozenset(modifiers)
         unknown = requested.difference(MODIFIERS)
         if unknown:
-            raise ValueError(f"unknown hotkey modifier: {sorted(unknown)[0]}")
+            raise ValueError(f"unknown hotkey modifier: {min(unknown)}")
         if not requested and key is None:
             raise ValueError("a chord needs at least one modifier or a key")
         return cls(requested, key)
@@ -261,7 +263,7 @@ class HotkeyListener:
             return "alt"
         if name.startswith("shift"):
             return "shift"
-        if name.startswith("cmd") or name.startswith("win"):
+        if name.startswith(("cmd", "win")):
             return "win"
         return None
 
@@ -287,8 +289,8 @@ class HotkeyListener:
         if char == "]":
             return 1
         virtual_key = getattr(key, "vk", None)
-        if virtual_key == 219:  # OEM_4: [ on a US Windows keyboard
+        if virtual_key == _VK_OEM_4_LEFT_BRACKET:
             return -1
-        if virtual_key == 221:  # OEM_6: ] on a US Windows keyboard
+        if virtual_key == _VK_OEM_6_RIGHT_BRACKET:
             return 1
         return None

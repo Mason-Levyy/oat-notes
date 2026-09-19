@@ -33,7 +33,6 @@ def test_line_labels():
     assert line_for(mic, label_channels=False) == "[00:00:05] hello"
     assert line_for(mic, label_channels=True) == "[00:00:05] Microphone: hello"
     assert line_for(system, label_channels=True) == "[00:00:06] System audio: hi there"
-    # A named speaker (Phase 2 attribution) wins over the channel label.
     assert line_for(named, label_channels=True) == "[00:00:07] Sarah: agreed"
 
 
@@ -150,7 +149,6 @@ def test_journal_flushes_lines_and_notes_as_they_land(tmp_path):
     log.add(segment("hello", 5.0, speaker="Mason"))
     log.add_note(6.0, "ship it")
 
-    # Readable mid-meeting — the crash-safety guarantee.
     assert path.read_text(encoding="utf-8") == (
         "[00:00:05] Mason: hello\n[00:00:06] NOTE: ship it\n"
     )
@@ -163,7 +161,7 @@ def test_save_removes_the_journal(tmp_path):
     assert path.exists()
 
     log.save(tmp_path, datetime(2026, 7, 9, 14, 30), "meeting")
-    assert not path.exists()  # transcript persisted, journal redundant
+    assert not path.exists()
 
 
 def test_discard_journal_removes_it_without_saving(tmp_path):
@@ -187,8 +185,8 @@ def test_recover_journals_promotes_orphans_and_clears_empties(tmp_path):
     assert recovered == [tmp_path / "crashed_2026-07-09_1430_recovered.txt"]
     assert recovered[0].read_text(encoding="utf-8") == "[00:00:01] Mason: unsaved words\n"
     assert not live.exists()
-    assert not empty.exists()  # empty journal just cleaned up
-    assert recover_journals(tmp_path) == []  # nothing left to recover
+    assert not empty.exists()
+    assert recover_journals(tmp_path) == []
 
 
 def test_a_journal_another_process_holds_open_does_not_stop_startup(tmp_path, monkeypatch):

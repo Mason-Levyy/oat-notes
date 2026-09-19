@@ -29,10 +29,6 @@ MAX_CLIPPED_RATIO = 0.01
 SOURCE_THRESHOLD = 0.60
 GLOBAL_THRESHOLD = 0.65
 MATCH_MARGIN = 0.05
-# Fallback tier: when no enrolled voice clears the confident bar above, the
-# closest in-call profile is still a better answer than "Unknown". It's
-# assigned as a lower-confidence guess (source "nearest") provided it clears
-# this floor and isn't a near-tie between two people.
 NEAREST_THRESHOLD = 0.45
 NEAREST_MARGIN = 0.02
 
@@ -169,8 +165,6 @@ class SpeakerResolver:
         if chunk_quality(chunk) < 1.0 - MAX_CLIPPED_RATIO:
             return False
         if chunk.manual_speaker_index is not None:
-            # Manual enrollment is handled by the stability-gated learner,
-            # independently from transcript attribution.
             return False
         return len(self._members()) > 1
 
@@ -246,9 +240,6 @@ class SpeakerResolver:
                             "auto",
                             best_score,
                         )
-                    # Confident match failed, but the closest in-call voice is
-                    # still a reasonable guess — assign it rather than leaving
-                    # the turn unknown, unless it's a near-tie with someone else.
                     if best_score >= NEAREST_THRESHOLD and margin >= NEAREST_MARGIN:
                         return AttributionDecision(
                             speaker.name,
@@ -402,7 +393,6 @@ class RollingSpeakerBuffer:
         self._sample_count += block.size
         self._samples_since_check += block.size
 
-        # Keep the shortest whole-block window that still covers the target.
         while (
             len(self._windows) > 1
             and self._sample_count - self._windows[0][1].size
@@ -442,10 +432,6 @@ class SpeakerChangeGate:
         self._current: int | None = None
         self._candidate: int | None = None
         self._count = 0
-
-    @property
-    def current(self) -> int | None:
-        return self._current
 
     def force(self, speaker_index: int | None) -> None:
         self._current = speaker_index
