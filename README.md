@@ -1,8 +1,9 @@
 # oat-notes
 
 [![ci](https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
+Live meeting transcription and system-wide dictation for Windows, entirely on-device. Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
 It also does **dictation**: hold Ctrl+Win anywhere in Windows, speak, and the cleaned text is inserted into whatever has focus — with automatic email formatting. See [Dictation](#dictation).
 
@@ -270,10 +271,22 @@ The legacy `.\scripts\build_exe.ps1` command remains as an alias for
 `build_app.ps1`. All CLI flags still work. Model weights download to the user
 cache on first run, keeping the installer smaller.
 
-## Tests
+## Development
 
-```
-uv run pytest
+```powershell
+uv sync --group dev
+uv run ruff check src tests   # lint (gate)
+uv run pytest                 # tests (gate); -m "not slow" as CI does
+uvx mypy src/oat_notes        # advisory type check
 ```
 
-Chunker and clock tests run against a fake VAD — no audio hardware needed.
+`scripts\check.ps1` runs the gate and prints the mypy count. Tests run
+against inline fakes — no audio hardware, model or network needed; the one
+test that loads a real model is marked `slow`. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the code standards and branch
+conventions, and [SECURITY.md](SECURITY.md) for reporting a privacy or
+security issue.
+
+## License
+
+[MIT](LICENSE) © 2026 Mason Levy.
