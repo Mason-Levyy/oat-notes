@@ -136,7 +136,7 @@ def test_destructive_library_actions_sit_behind_an_overflow_toggle():
 def test_the_library_gains_a_filter_only_once_the_list_is_long():
     assert 'id="library-search"' in HTML
     assert "LIBRARY_FILTER_THRESHOLD" in HTML
-    assert "speaker.name.toLowerCase().includes(needle)" in HTML
+    assert 'nameMatches(speaker.name, needle, "contains")' in HTML
 
 
 def test_groups_collapse_by_default_and_label_their_member_list():
