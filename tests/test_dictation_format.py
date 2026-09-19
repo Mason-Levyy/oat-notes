@@ -93,8 +93,8 @@ def test_vocabulary_substitution_is_whole_word_and_case_insensitive():
 
 
 def test_vocabulary_runs_inside_apply_rules():
-    assert apply_rules("um ask levya about it", (("levya", "Mason"),)) == (
-        "Ask Mason about it"
+    assert apply_rules("um ask ada about it", (("ada", "Ada"),)) == (
+        "Ask Ada about it"
     )
 
 
@@ -103,8 +103,8 @@ def test_vocabulary_ignores_blank_entries():
 
 
 def test_vocabulary_hotwords_are_the_written_forms_once_each():
-    vocabulary = (("levya", "Mason"), ("oat notes", "Oat Notes"), ("mace in", "Mason"), ("", "x"))
-    assert vocabulary_hotwords(vocabulary) == "Mason, Oat Notes"
+    vocabulary = (("ada", "Ada"), ("oat notes", "Oat Notes"), ("aider", "Ada"), ("", "x"))
+    assert vocabulary_hotwords(vocabulary) == "Ada, Oat Notes"
     assert vocabulary_hotwords(()) is None
 
 

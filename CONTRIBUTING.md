@@ -73,3 +73,5 @@ Open an issue with the steps to reproduce, the `oat-notes` version (the
 commit, or the installer name) and the Windows build.
 Never paste a transcript, dictated text or audio into an issue; describe the
 shape of the problem instead. Security concerns go through [SECURITY.md](SECURITY.md).
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md).

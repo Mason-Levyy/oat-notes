@@ -524,13 +524,13 @@ def test_settings_map_onto_dictation_options():
         AppSettings(
             dictation_modifiers=("alt", "win"),
             dictation_tap_ms=250,
-            dictation_vocabulary=(("levya", "Mason"),),
+            dictation_vocabulary=(("ada", "Ada"),),
             dictation_spoken_punctuation=True,
         )
     )
     assert options.modifiers == ("alt", "win")
     assert options.tap_seconds == 0.25
-    assert options.vocabulary == (("levya", "Mason"),)
+    assert options.vocabulary == (("ada", "Ada"),)
     assert options.spoken_punctuation is True
 
 
