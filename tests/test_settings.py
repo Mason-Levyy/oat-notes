@@ -73,7 +73,7 @@ def test_full_dictation_round_trip(tmp_path):
         dictation_tap_ms=250,
         dictation_restore_clipboard=False,
         dictation_spoken_punctuation=True,
-        dictation_vocabulary=(("levya", "Mason"), ("oat notes", "Oat Notes")),
+        dictation_vocabulary=(("ada", "Ada"), ("oat notes", "Oat Notes")),
         overlay_enabled=False,
     )
     store.save(settings)
@@ -132,7 +132,7 @@ def test_an_empty_email_chord_disables_it():
         {"dictation_tap_ms": True},
         {"dictation_enabled": "yes"},
         {"dictation_spoken_punctuation": "sure"},
-        {"dictation_vocabulary": "levya=Mason"},
+        {"dictation_vocabulary": "ada=Ada"},
         {"dictation_vocabulary": [["only-one-item"]]},
         {"dictation_vocabulary": [[1, 2]]},
     ],
@@ -144,16 +144,16 @@ def test_invalid_dictation_settings_are_rejected(payload):
 
 def test_vocabulary_accepts_the_ui_shape_and_drops_blanks():
     settings = AppSettings.from_dict(
-        {"dictation_vocabulary": [["levya", "Mason"], ["  ", "ignored"], ["x", " y "]]}
+        {"dictation_vocabulary": [["ada", "Ada"], ["  ", "ignored"], ["x", " y "]]}
     )
-    assert settings.dictation_vocabulary == (("levya", "Mason"), ("x", "y"))
+    assert settings.dictation_vocabulary == (("ada", "Ada"), ("x", "y"))
 
 
 def test_vocabulary_accepts_objects():
     settings = AppSettings.from_dict(
-        {"dictation_vocabulary": [{"heard": "levya", "written": "Mason"}]}
+        {"dictation_vocabulary": [{"heard": "ada", "written": "Ada"}]}
     )
-    assert settings.dictation_vocabulary == (("levya", "Mason"),)
+    assert settings.dictation_vocabulary == (("ada", "Ada"),)
 
 
 def test_unknown_keys_are_ignored():
