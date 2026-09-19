@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import re
-import sys
 import threading
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 from .types import Channel, TranscriptSegment
+
+log = logging.getLogger(__name__)
 
 CHANNEL_LABELS = {Channel.MIC: "Microphone", Channel.LOOPBACK: "System audio"}
 JOURNAL_SUFFIX = ".partial.txt"
@@ -82,7 +84,7 @@ def recover_journals(directory: Path) -> list[Path]:
                 target = directory / f"{stem}_recovered_{counter}.txt"
             partial.rename(target)
         except OSError as error:
-            print(f"warning: leaving {partial.name} in place: {error}", file=sys.stderr)
+            log.warning("leaving %s in place: %s", partial.name, error)
             continue
         recovered.append(target)
     return recovered
@@ -105,8 +107,10 @@ def line_for(segment: TranscriptSegment, label_channels: bool) -> str:
 
 
 class MeetingLog:
-    """Unlocked by design: ``add`` runs on the transcription worker thread,
-    everything else only after ``Pipeline.finish()`` has joined it."""
+    """Lines arrive from the transcription worker while relabels, renames
+    and notes come from HTTP and hotkey threads, so every method takes
+    the lock; ``save`` and ``apply_cleanup`` still expect the pipeline to
+    have finished."""
 
     def __init__(
         self, label_channels: bool, journal: TranscriptJournal | None = None
@@ -115,40 +119,47 @@ class MeetingLog:
         self._segments: list[TranscriptSegment] = []
         self._notes: list[tuple[float, str]] = []
         self._journal = journal
+        self._lock = threading.Lock()
 
     def add(self, segment: TranscriptSegment) -> int:
         """Append a segment and return its line id for later cleanup."""
-        self._segments.append(segment)
+        with self._lock:
+            self._segments.append(segment)
+            line_id = len(self._segments) - 1
         if self._journal is not None:
             self._journal.append(line_for(segment, self._label_channels))
-        return len(self._segments) - 1
+        return line_id
 
     def apply_cleanup(self, results: dict[int, str | None]) -> None:
         """Rewrite (or drop, for ``None``) lines by id. Call only after the
         pipeline and cleanup worker have finished — same single-threaded
         window as ``save``."""
         kept: list[TranscriptSegment] = []
-        for index, segment in enumerate(self._segments):
-            if index not in results:
-                kept.append(segment)
-                continue
-            text = results[index]
-            if text is not None:
-                kept.append(replace(segment, text=text))
-        self._segments = kept
+        with self._lock:
+            for index, segment in enumerate(self._segments):
+                if index not in results:
+                    kept.append(segment)
+                    continue
+                text = results[index]
+                if text is not None:
+                    kept.append(replace(segment, text=text))
+            self._segments = kept
 
     def add_note(self, timestamp: float, text: str) -> None:
-        self._notes.append((timestamp, text))
+        with self._lock:
+            self._notes.append((timestamp, text))
         if self._journal is not None:
             self._journal.append(f"[{format_timestamp(timestamp)}] NOTE: {text}")
 
     def speakers_with_lines(self) -> set[str]:
-        return {
-            segment.speaker for segment in self._segments if segment.speaker
-        }
+        with self._lock:
+            return {
+                segment.speaker for segment in self._segments if segment.speaker
+            }
 
     def has_line(self, line_id: int) -> bool:
-        return 0 <= line_id < len(self._segments)
+        with self._lock:
+            return 0 <= line_id < len(self._segments)
 
     def relabel(self, line_id: int, speaker: str) -> bool:
         """Move one line to a different speaker, by id.
@@ -161,22 +172,25 @@ class MeetingLog:
         crash artifact, not the transcript. ``save`` rebuilds from
         ``_segments``, so the correction lands in the file that matters.
         """
-        if not self.has_line(line_id):
-            return False
-        self._segments[line_id] = replace(self._segments[line_id], speaker=speaker)
-        return True
+        with self._lock:
+            if not 0 <= line_id < len(self._segments):
+                return False
+            self._segments[line_id] = replace(self._segments[line_id], speaker=speaker)
+            return True
 
     def rename(self, renames: dict[str, str]) -> None:
-        self._segments = [
-            replace(segment, speaker=renames[segment.speaker])
-            if segment.speaker in renames
-            else segment
-            for segment in self._segments
-        ]
+        with self._lock:
+            self._segments = [
+                replace(segment, speaker=renames[segment.speaker])
+                if segment.speaker in renames
+                else segment
+                for segment in self._segments
+            ]
 
     @property
     def is_empty(self) -> bool:
-        return not self._segments and not self._notes
+        with self._lock:
+            return not self._segments and not self._notes
 
     def discard_journal(self) -> None:
         """Drop the crash-safety journal without saving (meeting discarded)."""
@@ -189,13 +203,14 @@ class MeetingLog:
         directory.mkdir(parents=True, exist_ok=True)
         stem = _stem_for(started_at, name)
         path = directory / f"{stem}.txt"
-        entries = [
-            (segment.start, line_for(segment, self._label_channels))
-            for segment in self._segments
-        ] + [
-            (timestamp, f"[{format_timestamp(timestamp)}] NOTE: {text}")
-            for timestamp, text in self._notes
-        ]
+        with self._lock:
+            entries = [
+                (segment.start, line_for(segment, self._label_channels))
+                for segment in self._segments
+            ] + [
+                (timestamp, f"[{format_timestamp(timestamp)}] NOTE: {text}")
+                for timestamp, text in self._notes
+            ]
         entries.sort(key=lambda entry: entry[0])
         lines = [line for _, line in entries]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")

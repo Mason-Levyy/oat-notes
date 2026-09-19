@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import sys
+import logging
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .config import Config
+from .log import configure as configure_logging
 
 if TYPE_CHECKING:
     import numpy as np
@@ -17,8 +18,11 @@ if TYPE_CHECKING:
     from .output import MeetingLog
     from .types import TranscriptSegment
 
+log = logging.getLogger(__name__)
+
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser(
         prog="oat-notes", description="Live meeting transcription for Windows."
     )
@@ -299,10 +303,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     elif not args.no_file:
         print("No speech detected — no transcript written.", flush=True)
     if session.dropped_blocks:
-        print(
-            f"warning: dropped {session.dropped_blocks} audio blocks",
-            file=sys.stderr,
-        )
+        log.warning("dropped %d audio blocks", session.dropped_blocks)
 
 
 def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:

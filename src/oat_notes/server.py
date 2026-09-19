@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import queue
 import sys
@@ -23,6 +24,7 @@ from .attribution import Speaker
 from .config import Config
 from .dictation.controller import DictationController, DictationOptions
 from .hotkeys import HotkeyListener
+from .line_feed import LineFeed
 from .output import format_timestamp, recover_journals
 from .overlay import Overlay
 from .settings import AppSettings, SettingsStore
@@ -32,6 +34,9 @@ from .types import Channel, TranscriptSegment
 
 if TYPE_CHECKING:
     from .session import Session
+from .log import error_kind
+
+log = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS = AppSettings()
 
@@ -56,6 +61,7 @@ class EventHub:
 
     def __init__(self) -> None:
         self._subscribers: list[queue.Queue] = []
+        self._lagging: set[int] = set()
         self._lock = threading.Lock()
 
     def subscribe(self) -> queue.Queue:
@@ -68,15 +74,23 @@ class EventHub:
         with self._lock:
             if subscriber in self._subscribers:
                 self._subscribers.remove(subscriber)
+            self._lagging.discard(id(subscriber))
 
-    def publish(self, event: dict) -> None:
+    def publish(self, event: dict) -> int:
+        """Returns how many subscribers missed the event because their
+        queue was full — a browser tab that has stopped draining."""
         with self._lock:
             subscribers = list(self._subscribers)
+        missed = 0
         for subscriber in subscribers:
             try:
                 subscriber.put_nowait(event)
             except queue.Full:
-                pass
+                missed += 1
+                if id(subscriber) not in self._lagging:
+                    self._lagging.add(id(subscriber))
+                    log.warning("a browser tab stopped reading events; dropping them")
+        return missed
 
 
 class AppState:
@@ -111,7 +125,6 @@ class AppState:
         )
         self.speaker_model_error: str | None = None
         self.cleaner = None
-        self.llm_engine = None
         self.cleanup_status = "loading"
         self.cleanup_error: str | None = None
         self.model_status = "ready" if transcriber is not None else "loading"
@@ -125,13 +138,13 @@ class AppState:
         self._enrollment_event: dict | None = None
         self.roster: tuple[Speaker, ...] = ()
         self.meeting_name: str = "meeting"
-        self.lines: list[dict] = []
-        self.notes: list[dict] = []
+        self.lines = LineFeed()
         self.last_saved: str | None = None
         self.recovered: list[str] = []
         self.shutdown = shutdown or threading.Event()
 
     def status(self) -> dict:
+        lines, notes = self.lines.snapshot()
         with self.lock:
             recording = self.session is not None
             actives = (
@@ -211,8 +224,8 @@ class AppState:
                     if self.speaker_store is not None
                     else {"speakers": [], "groups": [], "ready_seconds": 5.0}
                 ),
-                "lines": self.lines,
-                "notes": self.notes,
+                "lines": lines,
+                "notes": notes,
                 "last_saved": self.last_saved,
                 "recovered": self.recovered,
                 "enrollment": self._enrollment_event,
@@ -480,9 +493,10 @@ class AppState:
                     "target_seconds": progress.target_seconds,
                     "reason": progress.reason,
                 }
-                self._enrollment_event = None if terminal else event
-                if terminal:
-                    self.enrollment = None
+                with self.lock:
+                    self._enrollment_event = None if terminal else event
+                    if terminal:
+                        self.enrollment = None
                 self.hub.publish(event)
 
             self.enrollment = VoiceEnrollmentRecorder(
@@ -536,8 +550,7 @@ class AppState:
                 )
             self.roster = tuple(roster)
             self.meeting_name = str(body.get("name") or "meeting").strip() or "meeting"
-            self.lines = []
-            self.notes = []
+            self.lines.reset()
             self.last_saved = None
 
             def on_segment(
@@ -564,19 +577,16 @@ class AppState:
                 self.hub.publish({"type": "line", **line})
 
             def on_line_cleaned(line_id: int, text: str | None) -> None:
-                for position, line in enumerate(self.lines):
-                    if line.get("id") != line_id:
-                        continue
-                    if text is None:
-                        del self.lines[position]
+                if text is None:
+                    if self.lines.drop(line_id):
                         self.hub.publish({"type": "line_drop", "id": line_id})
-                    else:
-                        original = line["text"]
-                        line["text"] = text
-                        self.hub.publish(
-                            {"type": "line_update", **line, "original": original}
-                        )
                     return
+                change = self.lines.update(line_id, text=text)
+                if change is not None:
+                    before, updated = change
+                    self.hub.publish(
+                        {"type": "line_update", **updated, "original": before["text"]}
+                    )
 
             def on_line_relabelled(
                 line_id: int, name: str, index: int, score: float
@@ -628,7 +638,7 @@ class AppState:
                 self.hub.publish({"type": "profile_learning", **update.to_dict()})
 
             def on_note(note: dict) -> None:
-                self.notes.append(note)
+                self.lines.add_note(note)
                 self.hub.publish({"type": "note", **note})
 
             self.awaiting_backfill = None
@@ -721,9 +731,7 @@ class AppState:
             self.awaiting_backfill = None
             saved = session.save(renames)
             self.last_saved = str(saved) if saved else None
-            for line in self.lines:
-                if line["label"] in renames:
-                    line["label"] = renames[line["label"]]
+            self.lines.relabel(renames)
         self.hub.publish({"type": "status", "recording": False})
         return self.status()
 
@@ -797,9 +805,7 @@ class AppState:
                 return {"error": error}
             new_name = session.roster[index].name
             if old is not None and old != new_name:
-                for line in self.lines:
-                    if line.get("label") == old:
-                        line["label"] = new_name
+                self.lines.relabel({old: new_name})
             self.roster = tuple(session.roster)
         self.hub.publish({"type": "status", "recording": True})
         return self.status()
@@ -815,15 +821,11 @@ class AppState:
         """Re-render one transcript line under a new speaker. Rides the same
         line_update event the cleanup pass already uses, so the browser needs
         nothing new to show it."""
-        for line in self.lines:
-            if line.get("id") != line_id:
-                continue
-            line["label"] = name
-            line["speaker_index"] = index
-            line["attribution"] = source
-            line["confidence"] = confidence
-            self.hub.publish({"type": "line_update", **line})
-            return
+        change = self.lines.update(
+            line_id, label=name, speaker_index=index, attribution=source, confidence=confidence
+        )
+        if change is not None:
+            self.hub.publish({"type": "line_update", **change[1]})
 
     def assign_line(self, body: dict) -> dict:
         """Put a transcript line on a person by hand: a roster ``index``, or
@@ -1112,7 +1114,7 @@ def _load_transcriber(state: AppState, config: Config) -> None:
         warm_up(config, transcriber)
     except Exception as error:
         elapsed = time.perf_counter() - started
-        print(f"Model initialization failed after {elapsed:.1f}s: {error}", file=sys.stderr)
+        log.error("model initialization failed after %.1fs: %s", elapsed, error)
         state.model_failed(error, elapsed)
     else:
         elapsed = time.perf_counter() - started
@@ -1129,20 +1131,18 @@ def _initialize_model(state: AppState, config: Config) -> None:
 
         engine = SherpaOnnxEmbeddingEngine()
     except Exception as error:
-        print(
-            f"Speaker recognition unavailable: {type(error).__name__}: {error}",
-            file=sys.stderr,
-        )
+        log.error("speaker recognition unavailable: %s: %s", error_kind(error), error)
         state.speaker_model_failed(error)
     else:
         tracking_engine = engine
         try:
             tracking_engine = SherpaOnnxEmbeddingEngine()
         except Exception as error:
-            print(
-                "Live speaker tracking will share the main speaker model "
-                f"(second instance failed: {type(error).__name__}: {error})",
-                file=sys.stderr,
+            log.warning(
+                "live speaker tracking will share the main speaker model"
+                " (second instance failed: %s: %s)",
+                error_kind(error),
+                error,
             )
         print("Local speaker recognition ready", flush=True)
         state.speaker_model_ready(engine, tracking_engine)
@@ -1163,21 +1163,16 @@ def _initialize_model(state: AppState, config: Config) -> None:
         cleaner = TranscriptCleaner(engine)
         cleaner.warm_up()
     except ImportError:
-        print(
-            "Transcript cleanup unavailable: install the openvino extra"
-            " (uv sync --extra openvino)",
-            file=sys.stderr,
+        log.warning(
+            "transcript cleanup unavailable: install the openvino extra"
+            " (uv sync --extra openvino)"
         )
         state.cleaner_unavailable("openvino extra not installed")
     except Exception as error:
-        print(
-            f"Transcript cleanup unavailable: {type(error).__name__}: {error}",
-            file=sys.stderr,
-        )
+        log.error("transcript cleanup unavailable: %s: %s", error_kind(error), error)
         state.cleaner_failed(error)
     else:
         print(f"Language model ready on {engine.device}", flush=True)
-        state.llm_engine = engine
         if state.dictation is not None:
             state.dictation.set_engine(engine)
         state.cleaner_ready(cleaner)
@@ -1219,10 +1214,8 @@ def _await_shutdown(state: AppState, overlay, show_overlay: bool = True) -> None
             overlay.run(state.shutdown)
             return
         except Exception as error:
-            print(
-                f"overlay unavailable, continuing without it: "
-                f"{type(error).__name__}: {error}",
-                file=sys.stderr,
+            log.warning(
+                "overlay unavailable, continuing without it: %s: %s", error_kind(error), error
             )
     while not state.shutdown.wait(timeout=0.3):
         pass

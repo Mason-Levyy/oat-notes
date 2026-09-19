@@ -3,7 +3,7 @@ CPU, or OpenVINO GenAI offloading to the Intel NPU/GPU."""
 
 from __future__ import annotations
 
-import sys
+import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -17,6 +17,8 @@ from .models import (
 )
 from .repetition import collapse_repeated_runs
 from .types import AudioChunk, TranscriptSegment
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ class FasterWhisperTranscriber(Transcriber):
                     f"model {config.model_name!r} is not cached locally and"
                     " --offline forbids downloading it"
                 ) from None
-            print(f"downloading {config.model_name}…", file=sys.stderr)
+            log.info("downloading %s", config.model_name)
             ensure_tls_trust()
             self._model = WhisperModel(
                 config.model_name, device="cpu", compute_type=config.compute_type

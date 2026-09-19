@@ -12,14 +12,17 @@ on the machine — keep them quick.
 
 from __future__ import annotations
 
-import sys
+import logging
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from .inject import VK_NONAME
+from .log import error_kind
 from .settings import MODIFIER_ORDER as MODIFIERS
+
+log = logging.getLogger(__name__)
 
 DIGIT = "digit"
 BRACKET = "bracket"
@@ -201,10 +204,7 @@ class HotkeyListener:
 
             defuse_start_menu()
         except Exception as error:
-            print(
-                f"could not defuse the Start menu: {type(error).__name__}",
-                file=sys.stderr,
-            )
+            log.warning("could not defuse the Start menu: %s", error_kind(error))
 
     def _cancel_armed(self) -> None:
         for binding in self._snapshot():
@@ -252,7 +252,7 @@ class HotkeyListener:
         try:
             callback(*arguments)
         except Exception as error:
-            print(f"hotkey callback error: {type(error).__name__}", file=sys.stderr)
+            log.error("hotkey callback failed: %s", error_kind(error))
 
     @staticmethod
     def _modifier_name(key) -> str | None:

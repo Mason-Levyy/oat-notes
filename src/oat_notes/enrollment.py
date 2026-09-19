@@ -3,6 +3,7 @@ store voice samples for one saved speaker without running a meeting."""
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from collections.abc import Callable
@@ -23,6 +24,8 @@ from .speaker_id import (
 from .speaker_store import SpeakerProfile, SpeakerStore
 from .types import AudioChunk, Channel
 from .vad import SileroVad
+
+log = logging.getLogger(__name__)
 
 TARGET_ENROLLMENT_SECONDS = 8.0
 
@@ -96,7 +99,7 @@ class VoiceEnrollmentRecorder:
         try:
             self.frame_queue.put_nowait(None)
         except queue.Full:
-            pass
+            log.warning("voice enrollment stop request dropped: frame queue is full")
 
     def _run(self) -> None:
         self._on_progress(

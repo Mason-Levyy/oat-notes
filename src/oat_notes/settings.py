@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
-import sys
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .paths import app_data_dir
+
+log = logging.getLogger(__name__)
 
 MODIFIER_ORDER = ("ctrl", "alt", "shift", "win")
 MODIFIER_LABELS = {
@@ -250,7 +252,7 @@ class SettingsStore:
         except FileNotFoundError:
             return AppSettings()
         except (OSError, ValueError, TypeError) as error:
-            print(f"warning: ignoring invalid settings file: {error}", file=sys.stderr)
+            log.warning("ignoring invalid settings file: %s", error)
             return AppSettings()
 
     def save(self, settings: AppSettings) -> None:

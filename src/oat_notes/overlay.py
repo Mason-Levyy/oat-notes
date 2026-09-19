@@ -12,6 +12,7 @@ own ``after`` loop drains.
 from __future__ import annotations
 
 import ctypes
+import logging
 import queue
 import sys
 import threading
@@ -28,6 +29,9 @@ from .dictation.phases import (
     LOADING,
     TRANSCRIBING,
 )
+from .log import error_kind
+
+log = logging.getLogger(__name__)
 
 INK = "#1A1A1A"
 PAPER = "#EDE8DD"
@@ -100,14 +104,14 @@ def set_dpi_awareness() -> None:
             ctypes.c_void_p(_DPI_PER_MONITOR_AWARE_V2)
         )
         return
-    except Exception:
-        pass
+    except Exception as error:
+        log.debug("per-monitor DPI awareness v2 unavailable: %s", error_kind(error))
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(
             _DPI_PER_MONITOR_AWARE_WINDOWS_10
         )
-    except Exception:
-        pass
+    except Exception as error:
+        log.warning("DPI awareness not set; the overlay may be blurry: %s", error_kind(error))
 
 
 def cursor_work_area() -> tuple[int, int, int, int]:
@@ -149,7 +153,7 @@ def make_click_through_and_unfocusable(hwnd: int) -> None:
         )
         user32.ShowWindow(ctypes.c_void_p(hwnd), _SW_SHOWNOACTIVATE)
     except Exception as error:
-        print(f"overlay focus guard failed: {type(error).__name__}", file=sys.stderr)
+        log.warning("overlay focus guard failed: %s", error_kind(error))
 
 
 def phase_label(state: OverlayState) -> str:
@@ -275,8 +279,8 @@ class Overlay:
         finally:
             try:
                 self._root.destroy()
-            except Exception:
-                pass
+            except Exception as error:
+                log.debug("overlay window did not close cleanly: %s", error_kind(error))
 
     def _hwnd(self) -> int:
         try:

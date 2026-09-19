@@ -129,7 +129,7 @@ def test_worker_records_dropped_lines_as_none():
     assert worker.results() == {3: None}
 
 
-def test_worker_error_leaves_line_raw_and_hides_captured_words(capsys):
+def test_worker_error_leaves_line_raw_and_hides_captured_words(caplog):
     def boom(text):
         raise RuntimeError("captured words must stay private")
 
@@ -139,9 +139,8 @@ def test_worker_error_leaves_line_raw_and_hides_captured_words(capsys):
 
     assert worker.results() == {}
     assert events == []
-    error_log = capsys.readouterr().err
-    assert "RuntimeError" in error_log
-    assert "captured words must stay private" not in error_log
+    assert "RuntimeError" in caplog.text
+    assert "captured words must stay private" not in caplog.text
 
 
 def test_worker_full_queue_skips_silently():
