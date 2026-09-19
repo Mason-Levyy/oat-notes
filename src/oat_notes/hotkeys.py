@@ -59,9 +59,9 @@ class Chord:
 @dataclass
 class _Binding:
     chord: Chord
-    on_press: Callable
-    on_release: Callable[[float], None] | None = None
-    on_cancel: Callable[[], None] | None = None
+    on_press: Callable[[], object]
+    on_release: Callable[[float], object] | None = None
+    on_cancel: Callable[[], object] | None = None
     armed_at: float | None = None
     cancelled: bool = False
 
@@ -108,9 +108,9 @@ class HotkeyListener:
         self,
         name: str,
         chord: Chord,
-        on_press: Callable,
-        on_release: Callable[[float], None] | None = None,
-        on_cancel: Callable[[], None] | None = None,
+        on_press: Callable[[], object],
+        on_release: Callable[[float], object] | None = None,
+        on_cancel: Callable[[], object] | None = None,
     ) -> None:
         """Register or replace a binding. ``on_release`` receives how long the
         chord was held, so the caller can tell a tap from a hold. Timed with

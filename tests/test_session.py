@@ -4,8 +4,14 @@ from types import SimpleNamespace
 import numpy as np
 
 from oat_notes.attribution import Speaker
-from oat_notes.session import UNKNOWN_TURN_MEMORY, Session, UnknownTurn
+from oat_notes.pipeline import ProfileLearningUpdate
+from oat_notes.session import Session
 from oat_notes.types import Channel, TranscriptSegment
+from oat_notes.unknown_turns import MEMORY_LIMIT, UnknownTurn
+
+
+def collecting(speaker_index):
+    return ProfileLearningUpdate("collecting", speaker_index, None, 0.0, 3.0)
 
 
 def bare_session():
@@ -106,7 +112,7 @@ def test_remove_speaker_blocks_while_sample_capture_in_progress():
     session.roster = [Speaker("Alex", hotkey_slot=0), Speaker("Sam", hotkey_slot=1)]
     session.current_speaker = 0
     session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
-    session.profile_learning = {"speaker_index": 1, "phase": "collecting"}
+    session.profile_learning = collecting(1)
     session.log = SimpleNamespace(speakers_with_lines=set)
 
     assert session.remove_speaker(1) == "a voice sample is being captured for this speaker"
@@ -157,8 +163,11 @@ class FakeStore:
         self.speakers = list(speakers)
         self.created = []
 
-    def list_speakers(self):
-        return tuple(self.speakers)
+    def find_by_name(self, name):
+        return next(
+            (item for item in self.speakers if item.name.casefold() == name.casefold()),
+            None,
+        )
 
     def create_speaker(self, name):
         self.created.append(name)
@@ -478,7 +487,7 @@ def test_resetting_a_profile_waits_for_an_in_flight_sample():
         [Speaker("Sarah", hotkey_slot=0)],
         resolver=SimpleNamespace(reset_profile=lambda index: None),
     )
-    session.profile_learning = {"speaker_index": 0, "phase": "collecting"}
+    session.profile_learning = collecting(0)
 
     assert session.reset_speaker_profile(0) == (
         "a voice sample is being captured for this speaker"
@@ -599,14 +608,14 @@ def test_only_saved_samples_trigger_a_rescore():
 def test_the_unknown_turn_memory_is_bounded():
     session = bare_session()
     session._unknown_turns = {}
-    for line_id in range(UNKNOWN_TURN_MEMORY + 25):
+    for line_id in range(MEMORY_LIMIT + 25):
         session._remember_unknown(
             line_id, Channel.MIC, np.array([1.0, 0.0], dtype=np.float32), 2.0
         )
 
-    assert len(session._unknown_turns) == UNKNOWN_TURN_MEMORY
+    assert len(session._unknown_turns) == MEMORY_LIMIT
     assert 0 not in session._unknown_turns
-    assert UNKNOWN_TURN_MEMORY + 24 in session._unknown_turns
+    assert MEMORY_LIMIT + 24 in session._unknown_turns
 
 
 def test_assigning_a_line_by_hand_validates_and_settles_it():
@@ -641,8 +650,11 @@ class LearningStore(VectorStore):
         self.samples.append((speaker_id, source, speech_seconds, quality))
         self.vectors[speaker_id] = np.array(embedding, dtype=np.float32)
 
-    def list_speakers(self):
-        return tuple(self.speakers)
+    def find_by_name(self, name):
+        return next(
+            (item for item in self.speakers if item.name.casefold() == name.casefold()),
+            None,
+        )
 
     def create_speaker(self, name):
         self.created.append(name)
@@ -672,7 +684,7 @@ def test_assigning_a_line_by_hand_teaches_the_profile_and_names_its_siblings():
 
     assert session.assign_line(4, 0) is None
 
-    assert store.samples == [("sp-sarah", "mic", 2.0, 1.0)]
+    assert store.samples == [("sp-sarah", Channel.MIC, 2.0, 1.0)]
     assert session.relabelled == [(4, "Sarah"), (5, "Sarah")]
     assert session._unknown_turns == {}
 
@@ -718,7 +730,7 @@ def test_assigning_a_line_to_a_new_name_saves_the_person_without_switching():
     assert session.roster[1] == Speaker("Sarah", speaker_id="sp-sarah", hotkey_slot=1)
     assert session.current_speaker == 0
     assert session.relabelled == [(4, "Sarah")]
-    assert store.samples == [("sp-sarah", "mic", 2.0, 1.0)]
+    assert store.samples == [("sp-sarah", Channel.MIC, 2.0, 1.0)]
 
 
 def test_assigning_a_line_to_a_name_already_on_the_roster_reuses_them():
