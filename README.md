@@ -1,5 +1,7 @@
 # oat-notes
 
+[![ci](https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml)
+
 Live meeting transcription for Windows ("Muesli" — a Granola analogue). Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
 It also does **dictation**: hold Ctrl+Win anywhere in Windows, speak, and the cleaned text is inserted into whatever has focus — with automatic email formatting. See [Dictation](#dictation).
