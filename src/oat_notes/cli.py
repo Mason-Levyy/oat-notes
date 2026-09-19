@@ -184,7 +184,7 @@ def main() -> None:
     config = Config(**config_overrides)
 
     if args.ui:
-        from .server import serve
+        from .webapp.bootstrap import serve
 
         serve(
             config,

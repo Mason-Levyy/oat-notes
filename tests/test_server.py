@@ -1,13 +1,19 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from oat_notes.attribution import Speaker
 from oat_notes.config import Config
 from oat_notes.enrollment import EnrollmentProgress
-from oat_notes.server import AppState, EventHub, is_trusted_request
 from oat_notes.settings import AppSettings
 from oat_notes.speaker_store import SpeakerStore
 from oat_notes.types import Channel
+from oat_notes.webapp import library, meeting, settings_api
+from oat_notes.webapp.handler import is_trusted_request
+from oat_notes.webapp.hub import EventHub
+from oat_notes.webapp.requests import ApiError
+from oat_notes.webapp.state import AppState, dictation_options
 
 
 class FakeSession:
@@ -62,6 +68,14 @@ class FakeRecorder:
 
     def stop(self):
         self.stopped = True
+
+
+def fake_store(**profiles):
+    """A library whose ``find`` knows only the given ids."""
+    return SimpleNamespace(
+        find=profiles.get,
+        library=lambda: {"speakers": [], "groups": [], "ready_seconds": 5.0},
+    )
 
 
 def test_hub_fans_out_to_all_subscribers():
@@ -123,21 +137,22 @@ def test_model_failure_is_exposed_and_blocks_start():
     status = state.status()
     assert status["model_status"] == "error"
     assert status["model_error"] == "RuntimeError: NPU unavailable"
-    assert state.start_session({}) == {"error": "RuntimeError: NPU unavailable"}
+    with pytest.raises(ApiError, match="RuntimeError: NPU unavailable"):
+        meeting.start_session(state, {})
 
 
 def test_start_is_blocked_while_model_loads():
     state = AppState(Config(), transcriber=None)
-    assert state.start_session({}) == {
-        "error": "transcription model is still loading"
-    }
+    with pytest.raises(ApiError, match="transcription model is still loading") as raised:
+        meeting.start_session(state, {})
+    assert raised.value.status == 409
 
 
 def test_settings_update_is_validated_and_persisted():
     saved = []
     state = AppState(Config(), transcriber=None, save_settings=saved.append)
 
-    status = state.update_settings({"hotkey_modifiers": ["shift", "ctrl"]})
+    status = settings_api.update_settings(state, {"hotkey_modifiers": ["shift", "ctrl"]})
 
     assert status["settings"]["hotkey_modifiers"] == ["ctrl", "shift"]
     assert status["settings"]["hotkey_label"] == "Ctrl+Shift+1–9"
@@ -146,16 +161,17 @@ def test_settings_update_is_validated_and_persisted():
 
 def test_invalid_settings_do_not_replace_current_value():
     state = AppState(Config(), transcriber=None)
-    response = state.update_settings({"hotkey_modifiers": []})
-    assert "error" in response
+    with pytest.raises(ApiError) as raised:
+        settings_api.update_settings(state, {"hotkey_modifiers": []})
+    assert raised.value.status == 400
     assert state.settings == AppSettings()
 
 
 def test_settings_cannot_change_during_meeting():
     state = AppState(Config(), transcriber=None)
     state.session = object()
-    response = state.update_settings({"hotkey_modifiers": ["shift"]})
-    assert response == {"error": "end the meeting before changing hotkeys"}
+    with pytest.raises(ApiError, match="end the meeting before changing hotkeys"):
+        settings_api.update_settings(state, {"hotkey_modifiers": ["shift"]})
 
 
 def test_cleanup_status_lifecycle():
@@ -179,7 +195,8 @@ def test_cleanup_status_lifecycle():
 
 def test_stop_without_session_reports_error():
     state = AppState(Config(), transcriber=None)
-    assert state.stop_session() == {"error": "not recording"}
+    with pytest.raises(ApiError, match="not recording"):
+        meeting.stop_session(state, {})
 
 
 def test_stop_with_discard_skips_save_and_backfill():
@@ -187,7 +204,7 @@ def test_stop_with_discard_skips_save_and_backfill():
     session = FakeSession(guest_has_spoken=True)
     state.session = session
 
-    status = state.stop_session(discard=True)
+    status = meeting.stop_session(state, {"discard": True})
 
     assert session.stopped is True
     assert session.discarded is True
@@ -203,7 +220,7 @@ def test_stop_without_discard_still_offers_backfill_for_a_guest_who_spoke():
     session = FakeSession(guest_has_spoken=True)
     state.session = session
 
-    status = state.stop_session(discard=False)
+    status = meeting.stop_session(state, {"discard": False})
 
     assert session.saved_calls == []
     assert state.awaiting_backfill is session
@@ -212,18 +229,34 @@ def test_stop_without_discard_still_offers_backfill_for_a_guest_who_spoke():
 
 def test_switch_without_session_is_harmless():
     state = AppState(Config(), transcriber=None)
-    status = state.switch_speaker(2)
+    status = meeting.switch_speaker(state, {"index": 2})
     assert status["recording"] is False
+
+
+def test_switch_index_is_validated_at_the_boundary():
+    state = AppState(Config(), transcriber=None)
+    with pytest.raises(ApiError, match="index must be an integer") as raised:
+        meeting.switch_speaker(state, {"index": "2"})
+    assert raised.value.status == 400
 
 
 def test_add_guest_without_session_reports_error():
     state = AppState(Config(), transcriber=None)
-    assert state.add_guest({}) == {"error": "not recording"}
+    with pytest.raises(ApiError, match="not recording"):
+        meeting.add_guest(state, {})
 
 
 def test_finalize_without_pending_reports_error():
     state = AppState(Config(), transcriber=None)
-    assert state.finalize({"renames": {}}) == {"error": "nothing awaiting backfill"}
+    with pytest.raises(ApiError, match="nothing awaiting backfill"):
+        meeting.finalize(state, {"renames": {}})
+
+
+def test_finalize_rejects_malformed_renames():
+    state = AppState(Config(), transcriber=None)
+    with pytest.raises(ApiError, match="renames must be an object") as raised:
+        meeting.finalize(state, {"renames": ["Guest 1"]})
+    assert raised.value.status == 400
 
 
 def test_idle_status_has_no_pending_backfill():
@@ -265,28 +298,32 @@ def test_local_speaker_library_crud_and_groups(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     state = AppState(Config(), transcriber=None, speaker_store=store)
 
-    result = state.create_library_speaker({"name": "Sarah"})
+    result = library.create_speaker(state, {"name": "Sarah"})
     speaker = result["library"]["speakers"][0]
     assert speaker["profile_state"] == "untrained"
 
-    result = state.create_library_group(
-        {
-            "name": "Standup",
-            "members": [{"speaker_id": speaker["id"]}],
-        }
+    result = library.create_group(
+        state, {"name": "Standup", "members": [{"speaker_id": speaker["id"]}]}
     )
     assert result["library"]["groups"][0]["members"][0]["speaker_id"] == speaker["id"]
 
-    state.update_library_speaker({"id": speaker["id"], "name": "Sarah K"})
+    library.update_speaker(state, {"id": speaker["id"], "name": "Sarah K"})
     assert store.profile(speaker["id"]).name == "Sarah K"
+
+
+def test_library_group_members_must_be_objects(tmp_path):
+    state = AppState(Config(), transcriber=None, speaker_store=SpeakerStore(tmp_path / "s.db"))
+    with pytest.raises(ApiError, match="group members must be a list of objects") as raised:
+        library.create_group(state, {"name": "Standup", "members": ["sp-1"]})
+    assert raised.value.status == 400
 
 
 def test_speaker_library_mutations_are_blocked_during_meeting(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     state = AppState(Config(), transcriber=None, speaker_store=store)
     state.session = object()
-    result = state.create_library_speaker({"name": "Blocked"})
-    assert result == {"error": "end the meeting before changing the speaker library"}
+    with pytest.raises(ApiError, match="end the meeting before changing the speaker library"):
+        library.create_speaker(state, {"name": "Blocked"})
     assert store.list_speakers() == ()
 
 
@@ -307,16 +344,16 @@ def test_voice_recording_blocked_during_meeting(tmp_path):
         Config(), transcriber=None, speaker_store=store, embedding_engine=object()
     )
     state.session = object()
-    result = state.start_voice_recording({"id": speaker.speaker_id})
-    assert result == {"error": "end the meeting before recording a voice sample"}
+    with pytest.raises(ApiError, match="end the meeting before recording a voice sample"):
+        library.start_voice_recording(state, {"id": speaker.speaker_id})
 
 
 def test_voice_recording_requires_speaker_model(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     speaker = store.create_speaker("Alice")
     state = AppState(Config(), transcriber=None, speaker_store=store)
-    result = state.start_voice_recording({"id": speaker.speaker_id})
-    assert result == {"error": "speaker recognition is unavailable"}
+    with pytest.raises(ApiError, match="speaker recognition is unavailable"):
+        library.start_voice_recording(state, {"id": speaker.speaker_id})
 
 
 def test_voice_recording_requires_existing_speaker(tmp_path):
@@ -324,8 +361,9 @@ def test_voice_recording_requires_existing_speaker(tmp_path):
     state = AppState(
         Config(), transcriber=None, speaker_store=store, embedding_engine=object()
     )
-    result = state.start_voice_recording({"id": "does-not-exist"})
-    assert result == {"error": "speaker not found"}
+    with pytest.raises(ApiError, match="speaker not found") as raised:
+        library.start_voice_recording(state, {"id": "does-not-exist"})
+    assert raised.value.status == 404
 
 
 def test_voice_recording_start_creates_recorder_and_blocks_double_start(tmp_path, monkeypatch):
@@ -336,13 +374,13 @@ def test_voice_recording_start_creates_recorder_and_blocks_double_start(tmp_path
         Config(), transcriber=None, speaker_store=store, embedding_engine=object()
     )
 
-    result = state.start_voice_recording({"id": speaker.speaker_id})
+    result = library.start_voice_recording(state, {"id": speaker.speaker_id})
     assert result == {"ok": True, "speaker_id": speaker.speaker_id}
     assert state.enrollment is not None
     assert state.enrollment.started
 
-    again = state.start_voice_recording({"id": speaker.speaker_id})
-    assert again == {"error": "a voice recording is already in progress"}
+    with pytest.raises(ApiError, match="a voice recording is already in progress"):
+        library.start_voice_recording(state, {"id": speaker.speaker_id})
 
 
 def test_voice_recording_progress_updates_state_and_clears_on_terminal(tmp_path, monkeypatch):
@@ -352,7 +390,7 @@ def test_voice_recording_progress_updates_state_and_clears_on_terminal(tmp_path,
     state = AppState(
         Config(), transcriber=None, speaker_store=store, embedding_engine=object()
     )
-    state.start_voice_recording({"id": speaker.speaker_id})
+    library.start_voice_recording(state, {"id": speaker.speaker_id})
     recorder = state.enrollment
 
     recorder.on_progress(EnrollmentProgress(phase="listening", target_seconds=8.0))
@@ -368,7 +406,8 @@ def test_voice_recording_progress_updates_state_and_clears_on_terminal(tmp_path,
 def test_stop_voice_recording_without_active_recording_reports_error(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     state = AppState(Config(), transcriber=None, speaker_store=store)
-    assert state.stop_voice_recording() == {"error": "no voice recording in progress"}
+    with pytest.raises(ApiError, match="no voice recording in progress"):
+        library.stop_voice_recording(state, {})
 
 
 def test_stop_voice_recording_stops_active_recorder(tmp_path, monkeypatch):
@@ -378,10 +417,10 @@ def test_stop_voice_recording_stops_active_recorder(tmp_path, monkeypatch):
     state = AppState(
         Config(), transcriber=None, speaker_store=store, embedding_engine=object()
     )
-    state.start_voice_recording({"id": speaker.speaker_id})
+    library.start_voice_recording(state, {"id": speaker.speaker_id})
     recorder = state.enrollment
 
-    result = state.stop_voice_recording()
+    result = library.stop_voice_recording(state, {})
     assert result == {"ok": True}
     assert recorder.stopped
 
@@ -401,8 +440,6 @@ class FakeDictation:
 
 
 def dictation_state(**kwargs):
-    from oat_notes.server import AppState
-
     return AppState(Config(), transcriber=None, dictation=FakeDictation(), **kwargs)
 
 
@@ -418,79 +455,71 @@ def test_status_without_dictation_reports_unavailable():
 
 def test_saving_dictation_settings_rebinds_the_chord():
     state = dictation_state(save_settings=lambda settings: None)
-    state.update_settings({"dictation_modifiers": ["alt", "win"]})
+    settings_api.update_settings(state, {"dictation_modifiers": ["alt", "win"]})
     assert state.dictation.rebinds[-1].modifiers == ("alt", "win")
 
 
 def test_partial_update_keeps_the_other_card_intact():
     state = dictation_state(save_settings=lambda settings: None)
-    state.update_settings({"hotkey_modifiers": ["alt", "shift"]})
-    state.update_settings({"dictation_spoken_punctuation": True})
+    settings_api.update_settings(state, {"hotkey_modifiers": ["alt", "shift"]})
+    settings_api.update_settings(state, {"dictation_spoken_punctuation": True})
     assert state.settings.hotkey_modifiers == ("alt", "shift")
     assert state.settings.dictation_spoken_punctuation is True
 
 
 def test_dictation_settings_may_change_during_a_meeting():
-    from oat_notes.types import Channel
-
     state = dictation_state(save_settings=lambda settings: None)
     state.session = FakeSession()
-    state.session.active = {Channel.MIC: None, Channel.LOOPBACK: None}
-    state.session.current_speaker = None
-    state.session.profile_learning = None
-    state.session.channels = ()
-    state.session.hotkey_bank = 0
-    state.session.elapsed = lambda: 0.0
-    response = state.update_settings({"dictation_spoken_punctuation": True})
-    assert "error" not in response
+    response = settings_api.update_settings(state, {"dictation_spoken_punctuation": True})
+    assert response["recording"] is True
     assert state.settings.dictation_spoken_punctuation is True
 
 
 def test_speaker_hotkey_still_locked_during_a_meeting():
     state = dictation_state(save_settings=lambda settings: None)
     state.session = object()
-    response = state.update_settings({"hotkey_modifiers": ["shift"]})
-    assert response == {"error": "end the meeting before changing hotkeys"}
+    with pytest.raises(ApiError, match="end the meeting before changing hotkeys"):
+        settings_api.update_settings(state, {"hotkey_modifiers": ["shift"]})
 
 
 def test_colliding_chords_are_refused():
     state = dictation_state(save_settings=lambda settings: None)
-    response = state.update_settings({"dictation_modifiers": ["ctrl", "alt"]})
-    assert "choose different modifiers" in response["error"]
+    with pytest.raises(ApiError, match="choose different modifiers"):
+        settings_api.update_settings(state, {"dictation_modifiers": ["ctrl", "alt"]})
     assert state.settings.dictation_modifiers == ("ctrl", "win")
 
 
 def test_toggle_dictation_flips_the_setting():
     state = dictation_state(save_settings=lambda settings: None)
-    status = state.toggle_dictation({})
+    status = settings_api.toggle_dictation(state, {})
     assert status["settings"]["dictation_enabled"] is False
     assert state.dictation.rebinds[-1].enabled is False
 
-    status = state.toggle_dictation({})
+    status = settings_api.toggle_dictation(state, {})
     assert status["settings"]["dictation_enabled"] is True
 
 
 def test_toggle_dictation_accepts_an_explicit_value():
     state = dictation_state(save_settings=lambda settings: None)
-    state.toggle_dictation({"enabled": False})
+    settings_api.toggle_dictation(state, {"enabled": False})
     assert state.settings.dictation_enabled is False
-    state.toggle_dictation({"enabled": False})
+    settings_api.toggle_dictation(state, {"enabled": False})
     assert state.settings.dictation_enabled is False
 
 
 def test_toggle_dictation_rejects_a_non_boolean():
     state = dictation_state(save_settings=lambda settings: None)
-    assert "error" in state.toggle_dictation({"enabled": "maybe"})
+    with pytest.raises(ApiError, match="enabled must be true or false"):
+        settings_api.toggle_dictation(state, {"enabled": "maybe"})
 
 
 def test_toggle_without_dictation_reports_unavailable():
     state = AppState(Config(), transcriber=None)
-    assert state.toggle_dictation({}) == {"error": "dictation is unavailable"}
+    with pytest.raises(ApiError, match="dictation is unavailable"):
+        settings_api.toggle_dictation(state, {})
 
 
 def test_settings_map_onto_dictation_options():
-    from oat_notes.server import dictation_options
-
     options = dictation_options(
         AppSettings(
             dictation_modifiers=("alt", "win"),
@@ -505,13 +534,15 @@ def test_settings_map_onto_dictation_options():
     assert options.spoken_punctuation is True
 
 
-def test_the_saved_model_choice_reloads_the_transcriber():
+def test_the_saved_model_choice_reloads_the_transcriber(monkeypatch):
     saved = []
     state = AppState(Config(), transcriber=object(), save_settings=saved.append)
     reloads = []
-    state.reload_transcriber = lambda: reloads.append(state.config.model_name)
+    monkeypatch.setattr(
+        settings_api, "reload_transcriber", lambda state: reloads.append(state.config.model_name)
+    )
 
-    status = state.update_settings({"whisper_model": "medium.en"})
+    status = settings_api.update_settings(state, {"whisper_model": "medium.en"})
 
     assert status["settings"]["whisper_model"] == "medium.en"
     assert state.config.model_name == "medium.en"
@@ -520,12 +551,12 @@ def test_the_saved_model_choice_reloads_the_transcriber():
     assert reloads == ["medium.en"]
 
 
-def test_saving_other_settings_does_not_reload_the_model():
+def test_saving_other_settings_does_not_reload_the_model(monkeypatch):
     state = AppState(Config(), transcriber=object())
     reloads = []
-    state.reload_transcriber = lambda: reloads.append(1)
+    monkeypatch.setattr(settings_api, "reload_transcriber", lambda state: reloads.append(1))
 
-    state.update_settings({"hotkey_modifiers": ["shift"]})
+    settings_api.update_settings(state, {"hotkey_modifiers": ["shift"]})
 
     assert reloads == []
     assert state.transcriber is not None
@@ -534,17 +565,15 @@ def test_saving_other_settings_does_not_reload_the_model():
 def test_the_model_cannot_change_during_a_meeting():
     state = AppState(Config(), transcriber=object())
     state.session = object()
-    response = state.update_settings({"whisper_model": "medium.en"})
-    assert response == {
-        "error": "end the meeting before changing the transcription model"
-    }
+    with pytest.raises(ApiError, match="end the meeting before changing the transcription model"):
+        settings_api.update_settings(state, {"whisper_model": "medium.en"})
     assert state.settings.whisper_model == "small.en"
 
 
 def test_an_unknown_model_is_rejected():
     state = AppState(Config(), transcriber=None)
-    response = state.update_settings({"whisper_model": "large-v3"})
-    assert "error" in response
+    with pytest.raises(ApiError):
+        settings_api.update_settings(state, {"whisper_model": "large-v3"})
     assert state.settings.whisper_model == "small.en"
 
 
@@ -557,12 +586,9 @@ def test_renaming_a_roster_member_passes_the_chosen_identity_through():
         calls.append((index, name, speaker_id)) or None
     )
     state.session = session
-    state.speaker_store = SimpleNamespace(
-        profile=lambda sid: SimpleNamespace(name="Sarah"),
-        library=lambda: {"speakers": [], "groups": [], "ready_seconds": 5.0},
-    )
+    state.speaker_store = fake_store(**{"sp-1": SimpleNamespace(name="Sarah")})
 
-    state.rename_roster_speaker({"index": 0, "name": "Sarah", "speaker_id": "sp-1"})
+    meeting.rename_roster_speaker(state, {"index": 0, "name": "Sarah", "speaker_id": "sp-1"})
 
     assert calls == [(0, "Sarah", "sp-1")]
 
@@ -570,16 +596,13 @@ def test_renaming_a_roster_member_passes_the_chosen_identity_through():
 def test_renaming_against_an_unknown_identity_is_refused():
     state = AppState(Config(), transcriber=None)
     state.session = FakeSession()
+    state.speaker_store = fake_store()
 
-    def missing(_sid):
-        raise KeyError("speaker not found")
-
-    state.speaker_store = SimpleNamespace(profile=missing)
-
-    response = state.rename_roster_speaker(
-        {"index": 0, "name": "Sarah", "speaker_id": "sp-gone"}
-    )
-    assert response == {"error": "speaker not found"}
+    with pytest.raises(ApiError, match="speaker not found") as raised:
+        meeting.rename_roster_speaker(
+            state, {"index": 0, "name": "Sarah", "speaker_id": "sp-gone"}
+        )
+    assert raised.value.status == 404
 
 
 def test_a_named_guest_is_no_longer_pending_backfill():
@@ -598,19 +621,19 @@ def test_resetting_a_profile_mid_meeting_reaches_the_session():
     session.reset_speaker_profile = lambda index: calls.append(index) or None
     state.session = session
 
-    state.reset_roster_profile({"index": 0})
+    meeting.reset_roster_profile(state, {"index": 0})
 
     assert calls == [0]
 
 
 def test_resetting_a_profile_needs_a_meeting_and_an_integer_index():
     state = AppState(Config(), transcriber=None)
-    assert state.reset_roster_profile({"index": 0}) == {"error": "not recording"}
+    with pytest.raises(ApiError, match="not recording"):
+        meeting.reset_roster_profile(state, {"index": 0})
 
     state.session = FakeSession()
-    assert state.reset_roster_profile({"index": "0"}) == {
-        "error": "index must be an integer"
-    }
+    with pytest.raises(ApiError, match="index must be an integer"):
+        meeting.reset_roster_profile(state, {"index": "0"})
 
 
 def test_a_session_error_reaches_the_browser_unchanged():
@@ -619,9 +642,9 @@ def test_a_session_error_reaches_the_browser_unchanged():
     session.reset_speaker_profile = lambda index: "speaker already removed"
     state.session = session
 
-    assert state.reset_roster_profile({"index": 0}) == {
-        "error": "speaker already removed"
-    }
+    with pytest.raises(ApiError, match="speaker already removed") as raised:
+        meeting.reset_roster_profile(state, {"index": 0})
+    assert raised.value.status == 409
 
 
 def _line_state():
@@ -649,7 +672,7 @@ def test_assigning_a_line_updates_it_and_tells_the_browser():
     state.session = session
     subscriber = state.hub.subscribe()
 
-    state.assign_line({"id": 0, "index": 0})
+    meeting.assign_line(state, {"id": 0, "index": 0})
 
     lines = _lines(state)
     assert lines[0]["label"] == "Sarah"
@@ -665,19 +688,18 @@ def test_assigning_a_line_updates_it_and_tells_the_browser():
 
 def test_assigning_a_line_needs_a_live_meeting():
     state = _line_state()
-    assert state.assign_line({"id": 0, "index": 0}) == {"error": "not recording"}
+    with pytest.raises(ApiError, match="not recording"):
+        meeting.assign_line(state, {"id": 0, "index": 0})
 
 
 def test_assigning_a_line_validates_its_arguments():
     state = _line_state()
     state.session = FakeSession()
 
-    assert state.assign_line({"id": "0", "index": 0}) == {
-        "error": "id must be an integer"
-    }
-    assert state.assign_line({"id": 0, "index": True}) == {
-        "error": "index must be an integer or null"
-    }
+    with pytest.raises(ApiError, match="id must be an integer"):
+        meeting.assign_line(state, {"id": "0", "index": 0})
+    with pytest.raises(ApiError, match="index must be an integer or null"):
+        meeting.assign_line(state, {"id": 0, "index": True})
 
 
 def test_a_session_refusal_to_assign_reaches_the_browser():
@@ -686,7 +708,8 @@ def test_a_session_refusal_to_assign_reaches_the_browser():
     session.assign_line = lambda line_id, index: "line not found"
     state.session = session
 
-    assert state.assign_line({"id": 9, "index": 0}) == {"error": "line not found"}
+    with pytest.raises(ApiError, match="line not found"):
+        meeting.assign_line(state, {"id": 9, "index": 0})
 
 
 def test_assigning_a_line_to_a_new_name_adds_them_and_tells_the_browser():
@@ -704,9 +727,9 @@ def test_assigning_a_line_to_a_new_name_adds_them_and_tells_the_browser():
     state.session = session
     subscriber = state.hub.subscribe()
 
-    response = state.assign_line({"id": 0, "name": " Sarah "})
+    response = meeting.assign_line(state, {"id": 0, "name": " Sarah "})
 
-    assert "error" not in response
+    assert response["recording"] is True
     assert asked == [(0, " Sarah ", None)]
     assert state.roster[1].name == "Sarah"
     assert _lines(state)[0]["label"] == "Sarah"
@@ -717,9 +740,8 @@ def test_assigning_a_line_to_a_new_name_adds_them_and_tells_the_browser():
 
 def test_assigning_a_line_to_a_library_person_uses_their_saved_name():
     state = _line_state()
-    state.speaker_store = SimpleNamespace(
-        profile=lambda speaker_id: SimpleNamespace(name="Priya", speaker_id=speaker_id),
-        library=dict,
+    state.speaker_store = fake_store(
+        **{"sp-priya": SimpleNamespace(name="Priya", speaker_id="sp-priya")}
     )
     session = FakeSession()
     session.roster = [Speaker("Alex")]
@@ -733,23 +755,18 @@ def test_assigning_a_line_to_a_library_person_uses_their_saved_name():
     session.assign_line_to_name = assign_line_to_name
     state.session = session
 
-    state.assign_line({"id": 0, "name": "pri", "speaker_id": "sp-priya"})
+    meeting.assign_line(state, {"id": 0, "name": "pri", "speaker_id": "sp-priya"})
 
     assert asked == [("Priya", "sp-priya")]
 
 
 def test_assigning_a_line_to_an_unknown_library_id_is_refused():
     state = _line_state()
-
-    def missing(speaker_id):
-        raise KeyError(speaker_id)
-
-    state.speaker_store = SimpleNamespace(profile=missing)
+    state.speaker_store = fake_store()
     state.session = FakeSession()
 
-    assert state.assign_line({"id": 0, "name": "x", "speaker_id": "nope"}) == {
-        "error": "speaker not found"
-    }
+    with pytest.raises(ApiError, match="speaker not found"):
+        meeting.assign_line(state, {"id": 0, "name": "x", "speaker_id": "nope"})
 
 
 def test_a_session_refusal_to_assign_by_name_reaches_the_browser():
@@ -758,4 +775,5 @@ def test_a_session_refusal_to_assign_by_name_reaches_the_browser():
     session.assign_line_to_name = lambda line_id, name, speaker_id=None: (None, "a name is required")
     state.session = session
 
-    assert state.assign_line({"id": 0, "name": ""}) == {"error": "a name is required"}
+    with pytest.raises(ApiError, match="a name is required"):
+        meeting.assign_line(state, {"id": 0, "name": ""})
