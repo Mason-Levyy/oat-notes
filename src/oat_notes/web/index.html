@@ -882,6 +882,7 @@ let dragIndex = null;
 let groupOptionsOpen = false;
 let personResults = [];
 let personActive = -1;
+let pickingLineId = null;
 const openGroups = new Set();
 const LIBRARY_FILTER_THRESHOLD = 6;
 
@@ -891,6 +892,36 @@ function post(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {}),
   }).then((r) => r.json());
+}
+
+function refreshState() {
+  return fetch("/api/state").then((r) => r.json()).then(applyState);
+}
+
+function showError(result, target) {
+  if (!result.error) return false;
+  (target || $("statusline")).textContent = result.error.toUpperCase();
+  return true;
+}
+
+function showSettingsError(result, message) {
+  if (!result.error) return false;
+  const target = message || $("settings-message");
+  target.textContent = result.error.toUpperCase();
+  target.className = "settings-message pixel error";
+  return true;
+}
+
+function applyOrShowError(result) {
+  if (!showError(result)) applyState(result);
+}
+
+function nameMatches(name, query, mode) {
+  const candidate = name.toLowerCase();
+  const needle = query.toLowerCase();
+  if (mode === "exact") return candidate === needle;
+  if (mode === "prefix") return candidate.startsWith(needle);
+  return candidate.includes(needle);
 }
 
 function fmt(totalSeconds) {
@@ -1021,11 +1052,7 @@ function saveShortcut(shortcut) {
     return;
   }
   post("/api/settings", { [shortcut.field]: shortcutDraft }).then((result) => {
-    if (result.error) {
-      message.textContent = result.error.toUpperCase();
-      message.className = "settings-message pixel error";
-      return;
-    }
+    if (showSettingsError(result, message)) return;
     editingShortcut = null;
     shortcutDraft = [];
     applyState(result);
@@ -1158,11 +1185,7 @@ function renderSetupRoster() {
 }
 
 function applyLibraryResult(result, message) {
-  if (result.error) {
-    $("settings-message").textContent = result.error.toUpperCase();
-    $("settings-message").className = "settings-message pixel error";
-    return false;
-  }
+  if (showSettingsError(result)) return false;
   applyState(result);
   if (message) {
     $("settings-message").textContent = message;
@@ -1216,12 +1239,7 @@ function renderEnrollmentStatus() {
 }
 
 function startRecording(speaker) {
-  post("/api/library/speakers/record/start", { id: speaker.id }).then((result) => {
-    if (result.error) {
-      $("settings-message").textContent = result.error.toUpperCase();
-      $("settings-message").className = "settings-message pixel error";
-    }
-  });
+  post("/api/library/speakers/record/start", { id: speaker.id }).then(showSettingsError);
 }
 
 function renderLibrarySettings() {
@@ -1237,7 +1255,7 @@ function renderLibrarySettings() {
     ? filterInput.value.trim().toLowerCase()
     : "";
   const visible = needle
-    ? people.filter((speaker) => speaker.name.toLowerCase().includes(needle))
+    ? people.filter((speaker) => nameMatches(speaker.name, needle, "contains"))
     : people;
   if (!visible.length) {
     const empty = document.createElement("div");
@@ -1435,11 +1453,7 @@ function saveModel(name) {
   message.textContent = "LOADING MODEL…";
   message.className = "settings-message pixel";
   post("/api/settings", { whisper_model: name }).then((result) => {
-    if (result.error) {
-      message.textContent = result.error.toUpperCase();
-      message.className = "settings-message pixel error";
-      return;
-    }
+    if (showSettingsError(result, message)) return;
     applyState(result);
   });
 }
@@ -1515,11 +1529,7 @@ function renderHistory() {
     button.onclick = () => {
       post("/api/dictation/copy", { id: Number(button.dataset.copy) }).then((result) => {
         const message = $("history-message");
-        if (result.error) {
-          message.textContent = result.error.toUpperCase();
-          message.className = "settings-message pixel error";
-          return;
-        }
+        if (showSettingsError(result, message)) return;
         applyHistory(result);
         message.textContent = "COPIED TO CLIPBOARD";
         message.className = "settings-message pixel saved";
@@ -1661,7 +1671,6 @@ function addLine(line, preserveViewport = true) {
 }
 
 const LINE_CLICK_HINT = "Click to put this line on someone else";
-let pickingLineId = null;
 
 function openLinePicker(anchor, lineId) {
   closeLinePicker();
@@ -1733,9 +1742,7 @@ function assignLineToName(lineId, typed) {
 
 function assignLine(payload) {
   closeLinePicker();
-  post("/api/lines/assign", payload).then((result) => {
-    if (result.error) $("statusline").textContent = result.error.toUpperCase();
-  });
+  post("/api/lines/assign", payload).then(showError);
 }
 
 function closeLinePicker() {
@@ -1841,10 +1848,7 @@ function renderPlayers() {
           `Clear ${speaker.name}'s voice profile? They go back to untrained, ` +
           "and you retrain by pressing their hotkey."
         )) return;
-        post("/api/roster/reset_profile", { index }).then((result) => {
-          if (result.error) $("statusline").textContent = result.error.toUpperCase();
-          else applyState(result);
-        });
+        post("/api/roster/reset_profile", { index }).then(applyOrShowError);
       };
       row.appendChild(resetVoice);
     }
@@ -1855,10 +1859,7 @@ function renderPlayers() {
       remove.textContent = "×";
       remove.title = `Remove ${speaker.name} (hasn't spoken yet)`;
       remove.setAttribute("aria-label", remove.title);
-      remove.onclick = () => post("/api/roster/remove", { index }).then((result) => {
-        if (result.error) $("statusline").textContent = result.error.toUpperCase();
-        else applyState(result);
-      });
+      remove.onclick = () => post("/api/roster/remove", { index }).then(applyOrShowError);
       row.appendChild(remove);
     }
     players.appendChild(row);
@@ -1898,10 +1899,7 @@ function speakerEditor(index, speaker) {
       index,
       name,
       speaker_id: match ? match.id : null,
-    }).then((result) => {
-      if (result.error) $("statusline").textContent = result.error.toUpperCase();
-      else applyState(result);
-    });
+    }).then(applyOrShowError);
   };
   const close = () => {
     editingSpeaker = null;
@@ -2061,10 +2059,7 @@ $("setup").onsubmit = (event) => {
     loopback: $("loopback").checked,
     cleanup: $("cleanup").checked && !$("cleanup").disabled,
   }).then((result) => {
-    if (result.error) {
-      $("statusline").textContent = result.error.toUpperCase();
-      return;
-    }
+    if (showError(result)) return;
     applyState(result);
   });
 };
@@ -2092,9 +2087,8 @@ function attachTabComplete(input, getNames) {
     if (event.key !== "Tab") return;
     const value = input.value.trim();
     if (!value) return;
-    const lower = value.toLowerCase();
-    const match = getNames().find((name) => name.toLowerCase().startsWith(lower));
-    if (match && match.toLowerCase() !== lower) {
+    const match = getNames().find((name) => nameMatches(name, value, "prefix"));
+    if (match && !nameMatches(match, value, "exact")) {
       event.preventDefault();
       input.value = match;
     }
@@ -2104,9 +2098,9 @@ function attachTabComplete(input, getNames) {
 attachTabComplete($("live-person-search"), () => librarySpeakers().map((speaker) => speaker.name));
 
 function matchingSpeaker(query) {
-  const lower = query.trim().toLowerCase();
-  if (!lower) return null;
-  return librarySpeakers().find((item) => item.name.toLowerCase() === lower) || null;
+  const wanted = query.trim();
+  if (!wanted) return null;
+  return librarySpeakers().find((item) => nameMatches(item.name, wanted, "exact")) || null;
 }
 
 
@@ -2174,10 +2168,9 @@ function renderPersonResults() {
   const input = $("person-search");
   const panel = $("person-results");
   const query = input.value.trim();
-  const lower = query.toLowerCase();
   const onRoster = new Set(setupRoster.map((entry) => entry.speaker_id));
   const matches = librarySpeakers().filter(
-    (speaker) => !onRoster.has(speaker.id) && (!lower || speaker.name.toLowerCase().includes(lower))
+    (speaker) => !onRoster.has(speaker.id) && (!query || nameMatches(speaker.name, query, "contains"))
   );
   personResults = matches.slice(0, 8).map((speaker) => ({ type: "speaker", speaker }));
   if (query && !matchingSpeaker(query)) personResults.push({ type: "create", name: query });
@@ -2283,10 +2276,7 @@ $("live-add-btn").onclick = () => {
   const speaker = matchingSpeaker(query);
   const payload = speaker ? { speaker_id: speaker.id } : { name: query };
   post("/api/roster/add", payload).then((result) => {
-    if (result.error) {
-      $("statusline").textContent = result.error.toUpperCase();
-      return;
-    }
+    if (showError(result)) return;
     applyState(result);
     $("live-person-search").value = "";
   });
@@ -2332,8 +2322,7 @@ $("notes-form").onsubmit = (event) => {
   const text = input.value.trim();
   if (!text) return;
   post("/api/notes/add", { text }).then((result) => {
-    if (result.error) {
-      $("notes-hint").textContent = result.error.toUpperCase();
+    if (showError(result, $("notes-hint"))) {
       $("notes-hint").style.display = "block";
       return;
     }
@@ -2374,10 +2363,8 @@ $("dictation-enabled").onchange = (event) => {
   applyDictationEnabled(enabled);
   const message = $("dictation-message");
   post("/api/dictation/toggle", { enabled }).then((result) => {
-    if (result.error) {
+    if (showSettingsError(result, message)) {
       applyDictationEnabled(!enabled);
-      message.textContent = result.error.toUpperCase();
-      message.className = "settings-message pixel error";
       return;
     }
     applyState(result);
@@ -2396,11 +2383,7 @@ $("dictation-form").onsubmit = (event) => {
     dictation_vocabulary: vocabulary,
     overlay_enabled: $("overlay-enabled").checked,
   }).then((result) => {
-    if (result.error) {
-      message.textContent = result.error.toUpperCase();
-      message.className = "settings-message pixel error";
-      return;
-    }
+    if (showSettingsError(result, message)) return;
     dictationDirty = false;
     applyState(result);
     message.textContent = `SAVED — ${result.settings.dictation_label}`.toUpperCase();
@@ -2483,7 +2466,7 @@ events.onmessage = (message) => {
     renderInfo();
     if (event.phase === "inserted") refreshHistory();
   } else if (event.type === "status") {
-    fetch("/api/state").then((r) => r.json()).then(applyState);
+    refreshState();
   } else if (event.type === "enrollment") {
     state.enrollment = event;
     renderEnrollmentStatus();
@@ -2496,7 +2479,7 @@ events.onmessage = (message) => {
   }
 };
 
-fetch("/api/state").then((r) => r.json()).then(applyState);
+refreshState();
 </script>
 </body>
 </html>
