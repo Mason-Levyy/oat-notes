@@ -26,6 +26,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: loads a real inference model; skipped in CI"]
 
 [tool.ruff]
 target-version = "py312"

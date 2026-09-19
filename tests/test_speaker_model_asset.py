@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from oat_notes.speaker_id import SherpaOnnxEmbeddingEngine, bundled_model_path
 
@@ -23,6 +24,7 @@ def test_incomplete_windows_runtime_fails_cleanly(monkeypatch):
         raise AssertionError("incomplete native runtime was accepted")
 
 
+@pytest.mark.slow
 def test_bundled_speaker_model_loads_and_embeds_without_network(monkeypatch):
     def deny_network(*args, **kwargs):
         raise AssertionError("outbound network attempted")
