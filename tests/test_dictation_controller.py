@@ -297,8 +297,8 @@ def test_rebind_swaps_the_chord():
 def test_rebind_hands_the_new_vocabulary_to_the_recorder():
     recorder = FakeRecorder()
     controller, _ = make_controller(recorder)
-    controller.rebind(DictationOptions(vocabulary=(("levya", "Mason"),)))
-    assert recorder.hotwords == "Mason"
+    controller.rebind(DictationOptions(vocabulary=(("ada", "Ada"),)))
+    assert recorder.hotwords == "Ada"
 
 
 def test_the_recorder_is_built_with_the_vocabulary_as_hotwords(monkeypatch):
