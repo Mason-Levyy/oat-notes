@@ -58,7 +58,6 @@ class SingleInstance:
             return None
         handle = _kernel32.CreateMutexW(None, False, self._name)
         if not handle:
-            # Nothing to be learned here; let the port bind have its say.
             return None
         if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
             _kernel32.CloseHandle(handle)
@@ -82,8 +81,6 @@ class SingleInstance:
             payload = json.loads(self._record.read_text(encoding="utf-8"))
             port = int(payload["port"])
         except (OSError, ValueError, TypeError, KeyError):
-            # A missing or half-written record is not worth failing over: the
-            # requested port is the best guess left.
             pass
         return f"http://127.0.0.1:{port}"
 

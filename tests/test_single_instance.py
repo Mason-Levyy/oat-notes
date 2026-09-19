@@ -29,9 +29,6 @@ def test_the_second_instance_is_turned_away(tmp_path):
 
 
 def test_a_different_port_does_not_get_around_the_lock(tmp_path):
-    # The regression this guards: binding the HTTP port was the only guard,
-    # and --port walked straight around it — leaving two keyboard hooks
-    # installed, so one chord pasted the same dictation twice.
     name = uuid.uuid4().hex
     record = tmp_path / "instance.json"
 
@@ -39,8 +36,6 @@ def test_a_different_port_does_not_get_around_the_lock(tmp_path):
     assert first.acquire(8737) is None
 
     second = lock(name, record)
-    # Refused, and pointed at the UI that actually exists rather than the one
-    # it asked for.
     assert second.acquire(9999) == "http://127.0.0.1:8737"
 
     first.release()

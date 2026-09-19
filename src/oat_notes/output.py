@@ -129,12 +129,12 @@ class MeetingLog:
         window as ``save``."""
         kept: list[TranscriptSegment] = []
         for index, segment in enumerate(self._segments):
-            if index in results:
-                text = results[index]
-                if text is None:
-                    continue
-                segment = replace(segment, text=text)
-            kept.append(segment)
+            if index not in results:
+                kept.append(segment)
+                continue
+            text = results[index]
+            if text is not None:
+                kept.append(replace(segment, text=text))
         self._segments = kept
 
     def add_note(self, timestamp: float, text: str) -> None:
@@ -199,7 +199,6 @@ class MeetingLog:
         entries.sort(key=lambda entry: entry[0])
         lines = [line for _, line in entries]
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        # The transcript is now safely written; the journal is redundant.
         if self._journal is not None:
             self._journal.close(delete=True)
         return path

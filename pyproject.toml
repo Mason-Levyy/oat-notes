@@ -21,7 +21,36 @@ dependencies = [
 dev = [
     "pyinstaller>=6.21.0",
     "pytest>=8",
+    "ruff>=0.16",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "RUF", "PIE", "FURB",
+    "PLC", "PLE", "PLW", "TRY", "S110", "BLE", "ISC", "C4", "PERF",
+    "RET", "LOG", "G", "PGH", "FLY",
+]
+ignore = [
+    "BLE001",
+    "S110",
+    "TRY003",
+    "TRY300",
+    "PLC0415",
+    "SIM105",
+    "RUF001", "RUF002", "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/oat_notes/app.py" = ["SIM115"]
+"src/oat_notes/settings.py" = ["TRY004"]
 
 [project.scripts]
 oat-notes = "oat_notes.cli:main"

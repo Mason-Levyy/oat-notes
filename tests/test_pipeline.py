@@ -74,7 +74,7 @@ def test_channels_route_to_separate_chunkers():
     ]
     mic_segment, loopback_segment = received
     assert mic_segment.start < 1.0
-    assert 4.5 < loopback_segment.start <= 5.0  # pre-roll may pull it slightly early
+    assert 4.5 < loopback_segment.start <= 5.0
 
 
 def test_finish_flushes_all_channels():
@@ -111,8 +111,6 @@ def test_worker_applies_attributor():
         ),
     )
     pipeline.start()
-    # Mic chunk spans ~0..1.5s (incl. trailing silence); Sarah only from 1.2s
-    # => minority overlap, Mason wins.
     pipeline.frame_queue.put((Channel.MIC, 0.0, speech(31)))
     pipeline.frame_queue.put(
         (Channel.MIC, 31 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
@@ -147,9 +145,9 @@ def test_hotkey_split_attributes_back_to_back_speakers():
     )
     pipeline.start()
 
-    alice_end = 31 * WINDOW / CONFIG.sample_rate  # ~0.992s
+    alice_end = 31 * WINDOW / CONFIG.sample_rate
     pipeline.frame_queue.put((Channel.MIC, 0.0, speech(31)))
-    log.record(alice_end, 1)  # hotkey pressed as Bob starts
+    log.record(alice_end, 1)
     pipeline.split_channel(Channel.MIC)
     pipeline.frame_queue.put((Channel.MIC, alice_end, speech(31)))
     pipeline.frame_queue.put(
@@ -159,7 +157,7 @@ def test_hotkey_split_attributes_back_to_back_speakers():
 
     assert [segment.speaker for segment in received] == ["Alice", "Bob"]
     first, second = received
-    assert second.start == first.end  # no audio lost at the boundary
+    assert second.start == first.end
 
 
 def test_mic_only_pipeline_still_works():
@@ -345,13 +343,11 @@ def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):
         speaker_tracking_sink=on_tracking,
     )
     pipeline.start()
-    # Pin Alice as the established speaker (mirrors a hotkey press at the
-    # top of the turn) so the engine's constant Bob embedding, once
-    # confirmed by the rolling tracker, is a genuine switch to correct.
     pipeline.manual_override(Channel.MIC, 0)
-    # 0.75, not speech()'s 1.0: amplitude >= 0.999 reads as clipped and
-    # wants_embedding() would refuse to embed a "clipped" chunk.
-    speech_block = lambda windows: np.full(windows * WINDOW, 0.75, dtype=np.float32)
+
+    def unclipped_speech(windows):
+        return np.full(windows * WINDOW, 0.75, dtype=np.float32)
+
     elapsed = 0.0
 
     def push(windows, block):
@@ -359,21 +355,15 @@ def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):
         pipeline.frame_queue.put((Channel.MIC, elapsed, block))
         elapsed += windows * WINDOW / CONFIG.sample_rate
 
-    # This whole block gets consumed by the chunker thread in one
-    # synchronous sweep before the tracker thread (reading a separate
-    # queue) can catch up and confirm Bob, so the split can only land
-    # after it — nothing here ends up in the post-split chunk.
-    push(100, speech_block(100))
+    push(100, unclipped_speech(100))
     assert confirmed_switch.wait(timeout=3.0)
-    # Real speech pushed after the confirmation lands in the fresh,
-    # post-split chunk the auto-split just opened.
-    push(40, speech_block(40))
+    push(40, unclipped_speech(40))
     push(SILENCE_WINDOWS, silence(SILENCE_WINDOWS))
     pipeline.finish()
 
     assert [segment.speaker for segment in received] == ["Alice", "Bob"]
     first, second = received
-    assert second.start == first.end  # no audio lost at the boundary
+    assert second.start == first.end
     assert first.attribution == "manual"
     assert second.attribution == "auto"
     assert tracked == [(1, Channel.MIC, "auto", 1.0)]
@@ -515,7 +505,6 @@ def test_cancel_profile_learning_stops_the_in_progress_capture(tmp_path):
     pipeline.begin_profile_learning(0, 0.0)
     pipeline.frame_queue.put((Channel.MIC, 0.0, _clean_speech(10)))
     pipeline.cancel_profile_learning()
-    # More speech after cancelling shouldn't resurrect the cancelled capture.
     pipeline.frame_queue.put((Channel.MIC, 10.0, _clean_speech(100)))
     pipeline.finish()
 

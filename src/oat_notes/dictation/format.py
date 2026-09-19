@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from ..llm import LlmEngine
 from ..repetition import collapse_repeated_runs
@@ -84,8 +84,8 @@ def apply_vocabulary(text: str, vocabulary: Sequence[tuple[str, str]]) -> str:
     Worth more than everything else here put together: Whisper is reliable on
     ordinary English and hopeless on colleague and product names.
     """
-    for heard, written in vocabulary:
-        heard = heard.strip()
+    for heard_raw, written in vocabulary:
+        heard = heard_raw.strip()
         if not heard:
             continue
         text = re.sub(

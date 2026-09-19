@@ -31,9 +31,6 @@ class FakeEngine:
         return self.reply
 
 
-# -- rule cleanup ----------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "raw, expected",
     [
@@ -87,9 +84,6 @@ def test_spoken_punctuation_when_enabled():
     ) == "Are you free, tomorrow?"
 
 
-# -- vocabulary ------------------------------------------------------------
-
-
 def test_vocabulary_substitution_is_whole_word_and_case_insensitive():
     vocabulary = (("oat notes", "Oat Notes"), ("sherpa", "sherpa-onnx"))
     assert apply_vocabulary("i use OAT NOTES daily", vocabulary) == (
@@ -118,18 +112,19 @@ def test_vocabulary_replacement_with_backslashes_is_literal():
     assert apply_vocabulary("path", (("path", r"C:\temp"),)) == r"C:\temp"
 
 
-# -- email scoring ---------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "text",
     [
-        "Hey Sarah, following up on the deployment we talked about yesterday. "
-        "I think we should push it to Thursday so QA has time to run the full "
-        "suite. Let me know if that works for you.",
-        "Hi team, quick update on the migration. We finished the first half "
-        "this morning and the rest should land by Friday afternoon. Thanks for "
-        "your patience with the downtime while we sorted the indexes out.",
+        (
+            "Hey Sarah, following up on the deployment we talked about yesterday. "
+            "I think we should push it to Thursday so QA has time to run the full "
+            "suite. Let me know if that works for you."
+        ),
+        (
+            "Hi team, quick update on the migration. We finished the first half "
+            "this morning and the rest should land by Friday afternoon. Thanks for "
+            "your patience with the downtime while we sorted the indexes out."
+        ),
         "write an email to Dave about the invoice",
     ],
 )
@@ -157,9 +152,6 @@ def test_salutation_needs_an_addressee_and_a_comma():
 
 def test_explicit_request_is_decisive():
     assert email_score("send an email to legal") == 1.0
-
-
-# -- email detection tiers -------------------------------------------------
 
 
 def test_high_score_skips_the_model_entirely():
@@ -193,9 +185,6 @@ def test_ambiguous_text_without_a_model_stays_plain():
 
 def test_classifier_failure_falls_back_to_plain_text():
     assert detect_email("Hi team, quick update: the build is green.", FakeEngine(explode=True)) is False
-
-
-# -- email formatting guardrails -------------------------------------------
 
 
 def test_placeholder_output_is_rejected():
@@ -262,9 +251,6 @@ def test_the_model_is_told_not_to_sign_a_name():
     assert "do not sign a name" in engine.calls[0][1]
 
 
-# -- the whole pipeline ----------------------------------------------------
-
-
 def test_plain_dictation_never_touches_the_model():
     engine = FakeEngine(reply="should not be used")
     text, mode = format_dictation("um, git status please", engine=engine)
@@ -289,7 +275,7 @@ def test_detected_email_is_formatted():
 
 def test_force_email_overrides_detection():
     engine = FakeEngine(reply="Hi,\n\nThe build is green and ready to ship.\n\nThanks,")
-    text, mode = format_dictation(
+    _, mode = format_dictation(
         "the build is green and ready to ship", engine=engine, force_email=True
     )
     assert mode == EMAIL_MODE
@@ -306,7 +292,7 @@ def test_detection_can_be_disabled():
         "Hey Sarah, following up on the deployment. I think we should push it "
         "to Thursday so QA has time. Let me know if that works for you."
     )
-    text, mode = format_dictation(raw, engine=engine, detect=False)
+    _, mode = format_dictation(raw, engine=engine, detect=False)
     assert mode == TEXT_MODE and engine.calls == []
 
 
@@ -323,9 +309,6 @@ def test_a_looped_phrase_is_collapsed_before_it_reaches_the_target_window():
 
 def test_collapsing_a_loop_leaves_deliberate_repetition_alone():
     assert apply_rules("no no, that won't work") == "No no, that won't work"
-
-
-# -- punctuation repair ----------------------------------------------------
 
 
 def test_a_paragraph_break_ends_the_sentence_before_it():

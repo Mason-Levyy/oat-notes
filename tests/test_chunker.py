@@ -11,7 +11,7 @@ from oat_notes.types import Channel
 
 CONFIG = Config()
 WINDOW = CONFIG.vad_window_samples
-WINDOW_SECONDS = WINDOW / CONFIG.sample_rate  # 0.032 s
+WINDOW_SECONDS = WINDOW / CONFIG.sample_rate
 SILENCE_WINDOWS = math.ceil(CONFIG.silence_split_seconds / WINDOW_SECONDS)
 
 
@@ -61,12 +61,12 @@ def test_blip_dropped_but_real_speech_kept():
     )
     chunks = chunker.push(0.0, windows(blip + speech + 2 * SILENCE_WINDOWS))
 
-    assert len(chunks) == 1  # the 3-window blip (0.096 s of speech) was dropped
+    assert len(chunks) == 1
     assert chunks[0].samples.size >= speech * WINDOW
 
 
 def test_force_split_at_max_chunk_length():
-    total = 600  # 19.2 s of continuous speech
+    total = 600
     chunker = make_chunker([1.0] * total)
     chunks = chunker.push(0.0, windows(total))
     final = chunker.flush()
@@ -93,7 +93,7 @@ def test_timestamps_reanchor_on_block_stamp():
     chunks = chunker.push(block_start, windows(2 + 10 + SILENCE_WINDOWS))
     assert len(chunks) == 1
     chunk = chunks[0]
-    assert chunk.start == pytest.approx(block_start)  # pre-roll from the new block
+    assert chunk.start == pytest.approx(block_start)
     total_windows = CONFIG.pre_roll_windows + 10 + SILENCE_WINDOWS
     assert chunk.end == pytest.approx(block_start + total_windows * WINDOW_SECONDS)
 

@@ -1,4 +1,3 @@
-import queue
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -86,7 +85,7 @@ def test_hub_full_subscriber_does_not_block_publish():
     subscriber = hub.subscribe()
     for _ in range(600):
         hub.publish({"type": "line"})
-    assert subscriber.qsize() == 512  # capped, publish never raised
+    assert subscriber.qsize() == 512
 
 
 def test_idle_status_shape():
@@ -190,7 +189,7 @@ def test_stop_with_discard_skips_save_and_backfill():
     status = state.stop_session(discard=True)
 
     assert session.stopped is True
-    assert session.discarded is True  # journal dropped, not recoverable
+    assert session.discarded is True
     assert session.saved_calls == []
     assert state.awaiting_backfill is None
     assert state.last_saved is None
@@ -384,9 +383,6 @@ def test_stop_voice_recording_stops_active_recorder(tmp_path, monkeypatch):
     result = state.stop_voice_recording()
     assert result == {"ok": True}
     assert recorder.stopped
-
-
-# -- dictation -------------------------------------------------------------
 
 
 class FakeDictation:
@@ -715,7 +711,7 @@ def test_assigning_a_line_to_a_library_person_uses_their_saved_name():
     state = _line_state()
     state.speaker_store = SimpleNamespace(
         profile=lambda speaker_id: SimpleNamespace(name="Priya", speaker_id=speaker_id),
-        library=lambda: {},
+        library=dict,
     )
     session = FakeSession()
     session.roster = [Speaker("Alex")]

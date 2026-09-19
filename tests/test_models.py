@@ -22,7 +22,6 @@ def test_openvino_model_cached_tracks_the_download_target(tmp_path, monkeypatch)
 
 
 def test_ensure_tls_trust_is_idempotent_and_never_raises():
-    # Safe to call repeatedly; a missing/broken truststore must not blow up.
     ensure_tls_trust()
     ensure_tls_trust()
 

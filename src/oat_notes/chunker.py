@@ -10,7 +10,8 @@ drains, so they follow the session clock rather than sample counts.
 from __future__ import annotations
 
 from collections import deque
-from typing import Callable, Protocol
+from collections.abc import Callable
+from typing import Protocol
 
 import numpy as np
 

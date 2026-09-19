@@ -39,7 +39,7 @@ class AudioChunk:
 
 @dataclass(frozen=True)
 class TranscriptSegment:
-    """Transcribed text for one chunk. ``speaker`` stays None until Phase 2."""
+    """Transcribed text for one chunk, with whatever attribution was decided."""
 
     text: str
     channel: Channel
@@ -50,6 +50,4 @@ class TranscriptSegment:
     speaker_index: int | None = None
     attribution: str | None = None
     confidence: float | None = None
-    profile_state: str | None = None
-    enrollment_seconds: float | None = None
     turn_end: bool = True

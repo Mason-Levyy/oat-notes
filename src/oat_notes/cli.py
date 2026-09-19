@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING
 from .config import Config
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from .output import MeetingLog
+    from .types import TranscriptSegment
 
 
 def main() -> None:
@@ -235,7 +238,7 @@ def _run_live(args: argparse.Namespace, config: Config, transcriber) -> None:
     from .attribution import parse_speakers
     from .output import format_timestamp
     from .session import Session, SessionEvents, SessionOptions
-    from .types import Channel, TranscriptSegment
+    from .types import Channel
 
     warm_up(config, transcriber)
     roster = parse_speakers(args.speakers or "")
@@ -318,7 +321,7 @@ def _run_file(args: argparse.Namespace, config: Config, transcriber) -> None:
     clock = SessionClock()
     log = MeetingLog(label_channels=False)
 
-    def sink(segment: TranscriptSegment, latency: float) -> None:
+    def sink(segment: TranscriptSegment, latency: float, embedding: np.ndarray | None) -> None:
         log.add(segment)
         print(line_for(segment, label_channels=False), flush=True)
 

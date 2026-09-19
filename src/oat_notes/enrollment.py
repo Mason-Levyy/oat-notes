@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import queue
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+from typing import Literal
 
 from .capture import AudioCapture
 from .chunker import Vad, VadChunker
@@ -26,11 +27,12 @@ from .vad import SileroVad
 TARGET_ENROLLMENT_SECONDS = 8.0
 
 OnProgress = Callable[["EnrollmentProgress"], None]
+EnrollmentPhase = Literal["listening", "captured", "rejected", "done", "stopped", "error"]
 
 
 @dataclass(frozen=True)
 class EnrollmentProgress:
-    phase: str  # "listening" | "captured" | "rejected" | "done" | "stopped" | "error"
+    phase: EnrollmentPhase
     captured_seconds: float = 0.0
     target_seconds: float = TARGET_ENROLLMENT_SECONDS
     reason: str | None = None
@@ -65,9 +67,6 @@ class VoiceEnrollmentRecorder:
         self._latest_profile: SpeakerProfile | None = None
         self._done = threading.Event()
 
-        # Real capture hardware is opened in start(), not here, so tests can
-        # drive frame_queue directly with a fake VAD — the same seam
-        # Pipeline uses for the same reason.
         self.frame_queue: queue.Queue = queue.Queue(maxsize=512)
         self._chunker = VadChunker(vad_factory(), config, Channel.MIC)
         self._pa = None
@@ -114,8 +113,6 @@ class VoiceEnrollmentRecorder:
                     reached = True
                     break
         if not reached:
-            # Stopped mid-utterance: keep whatever speech was already
-            # in-flight rather than discarding it silently.
             final_chunk = self._chunker.flush()
             if final_chunk is not None:
                 self._handle_chunk(final_chunk)
