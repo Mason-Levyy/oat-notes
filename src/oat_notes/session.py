@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -69,7 +69,7 @@ class SessionEvents:
     on_segment: Callable[[TranscriptSegment, str, float, int], None] = (
         lambda segment, label, latency, line_id: None
     )
-    on_line_cleaned: Callable[[int, "str | None"], None] = (
+    on_line_cleaned: Callable[[int, str | None], None] = (
         lambda line_id, text: None
     )
     on_line_relabelled: Callable[[int, str, int, float], None] = (
@@ -84,13 +84,16 @@ class SessionEvents:
     on_note: Callable[[dict], None] = lambda note: None
 
 
+NO_EVENTS = SessionEvents()
+
+
 class Session:
     def __init__(
         self,
         config: Config,
         options: SessionOptions,
         transcriber: Transcriber,
-        events: SessionEvents = SessionEvents(),
+        events: SessionEvents = NO_EVENTS,
     ) -> None:
         import pyaudiowpatch as pyaudio
 
@@ -130,9 +133,6 @@ class Session:
             Channel.MIC: None,
             Channel.LOOPBACK: None,
         }
-        # ``active`` remains channel-specific for attribution, but the UI needs
-        # one unambiguous person to highlight.  Start with nobody highlighted
-        # until a manual selection or a live speaker match arrives.
         self.current_speaker: int | None = None
         self._current_speaker_channel: Channel | None = None
         self.profile_learning: dict | None = None
@@ -143,7 +143,6 @@ class Session:
         first = 0 if self.roster else None
         self.active[Channel.MIC] = first
         self.active[Channel.LOOPBACK] = first
-        # Constructed even for an empty roster: guests can be added mid-session.
         self._attributor = Attributor(
             tuple(self.roster),
             mic_log=SwitchLog(initial=first if first is not None else 0),
@@ -279,9 +278,6 @@ class Session:
         self.switch_speaker(index)
 
     def page_hotkeys(self, direction: int) -> None:
-        # Banks are intentionally unbounded in the forward direction. This
-        # lets a user page into a completely empty bank and create a Guest at
-        # any exact slot with the next digit press.
         self.hotkey_bank = max(0, self.hotkey_bank + direction)
         self._events.on_hotkey_bank(self.hotkey_bank)
 
@@ -531,11 +527,8 @@ class Session:
         self,
         segment: TranscriptSegment,
         latency: float,
-        embedding: "np.ndarray | None" = None,
+        embedding: np.ndarray | None = None,
     ) -> None:
-        # A long utterance may produce several max-duration transcript
-        # chunks. Keep its turn connected; rolling tracking updates the live
-        # chip independently while turn attribution closes on natural silence.
         pending_manual = self._manual_override_pending.get(segment.channel, False)
         if segment.attribution == "manual" and segment.speaker_index is not None:
             self.active[segment.channel] = segment.speaker_index
@@ -611,7 +604,7 @@ class Session:
         self,
         line_id: int,
         channel: Channel,
-        embedding: "np.ndarray",
+        embedding: np.ndarray,
         speech_seconds: float,
     ) -> None:
         """Hold an unattributed turn's embedding so it can be named later.

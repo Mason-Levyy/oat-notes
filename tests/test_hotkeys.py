@@ -127,9 +127,6 @@ def test_bracket_virtual_key_fallback():
     assert pages == [-1, 1]
 
 
-# -- modifier-only chords (dictation push-to-talk) -------------------------
-
-
 def make_dictation_listener(modifiers=("ctrl", "win")):
     events = []
     listener = HotkeyListener()
@@ -150,7 +147,7 @@ def phases(events):
 def test_modifier_only_chord_arms_and_commits():
     listener, events = make_dictation_listener()
     listener._handle_press(CTRL)
-    assert events == []  # partial chord does nothing
+    assert events == []
     listener._handle_press(WIN)
     listener._handle_release(WIN)
     listener._handle_release(CTRL)
@@ -205,8 +202,6 @@ def test_extra_modifier_does_not_arm():
     listener._handle_press(SHIFT)
     listener._handle_release(SHIFT)
     listener._handle_release(WIN)
-    # Ctrl+Win armed, Shift joining is a different chord — but the arm already
-    # happened, so releasing must still commit rather than strand the state.
     assert phases(events) == ["press", "release"]
 
 

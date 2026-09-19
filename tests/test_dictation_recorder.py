@@ -41,10 +41,8 @@ class CountingTranscriber(Transcriber):
 
     def transcribe(self, chunk, hints=NO_HINTS):
         self.hints.append(hints)
-        if self._texts:
-            text = self._texts[self.calls % len(self._texts)]
-        else:
-            text = f"chunk{self.calls}"
+        texts = self._texts or [f"chunk{self.calls}"]
+        text = texts[self.calls % len(texts)]
         self.calls += 1
         return TranscriptSegment(
             text=text, channel=chunk.channel, start=chunk.start, end=chunk.end

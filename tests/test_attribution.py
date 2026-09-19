@@ -42,9 +42,7 @@ def test_initial_speaker_active_before_any_switch():
 def test_majority_overlap_mid_chunk_switch():
     log = SwitchLog()
     log.record(4.0, 1)
-    # Chunk spans 0..10: speaker 0 for 4s, speaker 1 for 6s.
     assert log.attribute(0.0, 10.0) == 1
-    # Chunk spans 0..6: speaker 0 for 4s, speaker 1 for 2s.
     assert log.attribute(0.0, 6.0) == 0
 
 
@@ -53,7 +51,6 @@ def test_multiple_switches_within_chunk():
     log.record(2.0, 1)
     log.record(3.0, 0)
     log.record(9.0, 2)
-    # Spans in 0..10: speaker 0 gets 2s + 6s, speaker 1 gets 1s, speaker 2 gets 1s.
     assert log.attribute(0.0, 10.0) == 0
 
 
@@ -61,7 +58,7 @@ def test_rename_updates_future_attribution():
     attributor = make_attributor((Speaker("Guest 1"), Speaker("Dev")))
     attributor.rename(0, "Sarah")
     assert attributor.for_chunk(chunk(0, 5)) == "Sarah"
-    attributor.rename(9, "ignored")  # out of range is a no-op, not an error
+    attributor.rename(9, "ignored")
 
 
 def test_single_speaker_is_attributed_on_either_source():
@@ -78,7 +75,6 @@ def test_each_source_keeps_its_own_switch_timeline():
     assert attributor.for_chunk(chunk(0.0, 4.0, Channel.LOOPBACK)) == "Priya"
     loopback_log.record(5.0, 2)
     assert attributor.for_chunk(chunk(6.0, 9.0, Channel.LOOPBACK)) == "Dev"
-    # A switch observed on one capture source does not rewrite the other's timeline.
     assert attributor.for_chunk(chunk(6.0, 9.0)) == "Mason"
 
 
@@ -95,13 +91,6 @@ def test_empty_roster_falls_back_to_none():
     attributor = make_attributor(())
     assert attributor.for_chunk(chunk(0, 5)) is None
     assert attributor.for_chunk(chunk(0, 5, Channel.LOOPBACK)) is None
-
-
-def test_source_log_helpers():
-    roster = parse_speakers("Mason, Priya")
-    attributor = make_attributor(roster)
-    assert attributor.first_member(Channel.MIC) == 0
-    assert attributor.first_member(Channel.LOOPBACK) == 0
 
 
 def test_add_guest_mid_session():

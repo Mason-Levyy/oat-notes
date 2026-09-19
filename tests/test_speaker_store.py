@@ -40,6 +40,7 @@ def test_profile_becomes_ready_at_five_seconds(tmp_path):
         speaker.speaker_id, np.array([1.0, 0.0]), "mic", 1.0, 1.0
     ).state == "ready"
 
+
 def test_speaker_names_are_case_insensitively_unique(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     store.create_speaker("Mason")

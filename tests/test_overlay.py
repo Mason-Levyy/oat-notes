@@ -1,5 +1,6 @@
 import queue
 import threading
+from itertools import pairwise
 
 import pytest
 
@@ -67,9 +68,6 @@ def test_every_label_fits_beside_the_meter():
             assert len(label) <= hud.LABEL_BUDGET, f"{label!r} overruns the meter"
 
 
-# -- pixel-rounded body ----------------------------------------------------
-
-
 def test_corners_step_inward_and_the_middle_is_full_width():
     rows = pixel_rounded_rows(60, 30, step=3, corner_steps=2)
     assert rows[0][0] == 6
@@ -94,7 +92,7 @@ def test_rows_tile_the_full_height():
     rows = pixel_rounded_rows(60, 30, step=3, corner_steps=2)
     assert rows[0][1] == 0
     assert rows[-1][3] == 30
-    for previous, current in zip(rows, rows[1:]):
+    for previous, current in pairwise(rows):
         assert previous[3] == current[1]
 
 
@@ -106,9 +104,6 @@ def test_a_height_that_is_not_a_multiple_of_the_step_still_fits():
 def test_square_corners_when_no_stepping_is_asked_for():
     rows = pixel_rounded_rows(60, 30, step=3, corner_steps=0)
     assert all(left == 0 and right == 60 for left, _, right, _ in rows)
-
-
-# -- level meter -----------------------------------------------------------
 
 
 def test_meter_is_flat_at_silence():
@@ -132,9 +127,6 @@ def test_meter_arches_toward_the_middle():
     heights = meter_heights(0.3)
     middle = len(heights) // 2
     assert heights[middle] > heights[0]
-
-
-# -- posting ---------------------------------------------------------------
 
 
 def test_post_is_lossy_rather_than_blocking():
@@ -189,9 +181,6 @@ def test_levels_are_ignored_when_not_recording():
     assert not overlay._queue.empty()
 
 
-# -- Win32 helpers ---------------------------------------------------------
-
-
 def test_work_area_is_sane():
     left, top, right, bottom = hud.cursor_work_area()
     assert right > left and bottom > top
@@ -204,9 +193,6 @@ def test_focus_guard_tolerates_a_missing_window():
 def test_dpi_awareness_is_idempotent():
     hud.set_dpi_awareness()
     hud.set_dpi_awareness()
-
-
-# -- shutdown fallback -----------------------------------------------------
 
 
 def test_shutdown_falls_back_when_the_overlay_cannot_start():

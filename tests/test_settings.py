@@ -50,9 +50,6 @@ def test_missing_or_corrupt_settings_use_defaults(tmp_path):
     assert store.load() == AppSettings()
 
 
-# -- dictation settings ----------------------------------------------------
-
-
 def test_dictation_defaults():
     settings = AppSettings()
     assert settings.dictation_modifiers == ("ctrl", "win")
@@ -83,9 +80,6 @@ def test_full_dictation_round_trip(tmp_path):
     assert store.load() == settings
 
 
-# -- partial merge ---------------------------------------------------------
-
-
 def test_merge_leaves_untouched_fields_alone():
     settings = AppSettings(
         hotkey_modifiers=("alt", "shift"), dictation_spoken_punctuation=True
@@ -104,9 +98,6 @@ def test_merge_validates_the_result():
 def test_merge_rejects_a_non_object():
     with pytest.raises(ValueError):
         AppSettings().merged(["nope"])
-
-
-# -- validation ------------------------------------------------------------
 
 
 def test_colliding_chords_are_rejected():

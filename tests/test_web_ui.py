@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 HTML = (
     Path(__file__).parents[1] / "src" / "oat_notes" / "web" / "index.html"
 ).read_text(encoding="utf-8")
@@ -10,7 +9,6 @@ def test_group_picker_is_a_roster_preset_before_individual_people():
     assert HTML.index('id="group-select"') < HTML.index('id="person-search"')
     assert 'id="add-group-btn"' not in HTML
     assert "setupRoster = [];" in HTML
-    # A button expanding an inline list, not a native <select>.
     assert '<button type="button" class="row-btn" id="group-select"' in HTML
     assert '$("group-select").onclick' in HTML
     assert "function renderGroupOptions()" in HTML
@@ -65,11 +63,10 @@ def test_nearest_guess_speakers_are_flagged_in_the_live_transcript():
 def test_one_control_both_finds_a_saved_person_and_creates_a_new_one():
     assert 'id="new-person-name"' not in HTML
     assert 'id="create-person-btn"' not in HTML
-    assert 'id="add-person-btn"' not in HTML  # the field alone commits now
+    assert 'id="add-person-btn"' not in HTML
     assert "function renderPersonResults()" in HTML
     assert "function commitChoice(choice)" in HTML
     assert '"/api/library/speakers/create"' in HTML
-    # Matches first, "create" as the last resort — and only without an exact hit.
     assert 'if (query && !matchingSpeaker(query)) personResults.push({ type: "create", name: query });' in HTML
     assert '`+ CREATE "${choice.name.toUpperCase()}"`' in HTML
 
@@ -93,14 +90,11 @@ def test_enter_in_the_person_search_adds_a_person_instead_of_starting_the_meetin
 
 
 def test_roster_rows_reorder_by_drag_or_by_keyboard():
-    # The setup roster's arrows are gone; the grip is the affordance. (Group
-    # members in Settings keep their arrows — they aren't drag targets.)
     assert "button.title = `Move ${entry.name} ${word} to hotkey slot ${target + 1}`;" not in HTML
     assert 'grip.className = "grip"' in HTML
     assert "row.draggable = true;" in HTML
     assert "row.ondrop = (event) => {" in HTML
     assert "moveRosterEntry(from, index);" in HTML
-    # Row order assigns the hotkey slots, so it must stay reachable without a mouse.
     assert "Press Alt+Up or Alt+Down to move." in HTML
     assert 'const delta = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;' in HTML
     assert 'rosterFocus = { action: "grip", index: to };' in HTML
@@ -108,7 +102,6 @@ def test_roster_rows_reorder_by_drag_or_by_keyboard():
 
 
 def test_the_grip_is_drawn_in_css_not_a_font_glyph():
-    # Same failure mode as the ✎ button: the bundled pixel font lacks the glyph.
     assert ".grip::before" in HTML
     assert "box-shadow: 0 4px #6b6558" in HTML
 
@@ -121,9 +114,6 @@ def test_capture_options_share_one_row():
 
 
 def test_a_pending_hotkey_choice_survives_background_state_updates():
-    # `status` events fire on every library mutation and re-run applyState. The
-    # open editor keeps its own draft, so a repaint no longer has anything to
-    # revert — the draft is only seeded when EDIT is pressed.
     assert "let editingShortcut = null;" in HTML
     assert "let shortcutDraft = [];" in HTML
     assert "shortcutDraft = shortcutChord(shortcut);" in HTML
@@ -133,7 +123,7 @@ def test_a_pending_hotkey_choice_survives_background_state_updates():
 def test_roster_instructions_are_a_disclosure_rather_than_permanent_copy():
     assert '<details class="help">' in HTML
     assert "HOW THE ROSTER WORKS" in HTML
-    assert 'id="hotkey-hint"' in HTML  # still written to by renderSettings
+    assert 'id="hotkey-hint"' in HTML
 
 
 def test_destructive_library_actions_sit_behind_an_overflow_toggle():
@@ -166,7 +156,6 @@ def test_secondary_buttons_stay_unfilled():
     assert 'id="live-add-btn">+ ADD' in HTML
     assert 'class="mini primary" id="library-create"' not in HTML
     assert 'class="mini primary" id="group-create"' not in HTML
-    # RECORD stays filled only where a profile is still missing.
     assert 'record.className = trained ? "mini" : "mini primary";' in HTML
 
 
@@ -191,7 +180,6 @@ def test_every_shortcut_lives_in_one_card():
         "dictation_modifiers", "dictation_email_modifiers", "hotkey_modifiers"
     ):
         assert f'field: "{field}"' in HTML
-    # No modifier grid is rendered until EDIT opens one.
     assert 'class="modifier-grid" id=' not in HTML
 
 
@@ -217,7 +205,6 @@ def test_dictation_card_keeps_behaviour_and_vocabulary():
 def test_dictation_card_edits_are_not_clobbered_by_status_events():
     assert "if (!dictationDirty) {" in HTML
     assert "dictationDirty = true;" in HTML
-    # Cleared before applyState so the card re-syncs from the saved values.
     submit = HTML[HTML.index('$("dictation-form").onsubmit'):]
     assert submit.index("dictationDirty = false;") < submit.index("applyState(result);")
 
@@ -238,8 +225,6 @@ def test_the_enable_switch_lives_in_the_card_header():
 
 
 def test_the_enable_switch_applies_without_a_save():
-    # It is the one dictation setting with an immediate effect, so it posts on
-    # change; the rest of the card still waits for SAVE.
     handler = HTML[HTML.index('$("dictation-enabled").onchange'):]
     handler = handler[:handler.index("\n};")]
     assert '"/api/dictation/toggle"' in handler
@@ -255,8 +240,6 @@ def test_turning_dictation_off_greys_out_the_rest_of_the_card():
 
 
 def test_the_dictation_card_no_longer_saves_chords():
-    # The SHORTCUTS card owns them; sending them from here too would let a
-    # stale copy overwrite a chord saved seconds earlier.
     submit = HTML[HTML.index('$("dictation-form").onsubmit'):]
     submit = submit[:submit.index("};")]
     assert "dictation_modifiers" not in submit
@@ -290,7 +273,6 @@ def test_every_rail_button_maps_to_a_section():
 
 
 def test_rail_glyphs_are_drawn_in_css_not_a_font():
-    # Same reason the grip is CSS: the bundled pixel font has no icon coverage.
     assert ".nav-glyph.info" in HTML
     assert ".nav-glyph.dictation" in HTML
     assert "clip-path: polygon" in HTML
@@ -305,8 +287,6 @@ def test_history_is_listed_with_copy_and_clear():
 
 
 def test_history_offers_copy_rather_than_reinsert():
-    # A click comes from the browser, so the browser holds focus and a
-    # re-insert would land there. Ctrl+Alt+Z is the re-insert path.
     assert ">COPY<" in HTML
     assert '"/api/dictation/insert"' not in HTML
 
@@ -328,8 +308,6 @@ def test_info_summarises_status_and_shortcuts():
 
 
 def test_transient_dictation_phases_reset_in_the_browser():
-    # The overlay dismisses INSERTED itself; the browser needs telling, or the
-    # pill reads INSERTED until the next dictation.
     assert "DICTATION_TRANSIENT" in HTML
     assert 'phase: "idle"' in HTML
     assert "clearTimeout(dictationReset)" in HTML
@@ -354,9 +332,6 @@ def test_roster_controls_stay_inside_the_rail():
 
 
 def test_a_narrow_chip_keeps_the_name_and_drops_the_slot_tag():
-    # The slot number is implied by roster order and repeated on the tooltip;
-    # the name is not recoverable from anything else on screen, so it wraps
-    # rather than being ellipsised away.
     assert ".chip .label {\n  flex: 1 1 auto; min-width: 0;\n  overflow-wrap: anywhere;\n}" in HTML
     assert "container-type: inline-size;" in HTML
     assert "@container (max-width: 240px) {\n  .chip .progress { display: none; }" in HTML
@@ -371,7 +346,6 @@ def test_enter_files_a_note_and_shift_enter_writes_a_newline():
 
 
 def test_an_open_notes_drawer_makes_room_instead_of_covering_the_transcript():
-    # Only where there is width to give up; a narrow window keeps the overlay.
     assert '@media (min-width: 1050px) {' in HTML
     assert "body.notes-open .console { margin-right: 320px; }" in HTML
     assert "body.notes-open .notes-tab { right: 320px; }" in HTML
@@ -379,8 +353,6 @@ def test_an_open_notes_drawer_makes_room_instead_of_covering_the_transcript():
 
 
 def test_the_notes_tab_does_not_cover_the_transcript():
-    # Full-bleed puts the transcript against the window edge at every width,
-    # so the gutter for the fixed tab is unconditional now.
     assert "padding: 18px 42px 18px 18px;" in HTML
     assert "padding: 24px 42px 24px 24px;" in HTML
 
@@ -390,7 +362,6 @@ def test_the_console_fills_the_window():
     assert ".console {\n  height: 100%;" in HTML
     assert ".console-body { display: flex; align-items: stretch; flex: 1; min-height: 0; }" in HTML
     assert ".body { display: flex; flex: 1; min-height: 0; }" in HTML
-    # The transcript grows with the window rather than a fixed slice of it.
     assert "max-height: 68vh;" not in HTML
 
 

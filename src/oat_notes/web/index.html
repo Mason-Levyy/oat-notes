@@ -33,14 +33,10 @@ body {
   font-family: Consolas, "Cascadia Mono", monospace;
   font-size: 15px;
   height: 100%;
-  /* The console fills the window and scrolls its own panes, so the page
-     itself never scrolls. */
   overflow: hidden;
 }
 .pixel { font-family: "Pixel", Consolas, monospace; font-size: 10px; line-height: 1.6; }
 
-/* Full-bleed: the transcript is the point of the app, so it gets the whole
-   window rather than a centred card. */
 .console {
   height: 100%;
   border: 3px solid var(--ink);
@@ -49,7 +45,6 @@ body {
   flex-direction: column;
 }
 
-/* ---------- header ---------- */
 .header {
   display: flex; align-items: center; gap: 14px;
   padding: 14px 18px;
@@ -164,7 +159,6 @@ body {
   display: block; width: 18px; height: 18px; margin: 0 auto;
   background: var(--ink);
 }
-/* Pinned to the bottom and smaller: reference material, not a destination. */
 .nav-btn.info {
   margin-top: auto; border-bottom: 0; border-top: 3px solid var(--ink);
   padding: 10px 6px 9px;
@@ -191,8 +185,6 @@ body {
                      62% 80%, 62% 100%, 38% 100%, 38% 80%, 20% 80%, 20% 62%,
                      0 62%);
 }
-/* Right padding clears the fixed NOTES tab, which now sits against the
-   window edge rather than outside a centred card. */
 .info-view, .dictation-view, .settings-view {
   flex: 1; min-height: 0; overflow-y: auto;
   padding: 24px 42px 24px 24px;
@@ -215,10 +207,8 @@ body {
 .history-row .email-tag { font-size: 7px; color: var(--oat-dark); }
 #history-clear { margin-top: 14px; }
 
-/* ---------- layout ---------- */
 .body { display: flex; flex: 1; min-height: 0; }
 .rail {
-  /* Grows a little on a wide window so speaker names fit on their chips. */
   width: clamp(300px, 24vw, 420px); flex: none;
   padding: 18px;
   border-right: 3px solid var(--ink);
@@ -226,14 +216,12 @@ body {
   overflow-y: auto;
   position: relative; z-index: 1;
 }
-/* Right padding clears the fixed NOTES tab. */
 .stage {
   flex: 1; min-width: 0; min-height: 0;
   padding: 18px 42px 18px 18px;
   display: flex; flex-direction: column; gap: 10px;
 }
 
-/* ---------- setup form ---------- */
 .field label { display: block; font-size: 8px; margin-bottom: 6px; }
 .field input[type="text"] {
   width: 100%;
@@ -245,9 +233,6 @@ body {
 }
 .field input[type="text"]:focus { outline: 3px solid var(--oat); outline-offset: 0; }
 .hint { font-size: 12px; color: #6b6558; margin-top: 5px; }
-/* The visually hidden input is positioned against its own label; without a
-   positioned ancestor it lands on the initial containing block and drags a
-   phantom scroll area onto a page that is meant to be exactly one screen. */
 .check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 8px; position: relative; }
 .check input { position: absolute; opacity: 0; }
 .check .box {
@@ -276,7 +261,6 @@ body {
 .btn.start { background: var(--oat); }
 .btn.stop { background: var(--rec); color: #fff; display: none; }
 
-/* ---------- settings ---------- */
 .settings-view { display: none; }
 .settings-card {
   width: min(760px, 100%); border: 3px solid var(--ink); background: #fff;
@@ -317,8 +301,6 @@ body {
   background: var(--oat); box-shadow: 3px 3px 0 var(--ink);
 }
 .modifier-option input:focus-visible + span { outline: 3px solid var(--sprout); }
-/* Sits flush under the modifier grid so the toggles and their result read as
-   one control rather than two stacked boxes. */
 .hotkey-preview {
   border: 3px solid var(--ink); background: var(--screen); color: var(--screen-hi);
   padding: 11px; margin-bottom: 18px; text-align: center; font-size: 11px;
@@ -381,7 +363,6 @@ body {
 .mini.danger { color: var(--rec); }
 .mini:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* ---------- disclosure help ---------- */
 .help { margin-top: 10px; }
 .help summary {
   font-size: 7px; cursor: pointer; color: #6b6558;
@@ -393,14 +374,12 @@ body {
 .help[open] summary { margin-bottom: 5px; }
 .help .hint { margin-top: 0; }
 
-/* ---------- list filter ---------- */
 .list-filter {
   width: 100%; margin-top: 10px; border: 2px solid var(--ink); background: #fff;
   font-family: Consolas, monospace; padding: 7px;
 }
 .list-empty { font-size: 8px; color: #6b6558; margin-top: 12px; }
 
-/* ---------- library row overflow ---------- */
 .library-row { flex-wrap: wrap; }
 .library-row .row-actions { display: none; width: 100%; gap: 7px; padding-top: 8px; }
 .library-row.open .row-actions { display: flex; }
@@ -426,7 +405,6 @@ body {
 .roster-tools { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .setup-roster-row.untrained, .setup-roster-row.learning { background: #d2d0ca; color: #68645c; }
 
-/* ---------- group loader ---------- */
 .row-btn {
   width: 100%; text-align: left; cursor: pointer;
   border: 2px solid var(--ink); background: #fff; padding: 10px;
@@ -438,7 +416,6 @@ body {
 .row-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .row-btn:focus-visible { outline: 3px solid var(--oat); outline-offset: 2px; }
 
-/* ---------- option lists (groups + person search) ---------- */
 .options { display: flex; flex-direction: column; gap: 6px; }
 .options[hidden] { display: none; }
 .option {
@@ -454,11 +431,9 @@ body {
 .combo { position: relative; }
 .options-empty { font-size: 12px; color: #6b6558; padding: 4px 2px; }
 
-/* ---------- roster rows ---------- */
 .setup-roster-row[draggable="true"] { cursor: grab; }
 .setup-roster-row.dragging { opacity: 0.4; }
 .setup-roster-row.drop-target { box-shadow: inset 0 3px 0 var(--oat); }
-/* The bundled pixel font has no grip glyph, so the dots are drawn in CSS. */
 .grip {
   width: 12px; height: 18px; flex: none; padding: 0;
   border: 0; background: transparent; cursor: grab; position: relative;
@@ -471,12 +446,8 @@ body {
 }
 .grip:focus-visible { outline: 2px solid var(--oat); }
 
-/* ---------- capture options ---------- */
 .check-row { display: flex; gap: 16px; align-items: center; }
-/* Groups collapse by default so a page of them stays scannable; the summary
-   carries the name and member count, which is what you scan for. */
 .group-card { border: 2px dashed var(--ink); padding: 10px; margin-top: 10px; }
-/* display:flex drops the native disclosure marker, so draw our own. */
 .group-card > summary {
   font-family: "Pixel", Consolas, monospace; font-size: 8px; cursor: pointer;
   display: flex; gap: 8px; align-items: center; list-style: none;
@@ -497,7 +468,6 @@ body {
 .bank-row { display: flex; gap: 8px; align-items: center; }
 .bank-row .pixel { flex: 1; text-align: center; font-size: 8px; }
 
-/* ---------- live session rail ---------- */
 .live { display: none; flex-direction: column; gap: 16px; }
 .counter { font-size: 20px; text-align: center; padding: 10px 0; }
 .rec-row { display: flex; justify-content: center; align-items: center; gap: 8px; font-size: 10px; }
@@ -521,9 +491,6 @@ body {
   width: 100%;
   overflow: hidden;
 }
-/* The name is the only part of a chip that carries meaning — the slot number
-   is implied by roster order — so it claims its full width and pushes the
-   enrollment counter onto a second line rather than being truncated away. */
 .chip .label {
   flex: 1 1 auto; min-width: 0;
   overflow-wrap: anywhere;
@@ -549,12 +516,7 @@ body {
 }
 .chip .progress + .dot { margin-left: 0; }
 .chip-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; container-type: inline-size; }
-/* The chip asks for enough room to hold a name; when EDIT/RESET/× can't fit
-   beside it they wrap to their own line instead of squeezing the name out. */
 .chip-row .chip { flex: 1 1 200px; width: auto; min-width: 0; }
-/* Too narrow for everything: drop the slot tag and the enrollment counter
-   before the name — both are on the chip's tooltip, the name is not
-   recoverable from anything else on screen. */
 @container (max-width: 240px) {
   .chip .progress { display: none; }
 }
@@ -569,7 +531,6 @@ body {
 .chip-row.editing input:focus { outline: 3px solid var(--oat); }
 #live-add-row { margin-top: 2px; }
 
-/* ---------- notes sidebar ---------- */
 .notes-tab {
   position: fixed; top: 50%; right: 0; z-index: 30;
   transition: right 0.2s ease;
@@ -588,9 +549,6 @@ body {
   padding: 18px; display: flex; flex-direction: column; gap: 12px;
 }
 .notes-drawer.open { transform: translateX(0); }
-/* Full-bleed means an open drawer would sit on top of the transcript, so on a
-   window with room to spare the console gives up the width instead. Narrower
-   than that it stays an overlay. */
 @media (min-width: 1050px) {
   .console { transition: margin-right 0.2s ease; }
   body.notes-open .console { margin-right: 320px; }
@@ -611,7 +569,6 @@ body {
 #notes-input:disabled { background: #d2d0ca; color: #6b6558; }
 #notes-hint { font-size: 8px; }
 
-/* ---------- screen ---------- */
 .statusline { font-size: 8px; min-height: 14px; }
 .statusline .saved { color: var(--sprout); }
 .screen {
@@ -622,7 +579,6 @@ body {
   box-shadow: inset 0 0 0 4px #234323;
   padding: 16px;
   overflow-y: auto;
-  /* Fills whatever height the window has instead of a fixed slice of it. */
   min-height: 240px;
   color: var(--screen-mid);
   line-height: 1.75;
@@ -671,8 +627,6 @@ body {
   .rec-dot, .chip.active .dot, .cursor { animation: none; }
 }
 @media (max-width: 760px) {
-  /* Stacked: the whole meeting view scrolls as one column instead of the
-     rail and the transcript scrolling separately. */
   .body { flex-direction: column; overflow-y: auto; }
   .rail {
     width: 100%; overflow: visible;
@@ -1127,7 +1081,6 @@ function moveRosterEntry(from, to) {
   if (to < 0 || to >= setupRoster.length) return;
   const [moved] = setupRoster.splice(from, 1);
   setupRoster.splice(to, 0, moved);
-  // Follow the row so repeated presses keep walking a speaker up the list.
   rosterFocus = { action: "grip", index: to };
   renderSetupRoster();
 }
@@ -1171,8 +1124,6 @@ function renderSetupRoster() {
     };
     row.ondragend = () => { dragIndex = null; row.classList.remove("dragging"); };
 
-    // Dragging is the visible affordance; Alt+Arrow keeps the ordering — and so
-    // the hotkey slots it assigns — reachable without a mouse.
     const grip = document.createElement("button");
     grip.type = "button"; grip.className = "grip"; grip.dataset.rosterAction = "grip";
     grip.title = `Reorder ${entry.name}`;
@@ -1281,7 +1232,6 @@ function renderLibrarySettings() {
   list.innerHTML = "";
   const people = librarySpeakers();
   const filterInput = $("library-search");
-  // A filter box is only worth its space once the list stops fitting on screen.
   filterInput.style.display = people.length > LIBRARY_FILTER_THRESHOLD ? "block" : "none";
   const needle = people.length > LIBRARY_FILTER_THRESHOLD
     ? filterInput.value.trim().toLowerCase()
@@ -1302,8 +1252,6 @@ function renderLibrarySettings() {
       <span class="profile-pill ${speaker.profile_state === "ready" ? "ready" : ""}">${profileText(speaker)}</span>`;
     const record = document.createElement("button");
     record.type = "button"; record.textContent = "RECORD"; record.disabled = recordDisabled;
-    // Filled only where a profile is still missing, so the accent marks the
-    // rows that need work instead of every row in the list.
     const trained = speaker.profile_state === "ready";
     record.className = trained ? "mini" : "mini primary";
     record.title = trained
@@ -1329,8 +1277,6 @@ function renderLibrarySettings() {
         post("/api/library/speakers/delete", { id: speaker.id }).then((r) => applyLibraryResult(r, "SPEAKER DELETED"));
       }
     };
-    // RECORD is the routine action and stays in reach; the rest — including the
-    // destructive ones — sit behind a deliberate second click.
     const actions = document.createElement("div");
     actions.className = "row-actions";
     actions.append(rename, reset, remove);
@@ -1353,8 +1299,6 @@ function renderLibrarySettings() {
   libraryGroups().forEach((group) => {
     const card = document.createElement("details");
     card.className = "group-card";
-    // Editing a group re-renders the whole list; remember which cards the user
-    // had opened so their card doesn't slam shut mid-edit.
     card.open = openGroups.has(group.id);
     card.ontoggle = () => {
       if (card.open) openGroups.add(group.id);
@@ -1442,8 +1386,6 @@ function renderLibrarySettings() {
 
 function renderSettings() {
   const settings = state.settings || {};
-  // An open editor holds its own draft, so a `status` event landing mid-edit
-  // repaints around it instead of reverting the selection.
   renderShortcuts();
   $("hotkey-hint").textContent = settings.hotkey_label || "Ctrl+Alt+1–9";
   const message = $("settings-message");
@@ -1642,8 +1584,6 @@ function renderDictationStatus() {
     ? String(dictation.error).toUpperCase()
     : DICTATION_LABELS[phase] || phase.toUpperCase();
   element.className = `dictation-status pixel ${DICTATION_CLASSES[phase] || ""}`.trim();
-  // The overlay dismisses these itself; the browser has to be told, or the
-  // pill reads INSERTED until the next dictation.
   if (dictationReset) clearTimeout(dictationReset);
   if (DICTATION_TRANSIENT.has(phase)) {
     dictationReset = setTimeout(() => {
@@ -1859,7 +1799,6 @@ function renderPlayers() {
         progress = "SAMPLE SKIPPED";
       }
     }
-    // Carries what a narrow chip hides: the slot tag and the enrollment state.
     chip.title = `${speaker.name} — hotkey ${bankKey}; saved slot ${hotkeySlot + 1}; ${progress}`;
     chip.innerHTML = `<span class="slot">${slot}</span><span class="label">${escapeHtml(speaker.name.toUpperCase())}</span><span class="progress">${progress}</span><span class="dot"></span>`;
     chip.onclick = () => post("/api/switch", { index });
@@ -1879,7 +1818,6 @@ function renderPlayers() {
     const rename = document.createElement("button");
     rename.type = "button";
     rename.className = "mini";
-    // The bundled pixel font has no ✎ glyph, so it fell back to a stray mark.
     rename.textContent = "EDIT";
     rename.title = `Name ${speaker.name}`;
     rename.setAttribute("aria-label", rename.title);
@@ -2039,8 +1977,6 @@ function applyState(s) {
   const previousProfileLearning = state.profile_learning;
   state = Object.assign(state, s);
   if (!state.enrollment && previousEnrollment && ENROLLMENT_TERMINAL.has(previousEnrollment.phase)) {
-    // A refetch racing the terminal SSE event shouldn't erase the
-    // TRAINED/STOPPED message before the user has a chance to dismiss it.
     state.enrollment = previousEnrollment;
   }
   if (!state.profile_learning && previousProfileLearning && ["saved", "skipped"].includes(previousProfileLearning.phase)) {
@@ -2165,8 +2101,6 @@ function attachTabComplete(input, getNames) {
   });
 }
 
-// The setup search has its own arrow-key result list; the live field still uses
-// a datalist, so Tab-completion earns its keep there.
 attachTabComplete($("live-person-search"), () => librarySpeakers().map((speaker) => speaker.name));
 
 function matchingSpeaker(query) {
@@ -2175,7 +2109,6 @@ function matchingSpeaker(query) {
   return librarySpeakers().find((item) => item.name.toLowerCase() === lower) || null;
 }
 
-/* ---------- saved-group loader ---------- */
 
 function setGroupOptionsOpen(open) {
   groupOptionsOpen = open && libraryGroups().length > 0;
@@ -2220,7 +2153,6 @@ function renderGroupOptions() {
 
 $("group-select").onclick = () => setGroupOptionsOpen(!groupOptionsOpen);
 
-/* ---------- person search combobox ---------- */
 
 function closePersonResults() {
   personResults = [];
@@ -2238,8 +2170,6 @@ function paintPersonActive() {
   if (current) $("person-search").setAttribute("aria-activedescendant", current.id);
 }
 
-// Searching for a saved person and naming a brand-new one are the same decision,
-// so both live in one list: matches first, "create" as the last resort.
 function renderPersonResults() {
   const input = $("person-search");
   const panel = $("person-results");
@@ -2307,8 +2237,6 @@ $("person-search").addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape") { closePersonResults(); return; }
   if (event.key !== "Enter") return;
-  // The field lives inside the setup form; Enter must add a person, not start
-  // the meeting.
   event.preventDefault();
   const choice = personResults[personActive] || personResults[0];
   if (choice) commitChoice(choice);
@@ -2368,7 +2296,6 @@ $("notes-tab").onclick = () => {
   const drawer = $("notes-drawer");
   const open = !drawer.classList.contains("open");
   drawer.classList.toggle("open", open);
-  // Lets the console shrink out from under the drawer on a wide window.
   document.body.classList.toggle("notes-open", open);
   drawer.setAttribute("aria-hidden", String(!open));
   $("notes-tab").setAttribute("aria-expanded", String(open));
@@ -2554,7 +2481,6 @@ events.onmessage = (message) => {
     });
     renderDictationStatus();
     renderInfo();
-    // Transcript text never rides the event stream; fetch it once it landed.
     if (event.phase === "inserted") refreshHistory();
   } else if (event.type === "status") {
     fetch("/api/state").then((r) => r.json()).then(applyState);
@@ -2562,8 +2488,6 @@ events.onmessage = (message) => {
     state.enrollment = event;
     renderEnrollmentStatus();
     if (ENROLLMENT_TERMINAL.has(event.phase)) {
-      // Refresh just the library (profile_state pill) rather than the full
-      // state, so the TRAINED message stays put until dismissed.
       fetch("/api/library").then((r) => r.json()).then((library) => {
         state.library = library;
         renderLibrarySettings();

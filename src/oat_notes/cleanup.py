@@ -9,13 +9,13 @@ import queue
 import sys
 import threading
 import time
-from typing import Callable, Protocol, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 from .llm import LlmEngine
 
 DROP_TOKEN = "[DROP]"
-# A cleanup pass only ever removes or repairs words. Output that grows past
-# this ratio means the model started inventing content — keep the original.
 MAX_GROWTH_RATIO = 1.2
 _LABEL_PREFIXES = ("LINE:", "PREV:", "NEXT:")
 
@@ -104,6 +104,13 @@ class TranscriptCleaner:
         self.clean("um, hello there")
 
 
+@dataclass
+class _PendingLine:
+    line_id: int
+    text: str | None
+    submitted_at: float
+
+
 class CleanupWorker:
     """Context-window cleanup between the transcription sink and the LLM.
 
@@ -132,9 +139,7 @@ class CleanupWorker:
         self._queue: queue.Queue = queue.Queue(maxsize=128)
         self._results: dict[int, str | None] = {}
         self._results_lock = threading.Lock()
-        # Owned solely by the worker thread; no lock needed.
-        # Each entry: [line_id, effective_text_or_None, submitted_at]
-        self._buffer: list[list] = []
+        self._buffer: list[_PendingLine] = []
         self._cursor = 0
         self._thread = threading.Thread(
             target=self._run, name="transcript-cleanup", daemon=True
@@ -145,7 +150,7 @@ class CleanupWorker:
 
     def submit(self, line_id: int, text: str) -> None:
         try:
-            self._queue.put_nowait((line_id, text, time.monotonic()))
+            self._queue.put_nowait(_PendingLine(line_id, text, time.monotonic()))
         except queue.Full:
             pass
 
@@ -164,32 +169,30 @@ class CleanupWorker:
             try:
                 item = self._queue.get(timeout=self._poll_timeout())
             except queue.Empty:
-                # Woke up to honour the max-wait fallback on a quiet channel.
                 self._process(draining=False)
                 continue
             if item is None:
                 self._process(draining=True)
                 return
-            self._buffer.append([item[0], item[1], item[2]])
+            self._buffer.append(item)
             self._process(draining=False)
 
     def _poll_timeout(self) -> float | None:
-        # Block indefinitely when nothing is pending; otherwise wake often
-        # enough to apply the age-based fallback.
         return 1.0 if self._cursor < len(self._buffer) else None
 
     def _process(self, draining: bool) -> None:
         while self._cursor < len(self._buffer):
             index = self._cursor
             has_future = (len(self._buffer) - 1 - index) >= self._after
-            aged = (time.monotonic() - self._buffer[index][2]) >= self._max_wait
+            aged = (time.monotonic() - self._buffer[index].submitted_at) >= self._max_wait
             if not (draining or has_future or aged):
                 break
             self._clean_index(index)
             self._cursor += 1
 
     def _clean_index(self, index: int) -> None:
-        line_id, raw, _ = self._buffer[index]
+        pending = self._buffer[index]
+        raw = pending.text
         before = self._context_before(index)
         after = self._context_after(index)
         try:
@@ -202,21 +205,19 @@ class CleanupWorker:
                 file=sys.stderr,
             )
             return
-        # Store the effective text so later lines get cleaned prior-context;
-        # a dropped line (None) contributes nothing to context.
-        self._buffer[index][1] = cleaned
+        pending.text = cleaned
         if cleaned == raw:
             return
         with self._results_lock:
-            self._results[line_id] = cleaned
-        self._on_cleaned(line_id, cleaned)
+            self._results[pending.line_id] = cleaned
+        self._on_cleaned(pending.line_id, cleaned)
 
     def _context_before(self, index: int) -> list[str]:
         out: list[str] = []
         position = index - 1
         while position >= 0 and len(out) < self._before:
-            text = self._buffer[position][1]
-            if text:  # skip dropped lines
+            text = self._buffer[position].text
+            if text:
                 out.append(text)
             position -= 1
         out.reverse()
@@ -224,4 +225,4 @@ class CleanupWorker:
 
     def _context_after(self, index: int) -> list[str]:
         end = min(len(self._buffer), index + 1 + self._after)
-        return [self._buffer[position][1] for position in range(index + 1, end)]
+        return [self._buffer[position].text for position in range(index + 1, end)]

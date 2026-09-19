@@ -86,16 +86,13 @@ def test_remove_speaker_rejects_out_of_range_or_spoken():
 
 
 def test_remove_speaker_allows_removing_a_mistakenly_created_active_guest():
-    # A freshly created Guest is switched to immediately, but they haven't
-    # actually spoken — removing them (undoing the mis-click) must still
-    # work, and must clear the now-stale active/current-speaker pointers.
     session = bare_session()
     session.roster = [Speaker("Alex", hotkey_slot=0), Speaker("Guest 1", hotkey_slot=1)]
     session.current_speaker = 1
     session._current_speaker_channel = Channel.MIC
     session.active = {Channel.MIC: 1, Channel.LOOPBACK: 1}
     session.profile_learning = None
-    session.log = SimpleNamespace(speakers_with_lines=lambda: set())
+    session.log = SimpleNamespace(speakers_with_lines=set)
 
     assert session.remove_speaker(1) is None
     assert session.roster[1].active is False
@@ -110,7 +107,7 @@ def test_remove_speaker_blocks_while_sample_capture_in_progress():
     session.current_speaker = 0
     session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
     session.profile_learning = {"speaker_index": 1, "phase": "collecting"}
-    session.log = SimpleNamespace(speakers_with_lines=lambda: set())
+    session.log = SimpleNamespace(speakers_with_lines=set)
 
     assert session.remove_speaker(1) == "a voice sample is being captured for this speaker"
 
@@ -121,7 +118,7 @@ def test_remove_speaker_succeeds_once_then_reports_already_removed():
     session.current_speaker = 0
     session.active = {Channel.MIC: 0, Channel.LOOPBACK: None}
     session.profile_learning = None
-    session.log = SimpleNamespace(speakers_with_lines=lambda: set())
+    session.log = SimpleNamespace(speakers_with_lines=set)
 
     assert session.remove_speaker(1) is None
     assert session.roster[1].active is False
@@ -148,7 +145,7 @@ def _rename_session(roster, guest_indices=()):
     session._attributor = SimpleNamespace(
         rename=lambda i, n: session.renamed.append((i, n))
     )
-    session.log = SimpleNamespace(rename=lambda mapping: session.log_renames.append(mapping))
+    session.log = SimpleNamespace(rename=session.log_renames.append)
     session._options = SimpleNamespace(speaker_store=None)
     return session
 
@@ -183,7 +180,7 @@ def test_rename_speaker_validates_index_and_name():
     session = _rename_session([Speaker("Guest 1", hotkey_slot=0)])
     assert session.rename_speaker(5, "Sarah") == "speaker not found"
     assert session.rename_speaker(0, "   ") == "a name is required"
-    assert session.rename_speaker(0, "Guest 1") is None  # unchanged is a no-op
+    assert session.rename_speaker(0, "Guest 1") is None
     assert session.log_renames == []
 
 
@@ -589,12 +586,12 @@ def test_only_saved_samples_trigger_a_rescore():
     session._events = SimpleNamespace(on_profile_learning=lambda update: None)
 
     session._handle_profile_learning(
-        SimpleNamespace(phase="collecting", speaker_index=2, to_dict=lambda: {})
+        SimpleNamespace(phase="collecting", speaker_index=2, to_dict=dict)
     )
     assert rescored == []
 
     session._handle_profile_learning(
-        SimpleNamespace(phase="saved", speaker_index=2, to_dict=lambda: {})
+        SimpleNamespace(phase="saved", speaker_index=2, to_dict=dict)
     )
     assert rescored == [2]
 

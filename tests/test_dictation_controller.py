@@ -74,9 +74,6 @@ def cancel(controller):
     controller._dispatch(_Command(dictation._CANCEL))
 
 
-# -- push to talk ----------------------------------------------------------
-
-
 def test_hold_and_release_inserts_the_transcript(injected):
     controller, phases = make_controller()
     arm(controller)
@@ -124,9 +121,6 @@ def test_release_without_arm_is_ignored(injected):
     assert injected == [] and phases == []
 
 
-# -- hybrid latching -------------------------------------------------------
-
-
 def test_quick_tap_latches_instead_of_committing(injected):
     recorder = FakeRecorder()
     recorder.speech_seconds = 0.0
@@ -164,7 +158,7 @@ def test_quick_tap_that_caught_speech_still_commits(injected):
 def test_escape_cancels_a_latched_recording(injected):
     recorder = FakeRecorder()
     recorder.speech_seconds = 0.0
-    controller, phases = make_controller(recorder)
+    controller, _ = make_controller(recorder)
     arm(controller)
     release(controller, held_seconds=0.1)
     controller._cancel_if_active()
@@ -177,9 +171,6 @@ def test_escape_while_idle_does_nothing():
     controller, _ = make_controller()
     controller._cancel_if_active()
     assert controller._commands.empty()
-
-
-# -- formatting hand-off ---------------------------------------------------
 
 
 def test_formatter_result_is_what_gets_inserted(injected):
@@ -220,9 +211,6 @@ def test_formatter_dropping_everything_inserts_nothing(injected):
     assert injected == []
 
 
-# -- failure handling ------------------------------------------------------
-
-
 def test_arm_before_the_model_loads_reports_loading(injected):
     controller, phases = make_controller()
     controller._recorder = None
@@ -255,9 +243,6 @@ def test_phase_listener_error_does_not_break_dictation(injected):
     arm(controller)
     release(controller, held_seconds=2.0)
     assert injected != []
-
-
-# -- bindings --------------------------------------------------------------
 
 
 def test_bind_registers_every_chord_and_escape():

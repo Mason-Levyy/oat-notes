@@ -75,5 +75,5 @@ def test_captured_words_are_never_logged():
     for path in (PACKAGE / "dictation" / "recorder.py", PACKAGE / "cleanup.py"):
         source = path.read_text(encoding="utf-8")
         for line in source.splitlines():
-            if "file=sys.stderr" in line or "error:" in line and "print" in line:
+            if "file=sys.stderr" in line or ("error:" in line and "print" in line):
                 assert "{error}" not in line or "type(error)" in line

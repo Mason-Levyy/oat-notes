@@ -87,7 +87,7 @@ class AudioCapture:
 
 
 def _resample(samples: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
-    target_length = int(round(samples.size * to_rate / from_rate))
+    target_length = round(samples.size * to_rate / from_rate)
     positions = np.linspace(0, samples.size - 1, target_length)
     return np.interp(positions, np.arange(samples.size), samples).astype(np.float32)
 

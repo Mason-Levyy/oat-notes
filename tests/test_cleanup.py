@@ -94,7 +94,6 @@ def test_worker_feeds_cleaned_prior_and_raw_future_context():
     worker = CleanupWorker(cleaner, lambda i, t: None, context_before=2, context_after=2)
     drain(worker, [(i, ch) for i, ch in enumerate(["a", "b", "c", "d", "e"])])
 
-    # Prior context is the already-cleaned (upper) text; future context is raw.
     assert cleaner.calls == [
         ("a", (), ("b", "c")),
         ("b", ("A",), ("c", "d")),
@@ -105,15 +104,13 @@ def test_worker_feeds_cleaned_prior_and_raw_future_context():
 
 
 def test_worker_excludes_dropped_lines_from_prior_context():
-    # The dropped middle line must not appear in later context: with room for
-    # three prior lines but one dropped, only the two survivors come through.
     cleaner = FakeCleaner(lambda t: None if t == "junk" else t.upper())
     worker = CleanupWorker(cleaner, lambda i, t: None, context_before=3, context_after=0)
     drain(worker, [(0, "hello"), (1, "junk"), (2, "there"), (3, "friend")])
 
     last = cleaner.calls[-1]
     assert last[0] == "friend"
-    assert last[1] == ("HELLO", "THERE")  # "junk" dropped, absent from context
+    assert last[1] == ("HELLO", "THERE")
 
 
 def test_worker_skips_unchanged_lines():
@@ -154,11 +151,10 @@ def test_worker_full_queue_skips_silently():
     worker.start()
     worker.finish()
 
-    assert len(worker.results()) == 128  # queue maxsize
+    assert len(worker.results()) == 128
 
 
 def test_worker_age_fallback_cleans_a_line_when_no_future_arrives():
-    # With max_wait 0, a line is cleaned even without any following lines.
     results = []
     cleaner = FakeCleaner(str.upper)
     worker = CleanupWorker(
@@ -172,4 +168,4 @@ def test_worker_age_fallback_cleans_a_line_when_no_future_arrives():
     worker.finish()
 
     assert results == [(0, "HELLO")]
-    assert cleaner.calls[0] == ("hello", (), ())  # no future context available
+    assert cleaner.calls[0] == ("hello", (), ())

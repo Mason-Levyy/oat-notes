@@ -114,7 +114,7 @@ def test_clipped_audio_is_rejected_and_never_reaches_target(tmp_path):
     recorder = make_recorder(store, carol.speaker_id, events.append, target_seconds=1.0)
     thread = run_without_hardware(recorder)
 
-    recorder.frame_queue.put((Channel.MIC, 0.0, speech(50, amplitude=1.0)))  # clipped
+    recorder.frame_queue.put((Channel.MIC, 0.0, speech(50, amplitude=1.0)))
     recorder.frame_queue.put(
         (Channel.MIC, 50 * WINDOW / CONFIG.sample_rate, silence(SILENCE_WINDOWS))
     )

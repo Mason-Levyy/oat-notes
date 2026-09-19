@@ -81,8 +81,7 @@ class Attributor:
     def add(self, speaker: Speaker) -> int:
         """Append a guest speaker mid-session."""
         self._roster.append(speaker)
-        index = len(self._roster) - 1
-        return index
+        return len(self._roster) - 1
 
     def rename(self, index: int, name: str) -> None:
         """Rename a roster member in place (mid-session naming of a guest)."""
@@ -91,9 +90,6 @@ class Attributor:
 
     def log_for(self, channel: Channel) -> SwitchLog:
         return self._logs[channel]
-
-    def first_member(self, channel: Channel) -> int | None:
-        return 0 if self._roster else None
 
     def for_chunk(self, chunk: AudioChunk) -> str | None:
         if not self._roster:

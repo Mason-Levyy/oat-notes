@@ -39,7 +39,7 @@ def normalize_modifiers(value: Any, allow_empty: bool = False) -> tuple[str, ...
     requested = {item.strip().lower() for item in value if item.strip()}
     unknown = requested.difference(MODIFIER_ORDER)
     if unknown:
-        raise ValueError(f"unknown hotkey modifier: {sorted(unknown)[0]}")
+        raise ValueError(f"unknown hotkey modifier: {min(unknown)}")
     if not requested and not allow_empty:
         raise ValueError("choose at least one hotkey modifier")
     return tuple(modifier for modifier in MODIFIER_ORDER if modifier in requested)

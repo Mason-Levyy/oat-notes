@@ -13,8 +13,8 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Callable
 
 import numpy as np
 
@@ -213,5 +213,4 @@ class UtteranceRecorder:
         try:
             self._level_sink(level)
         except Exception:
-            # A failing meter must never stall the capture thread behind it.
             pass

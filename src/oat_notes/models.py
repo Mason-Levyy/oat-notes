@@ -9,24 +9,20 @@ from __future__ import annotations
 
 import os
 import sys
+from functools import cache
 from pathlib import Path
 
-_tls_trusted = False
 
-
+@cache
 def ensure_tls_trust() -> None:
     """Make HTTPS model downloads trust the OS certificate store so a
     corporate TLS-interception proxy doesn't fail first-run fetches. A no-op
     when already applied or when truststore isn't available."""
-    global _tls_trusted
-    if _tls_trusted:
-        return
-    _tls_trusted = True
     try:
         import truststore
 
         truststore.inject_into_ssl()
-    except Exception as error:  # never let this block model loading
+    except Exception as error:
         print(f"could not enable OS certificate trust: {error}", file=sys.stderr)
 
 

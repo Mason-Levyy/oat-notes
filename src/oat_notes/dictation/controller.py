@@ -13,8 +13,8 @@ import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .. import inject
 from ..config import Config
@@ -198,8 +198,6 @@ class DictationController:
             listener.unbind(name)
 
     def rebind(self, options: DictationOptions) -> None:
-        # Any recording in flight belongs to the outgoing chord, which is
-        # about to stop existing, so it ends here rather than hanging.
         self._post(_CANCEL)
         self.options = options
         if self._recorder is not None:

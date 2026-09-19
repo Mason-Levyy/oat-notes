@@ -29,7 +29,7 @@ def _fail(*_args, **_kwargs):
 def test_release_modifiers_forces_up_only_held_keys(monkeypatch):
     sent = []
     monkeypatch.setattr(inject, "held_modifiers", lambda: [inject.VK_CONTROL])
-    monkeypatch.setattr(inject, "_send", lambda events: sent.extend(events))
+    monkeypatch.setattr(inject, "_send", sent.extend)
     inject.release_modifiers(timeout=0.02)
     assert [event.ki.wVk for event in sent] == [inject.VK_CONTROL]
     assert all(event.ki.dwFlags & inject._KEYEVENTF_KEYUP for event in sent)
@@ -37,7 +37,7 @@ def test_release_modifiers_forces_up_only_held_keys(monkeypatch):
 
 @windows_only
 def test_release_modifiers_sends_nothing_when_already_clear(monkeypatch):
-    monkeypatch.setattr(inject, "held_modifiers", lambda: [])
+    monkeypatch.setattr(inject, "held_modifiers", list)
     monkeypatch.setattr(inject, "_send", _fail)
     inject.release_modifiers(timeout=0.02)
 
@@ -63,7 +63,7 @@ def test_paste_sends_a_ctrl_v_chord(monkeypatch):
     monkeypatch.setattr(inject, "read_clipboard_text", lambda: None)
     monkeypatch.setattr(inject, "write_clipboard_text", lambda *a, **k: None)
     monkeypatch.setattr(inject, "release_modifiers", lambda *a, **k: None)
-    monkeypatch.setattr(inject, "_send", lambda events: sent.extend(events))
+    monkeypatch.setattr(inject, "_send", sent.extend)
     inject.paste_text("hello", restore_clipboard=False)
     assert [event.ki.wVk for event in sent] == [
         inject.VK_CONTROL, inject.VK_V, inject.VK_V, inject.VK_CONTROL
@@ -128,8 +128,6 @@ def test_inject_refuses_when_focus_cannot_be_restored(monkeypatch):
     monkeypatch.setattr(inject, "paste_text", _fail)
     with pytest.raises(inject.InjectionError, match="took focus"):
         inject.inject("hello", hwnd=1234)
-
-
 
 
 @windows_only
