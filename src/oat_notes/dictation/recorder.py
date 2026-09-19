@@ -10,8 +10,8 @@ single-speaker utterance. Everything underneath is shared unchanged.
 
 from __future__ import annotations
 
+import logging
 import queue
-import sys
 import threading
 from collections.abc import Callable
 from dataclasses import replace
@@ -22,9 +22,12 @@ from ..capture import AudioCapture, FrameBlock
 from ..chunker import VadChunker
 from ..clock import SessionClock
 from ..config import Config
+from ..log import error_kind
 from ..transcriber import Transcriber, TranscriptionHints
 from ..types import AudioChunk, Channel
 from .stitch import Piece, stitch_pieces
+
+log = logging.getLogger(__name__)
 
 _JOIN_TIMEOUT_SECONDS = 30.0
 
@@ -145,10 +148,7 @@ class UtteranceRecorder:
             self.frame_queue.put(None)
             self._thread.join(timeout=_JOIN_TIMEOUT_SECONDS)
             if self._thread.is_alive():
-                print(
-                    "warning: dictation worker did not finish in time",
-                    file=sys.stderr,
-                )
+                log.warning("dictation worker did not finish in time")
             self._thread = None
 
     def _run(self) -> None:
@@ -173,10 +173,7 @@ class UtteranceRecorder:
         try:
             segment = self._transcriber.transcribe(chunk, self._hints())
         except Exception as error:
-            print(
-                f"dictation transcription error: {type(error).__name__}",
-                file=sys.stderr,
-            )
+            log.error("dictation transcription failed: %s", error_kind(error))
             return
         text = segment.text.strip()
         if text:
@@ -212,5 +209,6 @@ class UtteranceRecorder:
         level = float(np.sqrt(np.mean(np.square(samples, dtype=np.float64))))
         try:
             self._level_sink(level)
-        except Exception:
-            pass
+        except Exception as error:
+            log.warning("level meter disabled: %s", error_kind(error))
+            self._level_sink = None

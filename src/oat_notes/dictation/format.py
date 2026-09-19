@@ -10,12 +10,15 @@ heuristic answers the clear-cut cases, and only ambiguous text costs a call.
 
 from __future__ import annotations
 
+import logging
 import re
-import sys
 from collections.abc import Sequence
 
 from ..llm import LlmEngine
+from ..log import error_kind
 from ..repetition import collapse_repeated_runs
+
+log = logging.getLogger(__name__)
 
 _FILLERS = ("um", "uhm", "uh", "erm", "er", "ah", "hmm", "mm", "mhm")
 _FILLER_WITH_SURROUNDING_COMMAS = re.compile(
@@ -185,7 +188,7 @@ def classify_email(text: str, engine: LlmEngine) -> bool:
     try:
         reply = engine.generate(_CLASSIFY_SYSTEM, text.strip()[:600], max_new_tokens=3)
     except Exception as error:
-        print(f"email classification failed: {type(error).__name__}", file=sys.stderr)
+        log.warning("email classification failed: %s", error_kind(error))
         return False
     return "EMAIL" in reply.strip().upper()
 
@@ -264,7 +267,7 @@ def format_email(text: str, engine: LlmEngine) -> str:
             EMAIL_SYSTEM_PROMPT, build_email_prompt(original), max_new_tokens
         )
     except Exception as error:
-        print(f"email formatting failed: {type(error).__name__}", file=sys.stderr)
+        log.warning("email formatting failed: %s", error_kind(error))
         return original
     return postprocess_email(output, original) or original
 

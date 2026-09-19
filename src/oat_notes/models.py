@@ -7,10 +7,12 @@ application ever makes lives here, and ``offline`` turns it off.
 
 from __future__ import annotations
 
+import logging
 import os
-import sys
 from functools import cache
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 @cache
@@ -23,7 +25,7 @@ def ensure_tls_trust() -> None:
 
         truststore.inject_into_ssl()
     except Exception as error:
-        print(f"could not enable OS certificate trust: {error}", file=sys.stderr)
+        log.warning("could not enable OS certificate trust: %s", error)
 
 
 def _openvino_model_dir(source: str) -> Path:
@@ -56,7 +58,7 @@ def resolve_openvino_model(source: str, offline: bool) -> str:
             f"model {source!r} is not cached locally and --offline forbids"
             " downloading it"
         )
-    print(f"downloading {source}…", file=sys.stderr)
+    log.info("downloading %s", source)
     ensure_tls_trust()
     from huggingface_hub import snapshot_download
 
@@ -76,11 +78,7 @@ def load_on_device_or_fall_back(build, device: str, what: str):
     except Exception as error:
         if device == "CPU":
             raise
-        print(
-            f"warning: {device} rejected the {what} ({error});"
-            " falling back to CPU",
-            file=sys.stderr,
-        )
+        log.warning("%s rejected the %s (%s); falling back to CPU", device, what, error)
         return build("CPU"), "CPU"
 
 

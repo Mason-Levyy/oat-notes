@@ -33,7 +33,7 @@ def test_a_device_that_takes_the_model_is_used_as_is():
     assert (pipeline, device) == ("pipeline-on-NPU", "NPU")
 
 
-def test_a_refusing_device_falls_back_to_cpu(capsys):
+def test_a_refusing_device_falls_back_to_cpu(caplog):
     attempts = []
 
     def build(chosen: str) -> str:
@@ -45,7 +45,7 @@ def test_a_refusing_device_falls_back_to_cpu(capsys):
     pipeline, device = load_on_device_or_fall_back(build, "NPU", "test model")
     assert (pipeline, device) == ("pipeline-on-CPU", "CPU")
     assert attempts == ["NPU", "CPU"]
-    assert "NPU rejected the test model" in capsys.readouterr().err
+    assert "NPU rejected the test model" in caplog.text
 
 
 def test_cpu_refusing_the_model_is_not_survivable():

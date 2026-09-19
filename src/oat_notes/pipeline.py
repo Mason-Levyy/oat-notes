@@ -4,8 +4,8 @@ end-of-stream sentinel on every queue."""
 
 from __future__ import annotations
 
+import logging
 import queue
-import sys
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -17,10 +17,13 @@ from .attribution import Attributor
 from .chunker import Vad, VadChunker
 from .clock import SessionClock
 from .config import Config
+from .log import error_kind
 from .speaker_id import RollingSpeakerBuffer, SpeakerChangeGate, SpeakerResolver
 from .transcriber import Transcriber
 from .types import AudioChunk, Channel, TranscriptSegment
 from .vad import SileroVad
+
+log = logging.getLogger(__name__)
 
 Sink = Callable[[TranscriptSegment, float, "np.ndarray | None"], None]
 TrackingSink = Callable[[int, Channel, str, float | None], None]
@@ -223,23 +226,25 @@ class Pipeline:
         if self._profile_thread is not None:
             self._profile_thread.join()
 
-    def split_channel(self, channel: Channel) -> None:
+    def split_channel(self, channel: Channel) -> bool:
         """Cut the in-flight chunk on ``channel`` right now (hotkey press).
 
         Called from the hotkey listener thread; must never block it.
         """
-        try:
-            self.frame_queue.put_nowait(_Split(channel))
-        except queue.Full:
-            pass
+        return self._post(_Split(channel), "split")
 
-    def manual_override(self, channel: Channel, speaker_index: int) -> None:
+    def manual_override(self, channel: Channel, speaker_index: int) -> bool:
         """Cut now and force only the next/current VAD turn to one speaker."""
         self._reset_tracking(channel, speaker_index)
+        return self._post(_Split(channel, speaker_index), "manual override")
+
+    def _post(self, command: object, what: str) -> bool:
         try:
-            self.frame_queue.put_nowait(_Split(channel, speaker_index))
+            self.frame_queue.put_nowait(command)
         except queue.Full:
-            pass
+            log.warning("%s dropped: the audio frame queue is full", what)
+            return False
+        return True
 
     def begin_profile_learning(self, speaker_index: int, selected_at: float) -> None:
         """Start one non-blocking, stability-gated manual enrollment attempt."""
@@ -261,7 +266,7 @@ class Pipeline:
                 )
             )
 
-    def cancel_profile_learning(self) -> None:
+    def cancel_profile_learning(self) -> bool:
         """Cancel the in-flight manual sample capture, if any, right now.
 
         Routed through ``frame_queue`` — like ``begin_profile_learning`` and
@@ -269,10 +274,7 @@ class Pipeline:
         queued instead of racing the chunker thread from the caller's own
         thread.
         """
-        try:
-            self.frame_queue.put_nowait(_CancelProfileLearning())
-        except queue.Full:
-            pass
+        return self._post(_CancelProfileLearning(), "cancel profile learning")
 
     def _cancel_profile_learning(self) -> None:
         update = None
@@ -615,10 +617,7 @@ class Pipeline:
                 embedding = resolver.embed_for_tracking(chunk)
                 decision = resolver.resolve(chunk, embedding)
             except Exception as error:
-                print(
-                    f"speaker tracking error: {type(error).__name__}",
-                    file=sys.stderr,
-                )
+                log.error("speaker tracking failed: %s", error_kind(error))
                 continue
             if self._tracking_paused(chunk.channel):
                 continue
@@ -651,10 +650,7 @@ class Pipeline:
             try:
                 embedding = resolver.embed_for_tracking(job.chunk)
             except Exception as error:
-                print(
-                    f"speaker profile learning error: {type(error).__name__}",
-                    file=sys.stderr,
-                )
+                log.error("speaker profile learning failed: %s", error_kind(error))
                 with self._learning_lock:
                     if job.generation != self._learning_generation:
                         continue
@@ -709,13 +705,7 @@ class Pipeline:
                 try:
                     segment = self._transcriber.transcribe(chunk)
                 except Exception as error:
-                    # Exception messages are deliberately omitted: a backend
-                    # must not be able to echo captured audio/transcript data
-                    # into the installed application's durable log.
-                    print(
-                        f"transcription error: {type(error).__name__}",
-                        file=sys.stderr,
-                    )
+                    log.error("transcription failed: %s", error_kind(error))
                     continue
                 segment = replace(segment, turn_end=chunk.turn_end)
 
@@ -725,10 +715,7 @@ class Pipeline:
                         try:
                             embedding = future.result()
                         except Exception as error:
-                            print(
-                                f"speaker recognition error: {type(error).__name__}",
-                                file=sys.stderr,
-                            )
+                            log.error("speaker recognition failed: %s", error_kind(error))
                     decision = self._speaker_resolver.resolve(chunk, embedding)
                     segment = replace(
                         segment,

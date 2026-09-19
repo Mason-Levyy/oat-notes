@@ -8,8 +8,8 @@ interleave with the next chord press.
 
 from __future__ import annotations
 
+import logging
 import queue
-import sys
 import threading
 import time
 from collections import deque
@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from .. import inject
 from ..config import Config
 from ..hotkeys import Chord, HotkeyListener
+from ..log import error_kind
 from ..settings import REPLAY_KEY
 from ..transcriber import Transcriber
 from .format import format_dictation, vocabulary_hotwords
@@ -34,6 +35,8 @@ from .phases import (
     TRANSCRIBING,
 )
 from .recorder import UtteranceRecorder
+
+log = logging.getLogger(__name__)
 
 _ARM = "arm"
 _CANCEL = "cancel"
@@ -136,10 +139,7 @@ class DictationController:
         try:
             self._recorder.prepare()
         except Exception as error:
-            print(
-                f"dictation audio unavailable: {type(error).__name__}: {error}",
-                file=sys.stderr,
-            )
+            log.error("dictation audio unavailable: %s: %s", error_kind(error), error)
             self._recorder = None
             self._publish(ERROR, error=str(error))
             return
@@ -214,14 +214,17 @@ class DictationController:
     def _capture_target() -> int:
         try:
             return inject.foreground_window()
-        except Exception:
+        except Exception as error:
+            log.warning("could not read the foreground window: %s", error_kind(error))
             return 0
 
-    def _post(self, kind: str, **fields) -> None:
+    def _post(self, kind: str, **fields) -> bool:
         try:
             self._commands.put_nowait(_Command(kind, **fields))
         except queue.Full:
-            pass
+            log.warning("dictation command %s dropped: worker queue is full", kind)
+            return False
+        return True
 
     def _run(self) -> None:
         while True:
@@ -238,7 +241,7 @@ class DictationController:
         try:
             self._handle(command)
         except Exception as error:
-            print(f"dictation error: {type(error).__name__}: {error}", file=sys.stderr)
+            log.error("dictation failed: %s", error_kind(error))
             self._abandon()
             self._publish(ERROR, error=str(error))
 
@@ -348,7 +351,7 @@ class DictationController:
     def clear_history(self) -> None:
         with self._history_lock:
             self._history.clear()
-        self.last_text = None
+            self.last_text = None
 
     def _abandon(self) -> None:
         if self._recorder is not None:
@@ -364,7 +367,4 @@ class DictationController:
         try:
             self._on_phase(phase, details)
         except Exception as error:
-            print(
-                f"dictation phase listener error: {type(error).__name__}",
-                file=sys.stderr,
-            )
+            log.error("dictation phase listener failed: %s", error_kind(error))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -28,6 +28,8 @@ from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
 from .speaker_store import MIN_SAMPLE_SPEECH_SECONDS, SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
 from .types import Channel, TranscriptSegment
+
+log = logging.getLogger(__name__)
 
 UNKNOWN_TURN_MEMORY = 400
 CLEAN_TURN_QUALITY = 1.0
@@ -120,10 +122,7 @@ class Session:
             else:
                 loopback_info = find_default_loopback(self._pa)
                 if loopback_info is None:
-                    print(
-                        "warning: no loopback device found — capturing mic only",
-                        file=sys.stderr,
-                    )
+                    log.warning("no loopback device found — capturing mic only")
         self.channels = (
             (Channel.MIC, Channel.LOOPBACK) if loopback_info else (Channel.MIC,)
         )
@@ -383,24 +382,32 @@ class Session:
             except (KeyError, ValueError) as error:
                 return str(error).strip("'")
 
+        store = self._options.speaker_store
+        if not is_guest and speaker.speaker_id and store is not None:
+            try:
+                store.rename_speaker(speaker.speaker_id, name)
+            except (KeyError, ValueError) as error:
+                return str(error).strip("'")
+
         self.roster[index] = replace(speaker, name=name, speaker_id=linked_id)
         self._attributor.rename(index, name)
         self.log.rename({old: name})
-
         if is_guest and linked_id is not None:
-            if self._speaker_resolver is not None:
-                try:
-                    self._speaker_resolver.persist_guest(index, linked_id)
-                except (KeyError, ValueError):
-                    pass
+            self._flush_guest_samples(index, linked_id)
             self.guest_indices.remove(index)
             self._rescore_unknown_turns(index)
-        elif speaker.speaker_id and self._options.speaker_store is not None:
-            try:
-                self._options.speaker_store.rename_speaker(speaker.speaker_id, name)
-            except (KeyError, ValueError):
-                pass
         return None
+
+    def _flush_guest_samples(self, index: int, speaker_id: str) -> None:
+        """A guest's voice samples move to the person they turned out to be;
+        unusable samples are logged and dropped, never a reason to refuse the
+        name."""
+        if self._speaker_resolver is None:
+            return
+        try:
+            self._speaker_resolver.persist_guest(index, speaker_id)
+        except (KeyError, ValueError) as error:
+            log.warning("guest voice samples not kept: %s", str(error).strip("'"))
 
     def _identity_for(self, name: str) -> str | None:
         """The saved person with this name, created if there isn't one."""

@@ -72,8 +72,10 @@ def test_dictation_stays_out_of_clipboard_history():
 
 
 def test_captured_words_are_never_logged():
-    for path in (PACKAGE / "dictation" / "recorder.py", PACKAGE / "cleanup.py"):
-        source = path.read_text(encoding="utf-8")
-        for line in source.splitlines():
-            if "file=sys.stderr" in line or ("error:" in line and "print" in line):
-                assert "{error}" not in line or "type(error)" in line
+    """Backends that see speech only ever log ``error_kind(error)``."""
+    for name in ("dictation/recorder.py", "dictation/format.py", "cleanup.py", "pipeline.py"):
+        source = (PACKAGE / name).read_text(encoding="utf-8")
+        assert "file=sys.stderr" not in source
+        assert "{error}" not in source
+        assert ", error)" not in source
+        assert "error_kind" in source

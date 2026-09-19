@@ -80,12 +80,13 @@ def test_hub_unsubscribe_stops_delivery():
     assert subscriber.empty()
 
 
-def test_hub_full_subscriber_does_not_block_publish():
+def test_hub_full_subscriber_does_not_block_publish(caplog):
     hub = EventHub()
     subscriber = hub.subscribe()
-    for _ in range(600):
-        hub.publish({"type": "line"})
+    missed = [hub.publish({"type": "line"}) for _ in range(600)]
     assert subscriber.qsize() == 512
+    assert missed == [0] * 512 + [1] * 88
+    assert caplog.text.count("stopped reading events") == 1
 
 
 def test_idle_status_shape():
@@ -625,13 +626,19 @@ def test_a_session_error_reaches_the_browser_unchanged():
 
 def _line_state():
     state = AppState(Config(), transcriber=None)
-    state.lines = [
+    state.lines.append(
         {"id": 0, "label": "Unknown", "text": "the churn number",
-         "speaker_index": None, "attribution": "unknown", "confidence": None},
+         "speaker_index": None, "attribution": "unknown", "confidence": None}
+    )
+    state.lines.append(
         {"id": 1, "label": "Alex", "text": "agreed",
-         "speaker_index": 1, "attribution": "auto", "confidence": 0.9},
-    ]
+         "speaker_index": 1, "attribution": "auto", "confidence": 0.9}
+    )
     return state
+
+
+def _lines(state):
+    return state.lines.snapshot()[0]
 
 
 def test_assigning_a_line_updates_it_and_tells_the_browser():
@@ -644,10 +651,11 @@ def test_assigning_a_line_updates_it_and_tells_the_browser():
 
     state.assign_line({"id": 0, "index": 0})
 
-    assert state.lines[0]["label"] == "Sarah"
-    assert state.lines[0]["speaker_index"] == 0
-    assert state.lines[0]["attribution"] == "manual"
-    assert state.lines[1]["label"] == "Alex"
+    lines = _lines(state)
+    assert lines[0]["label"] == "Sarah"
+    assert lines[0]["speaker_index"] == 0
+    assert lines[0]["attribution"] == "manual"
+    assert lines[1]["label"] == "Alex"
 
     event = subscriber.get_nowait()
     assert event["type"] == "line_update"
@@ -701,8 +709,8 @@ def test_assigning_a_line_to_a_new_name_adds_them_and_tells_the_browser():
     assert "error" not in response
     assert asked == [(0, " Sarah ", None)]
     assert state.roster[1].name == "Sarah"
-    assert state.lines[0]["label"] == "Sarah"
-    assert state.lines[0]["speaker_index"] == 1
+    assert _lines(state)[0]["label"] == "Sarah"
+    assert _lines(state)[0]["speaker_index"] == 1
     events = [subscriber.get_nowait()["type"] for _ in range(2)]
     assert events == ["status", "line_update"]
 

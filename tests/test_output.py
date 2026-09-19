@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -93,6 +94,24 @@ def test_speakers_with_lines():
     log.add(segment("hi", 2.0, speaker="Guest 1"))
     log.add(segment("unlabeled", 3.0))
     assert log.speakers_with_lines() == {"Mason", "Guest 1"}
+
+
+def test_lines_added_while_renaming_are_neither_lost_nor_skipped():
+    log = MeetingLog(label_channels=False)
+    stop = threading.Event()
+
+    def rename_forever():
+        while not stop.is_set():
+            log.rename({"Guest 1": "Sarah", "Sarah": "Guest 1"})
+
+    worker = threading.Thread(target=rename_forever)
+    worker.start()
+    ids = [log.add(segment(str(index), float(index), speaker="Guest 1")) for index in range(300)]
+    stop.set()
+    worker.join()
+    assert ids == list(range(300))
+    assert all(log.relabel(line_id, "Mason") for line_id in ids)
+    assert log.speakers_with_lines() == {"Mason"}
 
 
 def test_apply_cleanup_rewrites_and_drops_lines(tmp_path):

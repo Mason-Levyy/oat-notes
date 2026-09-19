@@ -9,10 +9,15 @@ instead of pasting. So held modifiers are cleared before anything is sent.
 from __future__ import annotations
 
 import ctypes
+import logging
 import sys
 import threading
 import time
 from ctypes import wintypes
+
+from .log import error_kind
+
+log = logging.getLogger(__name__)
 
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
@@ -351,9 +356,7 @@ def _restore_clipboard(previous: str) -> None:
         with _clipboard_lock:
             write_clipboard_text(previous, private=False)
     except Exception as error:
-        print(
-            f"could not restore the clipboard: {type(error).__name__}", file=sys.stderr
-        )
+        log.warning("could not restore the clipboard: %s", error_kind(error))
 
 
 def inject(

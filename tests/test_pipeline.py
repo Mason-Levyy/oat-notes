@@ -160,6 +160,18 @@ def test_hotkey_split_attributes_back_to_back_speakers():
     assert second.start == first.end
 
 
+def test_a_full_frame_queue_reports_the_dropped_command(caplog):
+    pipeline, _ = make_pipeline((Channel.MIC,))
+    while not pipeline.frame_queue.full():
+        pipeline.frame_queue.put_nowait((Channel.MIC, 0.0, silence(1)))
+
+    assert pipeline.split_channel(Channel.MIC) is False
+    assert pipeline.manual_override(Channel.MIC, 0) is False
+    assert pipeline.cancel_profile_learning() is False
+    assert "split dropped" in caplog.text
+    assert "manual override dropped" in caplog.text
+
+
 def test_mic_only_pipeline_still_works():
     pipeline, received = make_pipeline((Channel.MIC,))
     pipeline.start()
@@ -369,7 +381,7 @@ def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):
     assert tracked == [(1, Channel.MIC, "auto", 1.0)]
 
 
-def test_transcription_errors_never_log_backend_message(capsys):
+def test_transcription_errors_never_log_backend_message(caplog):
     class PrivateFailureTranscriber(Transcriber):
         def transcribe(self, chunk):
             raise RuntimeError("captured words must stay private")
@@ -389,9 +401,8 @@ def test_transcription_errors_never_log_backend_message(capsys):
     )
     pipeline.finish()
 
-    error_log = capsys.readouterr().err
-    assert "RuntimeError" in error_log
-    assert "captured words must stay private" not in error_log
+    assert "RuntimeError" in caplog.text
+    assert "captured words must stay private" not in caplog.text
 
 
 def _learning_pipeline(tmp_path, channels=(Channel.MIC,)):

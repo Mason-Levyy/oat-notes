@@ -5,8 +5,8 @@ machine."""
 
 from __future__ import annotations
 
+import logging
 import queue
-import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from .llm import LlmEngine
+from .log import error_kind
+
+log = logging.getLogger(__name__)
 
 DROP_TOKEN = "[DROP]"
 MAX_GROWTH_RATIO = 1.2
@@ -198,12 +201,7 @@ class CleanupWorker:
         try:
             cleaned = self._cleaner.clean(raw, before=before, after=after)
         except Exception as error:
-            # Message deliberately omitted — never echo captured words into
-            # the durable application log.
-            print(
-                f"transcript cleanup error: {type(error).__name__}",
-                file=sys.stderr,
-            )
+            log.error("transcript cleanup failed: %s", error_kind(error))
             return
         pending.text = cleaned
         if cleaned == raw:
