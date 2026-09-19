@@ -16,3 +16,10 @@ transcripts/
 # PyInstaller
 *.spec
 !oat-notes.spec
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
