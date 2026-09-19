@@ -8,12 +8,26 @@ drag the whole capture and transcription stack in behind it.
 
 from __future__ import annotations
 
-IDLE = "idle"
-LISTENING = "listening"
-LATCHED = "latched"
-TRANSCRIBING = "transcribing"
-FORMATTING = "formatting"
-INSERTED = "inserted"
-CANCELLED = "cancelled"
-ERROR = "error"
-LOADING = "loading"
+from typing import Final, Literal
+
+DictationPhase = Literal[
+    "idle",
+    "listening",
+    "latched",
+    "transcribing",
+    "formatting",
+    "inserted",
+    "cancelled",
+    "error",
+    "loading",
+]
+
+IDLE: Final = "idle"
+LISTENING: Final = "listening"
+LATCHED: Final = "latched"
+TRANSCRIBING: Final = "transcribing"
+FORMATTING: Final = "formatting"
+INSERTED: Final = "inserted"
+CANCELLED: Final = "cancelled"
+ERROR: Final = "error"
+LOADING: Final = "loading"

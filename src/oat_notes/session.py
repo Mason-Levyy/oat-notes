@@ -24,26 +24,23 @@ from .output import (
     journal_path_for,
 )
 from .pipeline import Pipeline, ProfileLearningUpdate
+from .roster import (
+    HOTKEYS_PER_BANK,
+    assign_hotkey_slots,
+    check_index,
+    index_for,
+    index_for_slot,
+    next_free_slot,
+)
 from .speaker_id import SpeakerEmbeddingEngine, SpeakerResolver
 from .speaker_store import MIN_SAMPLE_SPEECH_SECONDS, SpeakerProfile, SpeakerStore
 from .transcriber import Transcriber
-from .types import Channel, TranscriptSegment
+from .types import AttributionSource, Channel, ProfileState, TranscriptSegment
+from .unknown_turns import UnknownTurn, backfill_score, remember
 
 log = logging.getLogger(__name__)
 
-UNKNOWN_TURN_MEMORY = 400
 CLEAN_TURN_QUALITY = 1.0
-BACKFILL_THRESHOLD = 0.70
-BACKFILL_MARGIN = 0.10
-
-
-@dataclass(frozen=True)
-class UnknownTurn:
-    """What a line without a name keeps in memory: never the audio."""
-
-    channel: Channel
-    embedding: np.ndarray
-    speech_seconds: float
 
 
 @dataclass(frozen=True)
@@ -78,7 +75,7 @@ class SessionEvents:
         lambda line_id, name, index, score: None
     )
     on_speaker: Callable[[int], None] = lambda index: None
-    on_attribution: Callable[[int | None, Channel, str, float | None], None] = (
+    on_attribution: Callable[[int | None, Channel, AttributionSource, float | None], None] = (
         lambda index, channel, source, confidence: None
     )
     on_hotkey_bank: Callable[[int], None] = lambda bank: None
@@ -106,7 +103,7 @@ class Session:
         self._stopped = False
         self._saved = False
         self.clock = SessionClock()
-        self.roster = self._assign_hotkey_slots(options.speakers)
+        self.roster = assign_hotkey_slots(options.speakers)
         self.guest_indices: list[int] = []
         self._guests_created = 0
         self._unknown_turns: dict[int, UnknownTurn] = {}
@@ -134,7 +131,7 @@ class Session:
         }
         self.current_speaker: int | None = None
         self._current_speaker_channel: Channel | None = None
-        self.profile_learning: dict | None = None
+        self.profile_learning: ProfileLearningUpdate | None = None
         self._manual_override_pending = {
             Channel.MIC: False,
             Channel.LOOPBACK: False,
@@ -214,22 +211,6 @@ class Session:
                 self._hotkeys = HotkeyListener()
                 self._owns_hotkeys = True
 
-    @staticmethod
-    def _assign_hotkey_slots(speakers: tuple[Speaker, ...]) -> list[Speaker]:
-        roster: list[Speaker] = []
-        used: set[int] = set()
-        next_slot = 0
-        for speaker in speakers:
-            requested = speaker.hotkey_slot
-            if requested is None or requested < 0 or requested in used:
-                while next_slot in used:
-                    next_slot += 1
-                requested = next_slot
-            used.add(requested)
-            next_slot = max(next_slot, requested + 1)
-            roster.append(replace(speaker, hotkey_slot=requested))
-        return roster
-
     def start(self) -> None:
         if self._hotkeys is not None:
             self._hotkeys.bind_speaker_switch(
@@ -263,15 +244,8 @@ class Session:
         self._events.on_speaker(index)
 
     def switch_hotkey(self, offset: int) -> None:
-        slot = self.hotkey_bank * 9 + offset
-        index = next(
-            (
-                item
-                for item, speaker in enumerate(self.roster)
-                if speaker.hotkey_slot == slot and speaker.active
-            ),
-            None,
-        )
+        slot = self.hotkey_bank * HOTKEYS_PER_BANK + offset
+        index = index_for_slot(self.roster, slot)
         if index is None:
             index = self._create_guest(hotkey_slot=slot)
         self.switch_speaker(index)
@@ -285,12 +259,7 @@ class Session:
 
         The name is backfilled at save time via ``renames``.
         """
-        used = {speaker.hotkey_slot for speaker in self.roster}
-        start = self.hotkey_bank * 9
-        slot = next((item for item in range(start, start + 9) if item not in used), None)
-        if slot is None:
-            slot = max((item for item in used if item is not None), default=-1) + 1
-        index = self._create_guest(hotkey_slot=slot)
+        index = self._create_guest(hotkey_slot=next_free_slot(self.roster, self.hotkey_bank))
         self.switch_speaker(index)
         return index
 
@@ -311,11 +280,7 @@ class Session:
         meeting is kept rather than thrown away with the session."""
         if speaker_id is None:
             speaker_id = self._identity_for(name)
-        used = {speaker.hotkey_slot for speaker in self.roster}
-        start = self.hotkey_bank * 9
-        slot = next((item for item in range(start, start + 9) if item not in used), None)
-        if slot is None:
-            slot = max((item for item in used if item is not None), default=-1) + 1
+        slot = next_free_slot(self.roster, self.hotkey_bank)
         speaker = Speaker(name, speaker_id=speaker_id, hotkey_slot=slot)
         index = self._attributor.add(speaker)
         self.roster.append(speaker)
@@ -331,23 +296,30 @@ class Session:
         state, and in-flight pipeline threads all reference it by index — so
         removal only flips ``active`` rather than shrinking the list.
         """
-        if not 0 <= index < len(self.roster):
-            return "speaker not found"
+        blocked = check_index(self.roster, index) or self._learning_guard(index)
+        if blocked:
+            return blocked
         speaker = self.roster[index]
-        if not speaker.active:
-            return "speaker already removed"
-        if self.profile_learning and self.profile_learning.get("speaker_index") == index:
-            return "a voice sample is being captured for this speaker"
         if speaker.name in self.log.speakers_with_lines():
             return "speaker has already spoken"
         self.roster[index] = replace(speaker, active=False)
+        self._forget_selection(index)
+        return None
+
+    def _learning_guard(self, index: int) -> str | None:
+        learning = self.profile_learning
+        if learning is not None and learning.speaker_index == index:
+            return "a voice sample is being captured for this speaker"
+        return None
+
+    def _forget_selection(self, index: int) -> None:
+        """Nothing keeps pointing at a person who was removed or reset."""
         if self.current_speaker == index:
             self.current_speaker = None
             self._current_speaker_channel = None
         for channel, active_index in list(self.active.items()):
             if active_index == index:
                 self.active[channel] = None
-        return None
 
     def rename_speaker(
         self, index: int, name: str, speaker_id: str | None = None
@@ -414,14 +386,7 @@ class Session:
         store = self._options.speaker_store
         if store is None:
             return None
-        existing = next(
-            (
-                profile
-                for profile in store.list_speakers()
-                if profile.name.casefold() == name.casefold()
-            ),
-            None,
-        )
+        existing = store.find_by_name(name)
         if existing is not None:
             return existing.speaker_id
         return store.create_speaker(name).speaker_id
@@ -435,12 +400,9 @@ class Session:
         their hotkey is how you retrain, same as always. Returns an error
         message, or ``None`` on success.
         """
-        if not 0 <= index < len(self.roster):
-            return "speaker not found"
-        if not self.roster[index].active:
-            return "speaker already removed"
-        if self.profile_learning and self.profile_learning.get("speaker_index") == index:
-            return "a voice sample is being captured for this speaker"
+        blocked = check_index(self.roster, index) or self._learning_guard(index)
+        if blocked:
+            return blocked
         if self._speaker_resolver is None:
             return "speaker recognition is unavailable"
         try:
@@ -448,12 +410,7 @@ class Session:
         except (KeyError, ValueError) as error:
             return str(error).strip("'")
         self._pipeline.reset_speaker_tracking()
-        if self.current_speaker == index:
-            self.current_speaker = None
-            self._current_speaker_channel = None
-        for channel, active_index in list(self.active.items()):
-            if active_index == index:
-                self.active[channel] = None
+        self._forget_selection(index)
         return None
 
     def cancel_profile_learning(self) -> None:
@@ -466,7 +423,7 @@ class Session:
         self._events.on_note(note)
         return note
 
-    def profile_status(self, index: int) -> tuple[str, float]:
+    def profile_status(self, index: int) -> tuple[ProfileState, float]:
         if self._speaker_resolver is None:
             return "untrained", 0.0
         return self._speaker_resolver.profile_status(index)
@@ -596,7 +553,7 @@ class Session:
         self,
         index: int,
         channel: Channel,
-        source: str,
+        source: AttributionSource,
         confidence: float | None,
     ) -> None:
         """Publish stable rolling matches without waiting for a VAD turn end."""
@@ -614,25 +571,11 @@ class Session:
         embedding: np.ndarray,
         speech_seconds: float,
     ) -> None:
-        """Hold an unattributed turn's embedding so it can be named later.
-
-        Embeddings only, in memory only — the same thing the profile store
-        keeps, and never the audio. Bounded so a long meeting cannot grow
-        without limit.
-        """
-        self._unknown_turns[line_id] = UnknownTurn(
-            channel, np.array(embedding, copy=True), speech_seconds
-        )
-        while len(self._unknown_turns) > UNKNOWN_TURN_MEMORY:
-            self._unknown_turns.pop(next(iter(self._unknown_turns)))
+        remember(self._unknown_turns, line_id, channel, embedding, speech_seconds)
 
     def _rescore_unknown_turns(self, index: int) -> None:
         """Name the earlier Unknown lines this person's new profile explains.
-
-        Deliberately stricter than live attribution: this rewrites text the
-        user has already read, so a near-miss stays Unknown rather than
-        guessing. Nothing here ever overwrites a line that already has a name.
-        """
+        Nothing here ever overwrites a line that already has a name."""
         if not self._unknown_turns or self._speaker_resolver is None:
             return
         if not 0 <= index < len(self.roster):
@@ -641,28 +584,14 @@ class Session:
         store = self._options.speaker_store
         if not speaker.speaker_id or store is None:
             return
-
         rivals = [
             other.speaker_id
             for position, other in enumerate(self.roster)
             if position != index and other.speaker_id and other.active
         ]
         for line_id, turn in list(self._unknown_turns.items()):
-            channel, embedding = turn.channel, turn.embedding
-            own = store.profile_vector(speaker.speaker_id, channel.value)
-            if own is None or own.embedding.shape != embedding.shape:
-                continue
-            score = float(np.dot(embedding, own.embedding))
-            if score < BACKFILL_THRESHOLD:
-                continue
-            rival_scores = [
-                float(np.dot(embedding, vector.embedding))
-                for vector in store.match_vectors(rivals, channel.value)
-                if vector.embedding.shape == embedding.shape
-            ]
-            if rival_scores and score - max(rival_scores) < BACKFILL_MARGIN:
-                continue
-            if self.log.relabel(line_id, speaker.name):
+            score = backfill_score(turn, store, speaker.speaker_id, rivals)
+            if score is not None and self.log.relabel(line_id, speaker.name):
                 del self._unknown_turns[line_id]
                 self._events.on_line_relabelled(line_id, speaker.name, index, score)
 
@@ -676,10 +605,9 @@ class Session:
         if index is None:
             name = "Unknown"
         else:
-            if not 0 <= index < len(self.roster):
-                return "speaker not found"
-            if not self.roster[index].active:
-                return "speaker already removed"
+            blocked = check_index(self.roster, index)
+            if blocked:
+                return blocked
             name = self.roster[index].name
         if not self.log.relabel(line_id, name):
             return "line not found"
@@ -699,22 +627,13 @@ class Session:
             return None, "a name is required"
         if not self.log.has_line(line_id):
             return None, "line not found"
-        index = self._roster_index_for(name, speaker_id)
+        index = index_for(self.roster, name, speaker_id)
         if index is None:
             try:
                 index = self.add_speaker(name, speaker_id)
             except ValueError as error:
                 return None, str(error).strip("'")
         return index, self.assign_line(line_id, index)
-
-    def _roster_index_for(self, name: str, speaker_id: str | None) -> int | None:
-        for index, speaker in enumerate(self.roster):
-            if not speaker.active:
-                continue
-            same_identity = speaker_id is not None and speaker.speaker_id == speaker_id
-            if same_identity or speaker.name.casefold() == name.casefold():
-                return index
-        return None
 
     def _learn_from_turn(self, index: int, turn: UnknownTurn) -> None:
         speaker = self.roster[index]
@@ -727,16 +646,17 @@ class Session:
             store.add_sample(
                 speaker.speaker_id,
                 turn.embedding,
-                turn.channel.value,
+                turn.channel,
                 turn.speech_seconds,
                 CLEAN_TURN_QUALITY,
             )
-        except (KeyError, ValueError):
+        except (KeyError, ValueError) as error:
+            log.warning("assigned turn not kept as a sample: %s", str(error).strip("'"))
             return
         self._rescore_unknown_turns(index)
 
     def _handle_profile_learning(self, update: ProfileLearningUpdate) -> None:
-        self.profile_learning = update.to_dict() if update.phase == "collecting" else None
+        self.profile_learning = update if update.phase == "collecting" else None
         self._events.on_profile_learning(update)
         if update.phase == "saved":
             self._rescore_unknown_turns(update.speaker_index)

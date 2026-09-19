@@ -28,6 +28,7 @@ from .dictation.phases import (
     LISTENING,
     LOADING,
     TRANSCRIBING,
+    DictationPhase,
 )
 from .log import error_kind
 
@@ -66,7 +67,7 @@ _MONITOR_DEFAULTTONEAREST = 2
 
 @dataclass
 class OverlayState:
-    phase: str = IDLE
+    phase: DictationPhase = IDLE
     level: float = 0.0
     email: bool = False
     label: str = ""
@@ -220,7 +221,7 @@ class Overlay:
         except queue.Full:
             pass
 
-    def post_phase(self, phase: str, details: dict | None = None) -> None:
+    def post_phase(self, phase: DictationPhase, details: dict | None = None) -> None:
         details = details or {}
         self.post(
             OverlayState(

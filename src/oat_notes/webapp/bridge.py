@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from ..output import format_timestamp
 from ..session import SessionEvents
-from ..types import Channel, TranscriptSegment
+from ..types import AttributionSource, Channel, TranscriptSegment
 
 if TYPE_CHECKING:
     from ..pipeline import ProfileLearningUpdate
@@ -73,7 +73,7 @@ class SessionBridge:
         line_id: int,
         name: str,
         index: int | None,
-        source: str,
+        source: AttributionSource,
         confidence: float | None,
     ) -> None:
         """Re-render one transcript line under a new speaker, riding the same
@@ -97,7 +97,7 @@ class SessionBridge:
         self,
         index: int | None,
         channel: Channel,
-        source: str,
+        source: AttributionSource,
         confidence: float | None,
     ) -> None:
         session = self._state.session

@@ -15,6 +15,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Final, Literal
 
 from .. import inject
 from ..config import Config
@@ -33,16 +34,18 @@ from .phases import (
     LISTENING,
     LOADING,
     TRANSCRIBING,
+    DictationPhase,
 )
 from .recorder import UtteranceRecorder
 
 log = logging.getLogger(__name__)
 
-_ARM = "arm"
-_CANCEL = "cancel"
-_RELEASE = "release"
-_REPLAY = "replay"
-_SHUTDOWN = "shutdown"
+_ARM: Final = "arm"
+_CANCEL: Final = "cancel"
+_RELEASE: Final = "release"
+_REPLAY: Final = "replay"
+_SHUTDOWN: Final = "shutdown"
+_CommandKind = Literal["arm", "cancel", "release", "replay", "shutdown"]
 
 _LATCH_SPEECH_CEILING = 0.35
 HISTORY_LIMIT = 20
@@ -64,7 +67,7 @@ class DictationOptions:
 
 @dataclass
 class _Command:
-    kind: str
+    kind: _CommandKind
     hwnd: int = 0
     held_seconds: float = 0.0
     force_email: bool = False
@@ -78,7 +81,7 @@ class DictationController:
         self,
         config: Config,
         options: DictationOptions | None = None,
-        on_phase: Callable[[str, dict], None] | None = None,
+        on_phase: Callable[[DictationPhase, dict], None] | None = None,
         level_sink: Callable[[float], None] | None = None,
         format_text: Callable[[str, bool], tuple[str, str]] | None = None,
     ) -> None:
@@ -218,7 +221,7 @@ class DictationController:
             log.warning("could not read the foreground window: %s", error_kind(error))
             return 0
 
-    def _post(self, kind: str, **fields) -> bool:
+    def _post(self, kind: _CommandKind, **fields) -> bool:
         try:
             self._commands.put_nowait(_Command(kind, **fields))
         except queue.Full:
@@ -359,7 +362,7 @@ class DictationController:
         self._recording = False
         self._latched = False
 
-    def _publish(self, phase: str, **details) -> None:
+    def _publish(self, phase: DictationPhase, **details) -> None:
         self.phase = phase
         self.last_error = details.get("error")
         if self._on_phase is None:
