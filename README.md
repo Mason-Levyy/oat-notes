@@ -192,7 +192,11 @@ overlay.py    frameless, always-on-top, never-focused dictation HUD (tkinter)
 dictation/    recorder (mic → VAD → whisper), formatter (rules + email), controller
 session.py    one meeting: capture + pipeline + attribution + transcript log
 single_instance.py  named kernel mutex: one keyboard hook, one microphone
-server.py     stdlib HTTP + SSE serving the web UI (web/index.html)
+line_feed.py  the transcript lines and notes the browser sees, behind one lock
+log.py        the stderr logger; error_kind() keeps captured speech out of it
+webapp/       the web UI: requests (validation), state, meeting/library/settings
+              handlers, bridge (session callbacks → events), handler (HTTP + SSE),
+              bootstrap (serve); the page itself is web/index.html
 ```
 
 Chunks carry a channel tag (`MIC`/`LOOPBACK`) and segments carry a `speaker` field from day one, so the dual-stream and attribution phases slot in without restructuring.
