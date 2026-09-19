@@ -87,6 +87,17 @@ class SpeakerGroup:
         }
 
 
+def profile_state(speech_seconds: float) -> str:
+    if speech_seconds <= 0:
+        return "untrained"
+    return "ready" if speech_seconds >= READY_SPEECH_SECONDS else "learning"
+
+
+def _profile_from_row(row: sqlite3.Row) -> SpeakerProfile:
+    seconds = float(row["seconds"])
+    return SpeakerProfile(str(row["id"]), str(row["name"]), seconds, profile_state(seconds))
+
+
 class SpeakerStore:
     """Small SQLite repository safe to call from UI and worker threads."""
 
@@ -227,6 +238,14 @@ class SpeakerStore:
     def profile(
         self, speaker_id: str, model_key: str = DEFAULT_MODEL_KEY
     ) -> SpeakerProfile:
+        profile = self.find(speaker_id, model_key)
+        if profile is None:
+            raise KeyError("speaker not found")
+        return profile
+
+    def find(
+        self, speaker_id: str, model_key: str = DEFAULT_MODEL_KEY
+    ) -> SpeakerProfile | None:
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -240,15 +259,7 @@ class SpeakerStore:
                 """,
                 (model_key, speaker_id),
             ).fetchone()
-        if row is None:
-            raise KeyError("speaker not found")
-        seconds = float(row["seconds"])
-        state = (
-            "untrained"
-            if seconds <= 0
-            else "ready" if seconds >= READY_SPEECH_SECONDS else "learning"
-        )
-        return SpeakerProfile(str(row["id"]), str(row["name"]), seconds, state)
+        return None if row is None else _profile_from_row(row)
 
     def list_speakers(
         self, model_key: str = DEFAULT_MODEL_KEY
@@ -266,18 +277,7 @@ class SpeakerStore:
                 """,
                 (model_key,),
             ).fetchall()
-        profiles = []
-        for row in rows:
-            seconds = float(row["seconds"])
-            state = (
-                "untrained"
-                if seconds <= 0
-                else "ready" if seconds >= READY_SPEECH_SECONDS else "learning"
-            )
-            profiles.append(
-                SpeakerProfile(str(row["id"]), str(row["name"]), seconds, state)
-            )
-        return tuple(profiles)
+        return tuple(_profile_from_row(row) for row in rows)
 
     def add_sample(
         self,

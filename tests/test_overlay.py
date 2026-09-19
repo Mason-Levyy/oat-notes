@@ -196,7 +196,7 @@ def test_dpi_awareness_is_idempotent():
 
 
 def test_shutdown_falls_back_when_the_overlay_cannot_start():
-    from oat_notes.server import _await_shutdown
+    from oat_notes.webapp.bootstrap import await_shutdown
 
     class BrokenOverlay:
         def run(self, should_stop):
@@ -207,11 +207,11 @@ def test_shutdown_falls_back_when_the_overlay_cannot_start():
 
     state = FakeState()
     threading.Timer(0.05, state.shutdown.set).start()
-    _await_shutdown(state, BrokenOverlay(), show_overlay=True)
+    await_shutdown(state, BrokenOverlay(), show_overlay=True)
 
 
 def test_shutdown_skips_the_overlay_when_disabled():
-    from oat_notes.server import _await_shutdown
+    from oat_notes.webapp.bootstrap import await_shutdown
 
     class ExplodingOverlay:
         def run(self, should_stop):
@@ -222,4 +222,4 @@ def test_shutdown_skips_the_overlay_when_disabled():
 
     state = FakeState()
     state.shutdown.set()
-    _await_shutdown(state, ExplodingOverlay(), show_overlay=False)
+    await_shutdown(state, ExplodingOverlay(), show_overlay=False)
