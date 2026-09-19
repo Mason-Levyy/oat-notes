@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
+from .embeddings import normalize
 from .paths import app_data_dir
+from .types import Channel, ProfileState
 
 CURRENT_SCHEMA_VERSION = 2
 DEFAULT_MODEL_KEY = "3dspeaker-eres2net-en-voxceleb-v1"
@@ -28,20 +31,12 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _normalize(embedding: np.ndarray) -> np.ndarray:
-    vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
-    norm = float(np.linalg.norm(vector))
-    if not np.isfinite(norm) or norm <= 0:
-        raise ValueError("speaker embedding must have a finite non-zero norm")
-    return np.ascontiguousarray(vector / norm, dtype=np.float32)
-
-
 @dataclass(frozen=True)
 class SpeakerProfile:
     speaker_id: str
     name: str
     enrollment_seconds: float
-    state: str
+    state: ProfileState
 
     def to_dict(self) -> dict:
         return {
@@ -87,7 +82,7 @@ class SpeakerGroup:
         }
 
 
-def profile_state(speech_seconds: float) -> str:
+def profile_state(speech_seconds: float) -> ProfileState:
     if speech_seconds <= 0:
         return "untrained"
     return "ready" if speech_seconds >= READY_SPEECH_SECONDS else "learning"
@@ -204,6 +199,14 @@ class SpeakerStore:
             raise ValueError(f"speaker {cleaned!r} already exists") from error
         return self.profile(speaker_id)
 
+    def find_by_name(self, name: str) -> SpeakerProfile | None:
+        """The saved person with this name, ignoring case (the column's collation)."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM speakers WHERE name = ?", (name.strip(),)
+            ).fetchone()
+        return None if row is None else self.find(str(row["id"]))
+
     def rename_speaker(self, speaker_id: str, name: str) -> SpeakerProfile:
         cleaned = self._clean_name(name)
         try:
@@ -283,18 +286,16 @@ class SpeakerStore:
         self,
         speaker_id: str,
         embedding: np.ndarray,
-        source: str,
+        source: Channel,
         speech_seconds: float,
         quality: float,
         model_key: str = DEFAULT_MODEL_KEY,
     ) -> SpeakerProfile:
-        if source not in {"mic", "loopback"}:
-            raise ValueError("source must be mic or loopback")
         if not np.isfinite(speech_seconds) or speech_seconds < MIN_SAMPLE_SPEECH_SECONDS:
             raise ValueError("voice samples require at least one second of speech")
         if not np.isfinite(quality) or not 0.0 <= quality <= 1.0:
             raise ValueError("quality must be between zero and one")
-        vector = _normalize(embedding)
+        vector = normalize(embedding)
         with self._connect() as connection:
             if not connection.execute(
                 "SELECT 1 FROM speakers WHERE id = ?", (speaker_id,)
@@ -310,7 +311,7 @@ class SpeakerStore:
                 (
                     speaker_id,
                     model_key,
-                    source,
+                    source.value,
                     float(speech_seconds),
                     float(quality),
                     vector.size,
@@ -328,7 +329,7 @@ class SpeakerStore:
                     LIMIT -1 OFFSET ?
                 )
                 """,
-                (speaker_id, source, MAX_SAMPLES_PER_SOURCE),
+                (speaker_id, source.value, MAX_SAMPLES_PER_SOURCE),
             )
         return self.profile(speaker_id, model_key)
 
@@ -347,12 +348,12 @@ class SpeakerStore:
                 vectors.append(vector)
         if not vectors:
             return None
-        return _normalize(np.mean(np.stack(vectors), axis=0))
+        return normalize(np.mean(np.stack(vectors), axis=0))
 
     def match_vectors(
         self,
         speaker_ids: Iterable[str],
-        source: str,
+        source: Channel,
         model_key: str = DEFAULT_MODEL_KEY,
     ) -> tuple[MatchVector, ...]:
         candidates = []
@@ -368,7 +369,7 @@ class SpeakerStore:
     def profile_vector(
         self,
         speaker_id: str,
-        source: str,
+        source: Channel,
         model_key: str = DEFAULT_MODEL_KEY,
     ) -> MatchVector | None:
         """Return a person's centroid even while the profile is learning."""
@@ -379,7 +380,7 @@ class SpeakerStore:
                 WHERE speaker_id = ? AND model_key = ? AND source = ?
                 ORDER BY id
                 """,
-                (speaker_id, model_key, source),
+                (speaker_id, model_key, source.value),
             ).fetchall()
             centroid = self._centroid(source_rows)
             source_specific = centroid is not None
@@ -397,7 +398,7 @@ class SpeakerStore:
             return None
         return MatchVector(speaker_id, centroid, source_specific)
 
-    def create_group(self, name: str, members: Iterable[dict]) -> SpeakerGroup:
+    def create_group(self, name: str, members: Iterable[Mapping[str, Any]]) -> SpeakerGroup:
         group_id = str(uuid.uuid4())
         cleaned = self._clean_name(name, "group")
         timestamp = _now()
@@ -414,7 +415,7 @@ class SpeakerStore:
         return self.group(group_id)
 
     def update_group(
-        self, group_id: str, name: str, members: Iterable[dict]
+        self, group_id: str, name: str, members: Iterable[Mapping[str, Any]]
     ) -> SpeakerGroup:
         cleaned = self._clean_name(name, "group")
         try:
@@ -435,7 +436,7 @@ class SpeakerStore:
 
     @staticmethod
     def _replace_members(
-        connection: sqlite3.Connection, group_id: str, members: Iterable[dict]
+        connection: sqlite3.Connection, group_id: str, members: Iterable[Mapping[str, Any]]
     ) -> None:
         seen: set[str] = set()
         for position, member in enumerate(members):

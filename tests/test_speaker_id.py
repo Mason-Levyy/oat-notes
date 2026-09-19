@@ -41,8 +41,8 @@ def test_manual_turn_enrolls_then_automatic_turn_matches(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     roster = [
         Speaker("Alice", speaker_id=alice.speaker_id),
         Speaker("Bob", speaker_id=bob.speaker_id),
@@ -69,8 +69,8 @@ def test_ambiguous_match_is_unknown(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     a = store.create_speaker("A")
     b = store.create_speaker("B")
-    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(b.speaker_id, np.array([0.99, 0.01]), "mic", 5.0, 1.0)
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.99, 0.01]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
         store,
@@ -85,8 +85,8 @@ def test_nearest_fallback_assigns_closest_in_call_below_threshold(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     a = store.create_speaker("A")
     b = store.create_speaker("B")
-    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
         store,
@@ -103,8 +103,8 @@ def test_weak_match_below_the_nearest_floor_stays_unknown(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     a = store.create_speaker("A")
     b = store.create_speaker("B")
-    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
         store,
@@ -119,8 +119,8 @@ def test_near_tie_below_threshold_is_left_unknown_not_guessed(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     a = store.create_speaker("A")
     b = store.create_speaker("B")
-    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(a.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(b.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("A", speaker_id=a.speaker_id), Speaker("B", speaker_id=b.speaker_id)],
         store,
@@ -135,8 +135,8 @@ def test_matching_never_considers_people_outside_roster(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     roster_person = store.create_speaker("Roster")
     outsider = store.create_speaker("Outsider")
-    store.add_sample(roster_person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(outsider.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(roster_person.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(outsider.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Roster", speaker_id=roster_person.speaker_id),
@@ -196,7 +196,7 @@ def test_source_specific_and_cross_source_thresholds(tmp_path):
     same_source = store.create_speaker("Same source")
     untrained = store.create_speaker("Untrained")
     vector_62 = np.array([0.62, math.sqrt(1.0 - 0.62**2)], dtype=np.float32)
-    store.add_sample(same_source.speaker_id, vector_62, "mic", 5.0, 1.0)
+    store.add_sample(same_source.speaker_id, vector_62, Channel.MIC, 5.0, 1.0)
 
     mic = SpeakerResolver(
         [
@@ -229,9 +229,9 @@ def test_matching_considers_every_rostered_person_on_either_source(tmp_path):
     mic_a = store.create_speaker("Mic A")
     mic_b = store.create_speaker("Mic B")
     system_speaker = store.create_speaker("Taylor")
-    store.add_sample(mic_a.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
-    store.add_sample(mic_b.speaker_id, np.array([0.0, -1.0]), "mic", 5.0, 1.0)
-    store.add_sample(system_speaker.speaker_id, np.array([1.0, 0.0]), "loopback", 5.0, 1.0)
+    store.add_sample(mic_a.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(mic_b.speaker_id, np.array([0.0, -1.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(system_speaker.speaker_id, np.array([1.0, 0.0]), Channel.LOOPBACK, 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Mic A", speaker_id=mic_a.speaker_id),
@@ -287,7 +287,7 @@ def test_enrollment_rejects_short_or_clipped_turns(tmp_path):
 def test_ready_profile_accepts_consistent_manual_sample(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     person = store.create_speaker("Local")
-    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("Local", speaker_id=person.speaker_id)],
         store,
@@ -306,7 +306,7 @@ def test_ready_profile_accepts_consistent_manual_sample(tmp_path):
 def test_ready_profile_rejects_inconsistent_manual_sample(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     person = store.create_speaker("Local")
-    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [Speaker("Local", speaker_id=person.speaker_id)],
         store,
@@ -327,8 +327,8 @@ def test_ready_profile_rejects_sample_that_is_ambiguous_with_roster(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.99, 0.01]), "mic", 5.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.99, 0.01]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Alice", speaker_id=alice.speaker_id),
@@ -494,9 +494,9 @@ def test_the_rolling_buffer_still_produces_windows_at_the_tracking_size():
 def test_a_short_turn_is_still_worth_naming(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     person = store.create_speaker("Sarah")
-    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(person.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
     other = store.create_speaker("Alex")
-    store.add_sample(other.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(other.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Sarah", speaker_id=person.speaker_id),

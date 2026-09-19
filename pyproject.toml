@@ -52,6 +52,16 @@ ignore = [
 "src/oat_notes/app.py" = ["SIM115"]
 "src/oat_notes/settings.py" = ["TRY004"]
 
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["oat_notes.inject", "oat_notes.overlay", "oat_notes.single_instance"]
+ignore_errors = true
+
 [project.scripts]
 oat-notes = "oat_notes.cli:main"
 

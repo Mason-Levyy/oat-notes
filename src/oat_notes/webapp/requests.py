@@ -6,8 +6,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
+from typing import Any
 
-Body = Mapping[str, object]
+Body = Mapping[str, Any]
 
 
 class ApiError(Exception):
@@ -52,13 +53,19 @@ def parse_id(body: Body, field: str = "id") -> str:
     return parse_text(body, field, required_message=f"{field} is required")
 
 
-def parse_int(body: Body, field: str, *, optional: bool = False) -> int | None:
+def parse_int(body: Body, field: str) -> int:
     value = body.get(field)
-    if value is None and optional:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise bad_request(f"{field} must be an integer")
+    return value
+
+
+def parse_optional_int(body: Body, field: str) -> int | None:
+    value = body.get(field)
+    if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
-        suffix = " or null" if optional else ""
-        raise bad_request(f"{field} must be an integer{suffix}")
+        raise bad_request(f"{field} must be an integer or null")
     return value
 
 

@@ -138,7 +138,7 @@ class VoiceEnrollmentRecorder:
         try:
             embedding = self._engine.embed(chunk.samples, self._config.sample_rate)
             self._latest_profile = self._store.add_sample(
-                self._speaker_id, embedding, "mic", seconds, quality
+                self._speaker_id, embedding, Channel.MIC, seconds, quality
             )
         except Exception as error:
             self._on_progress(

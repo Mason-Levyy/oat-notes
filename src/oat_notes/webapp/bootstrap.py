@@ -15,6 +15,7 @@ from http.server import ThreadingHTTPServer
 
 from ..config import Config
 from ..dictation.controller import DictationController
+from ..dictation.phases import DictationPhase
 from ..hotkeys import HotkeyListener
 from ..log import error_kind
 from ..output import recover_journals
@@ -170,7 +171,7 @@ class DictationPhaseRelay:
         self._hub = hub
         self._last_phase = ""
 
-    def __call__(self, phase: str, details: dict) -> None:
+    def __call__(self, phase: DictationPhase, details: dict) -> None:
         self._overlay.post_phase(phase, details)
         if self._last_phase != phase:
             self._last_phase = phase

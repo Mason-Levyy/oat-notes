@@ -7,6 +7,7 @@ from oat_notes.speaker_store import (
     MAX_SAMPLES_PER_SOURCE,
     SpeakerStore,
 )
+from oat_notes.types import Channel
 
 
 def test_speaker_profiles_persist_without_audio(tmp_path):
@@ -15,9 +16,9 @@ def test_speaker_profiles_persist_without_audio(tmp_path):
     speaker = store.create_speaker("Sarah")
     assert speaker.state == "untrained"
 
-    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 2.0, 1.0)
+    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 2.0, 1.0)
     profile = store.add_sample(
-        speaker.speaker_id, np.array([0.9, 0.1]), "mic", 3.0, 1.0
+        speaker.speaker_id, np.array([0.9, 0.1]), Channel.MIC, 3.0, 1.0
     )
     assert profile.state == "ready"
     assert SpeakerStore(path).profile(speaker.speaker_id).enrollment_seconds == 5.0
@@ -34,10 +35,10 @@ def test_profile_becomes_ready_at_five_seconds(tmp_path):
     speaker = store.create_speaker("Threshold")
 
     assert store.add_sample(
-        speaker.speaker_id, np.array([1.0, 0.0]), "mic", 4.0, 1.0
+        speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 4.0, 1.0
     ).state == "learning"
     assert store.add_sample(
-        speaker.speaker_id, np.array([1.0, 0.0]), "mic", 1.0, 1.0
+        speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 1.0, 1.0
     ).state == "ready"
 
 
@@ -55,7 +56,7 @@ def test_samples_are_capped_per_source(tmp_path):
         store.add_sample(
             speaker.speaker_id,
             np.array([1.0, index / 100.0]),
-            "mic",
+            Channel.MIC,
             1.0,
             1.0,
         )
@@ -63,7 +64,7 @@ def test_samples_are_capped_per_source(tmp_path):
         store.add_sample(
             speaker.speaker_id,
             np.array([1.0, index / 100.0]),
-            "mic",
+            Channel.MIC,
             1.0,
             1.0,
             model_key="next-model-version",
@@ -78,11 +79,11 @@ def test_store_rejects_short_or_invalid_quality_samples(tmp_path):
     speaker = store.create_speaker("Mason")
     with pytest.raises(ValueError, match="at least one second"):
         store.add_sample(
-            speaker.speaker_id, np.array([1.0, 0.0]), "mic", 0.99, 1.0
+            speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 0.99, 1.0
         )
     with pytest.raises(ValueError, match="quality"):
         store.add_sample(
-            speaker.speaker_id, np.array([1.0, 0.0]), "mic", 1.0, -0.1
+            speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 1.0, -0.1
         )
 
 
@@ -106,10 +107,10 @@ def test_groups_round_trip_order(tmp_path):
 def test_match_vectors_prefer_same_source_then_fall_back_global(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     speaker = store.create_speaker("A")
-    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
 
-    mic = store.match_vectors([speaker.speaker_id], "mic")[0]
-    loopback = store.match_vectors([speaker.speaker_id], "loopback")[0]
+    mic = store.match_vectors([speaker.speaker_id], Channel.MIC)[0]
+    loopback = store.match_vectors([speaker.speaker_id], Channel.LOOPBACK)[0]
     assert mic.source_specific is True
     assert loopback.source_specific is False
 
@@ -118,7 +119,7 @@ def test_schema_is_versioned_and_delete_cascades(tmp_path):
     path = tmp_path / "speakers.db"
     store = SpeakerStore(path)
     speaker = store.create_speaker("Temporary")
-    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
+    store.add_sample(speaker.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
     store.create_group(
         "Temporary group",
         [{"speaker_id": speaker.speaker_id}],

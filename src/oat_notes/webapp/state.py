@@ -17,7 +17,7 @@ from ..settings import AppSettings
 from ..speaker_id import SpeakerEmbeddingEngine
 from ..speaker_store import READY_SPEECH_SECONDS, SpeakerStore
 from ..transcriber import Transcriber
-from ..types import Channel
+from ..types import Channel, ModelStatus
 from .hub import EventHub
 from .requests import conflict
 
@@ -80,14 +80,14 @@ class AppState:
         self.tracking_embedding_engine = tracking_embedding_engine
         self.hotkey_listener = hotkey_listener
         self.dictation = dictation
-        self.speaker_model_status = (
+        self.speaker_model_status: ModelStatus = (
             "ready" if embedding_engine is not None else "loading" if speaker_store else "unavailable"
         )
         self.speaker_model_error: str | None = None
         self.cleaner: LineCleaner | None = None
-        self.cleanup_status = "loading"
+        self.cleanup_status: ModelStatus = "loading"
         self.cleanup_error: str | None = None
-        self.model_status = "ready" if transcriber is not None else "loading"
+        self.model_status: ModelStatus = "ready" if transcriber is not None else "loading"
         self.model_error: str | None = None
         self.model_load_seconds: float | None = None
         self.hub = hub or EventHub()
@@ -193,7 +193,9 @@ class AppState:
                 "loopback": session.active[Channel.LOOPBACK],
             },
             "active_speaker": session.current_speaker,
-            "profile_learning": session.profile_learning,
+            "profile_learning": (
+                session.profile_learning.to_dict() if session.profile_learning else None
+            ),
             "elapsed": session.elapsed(),
             "channels": [channel.value for channel in session.channels],
             "hotkey_bank": session.hotkey_bank,

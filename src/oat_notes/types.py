@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Literal
 
 import numpy as np
 
@@ -13,6 +14,14 @@ class Channel(Enum):
 
     MIC = "mic"
     LOOPBACK = "loopback"
+
+
+AttributionSource = Literal["manual", "single", "auto", "nearest", "unknown"]
+"""How a line got its speaker: a hotkey, the only person on the roster, a
+confident voice match, the closest voice below the confident bar, or nobody."""
+
+ProfileState = Literal["untrained", "learning", "ready"]
+ModelStatus = Literal["loading", "downloading", "ready", "unavailable", "error"]
 
 
 @dataclass(frozen=True)
@@ -48,6 +57,6 @@ class TranscriptSegment:
     speaker: str | None = None
     speaker_id: str | None = None
     speaker_index: int | None = None
-    attribution: str | None = None
+    attribution: AttributionSource | None = None
     confidence: float | None = None
     turn_end: bool = True

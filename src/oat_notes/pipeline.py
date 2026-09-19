@@ -10,6 +10,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from typing import Literal
 
 import numpy as np
 
@@ -18,26 +19,42 @@ from .chunker import Vad, VadChunker
 from .clock import SessionClock
 from .config import Config
 from .log import error_kind
-from .speaker_id import RollingSpeakerBuffer, SpeakerChangeGate, SpeakerResolver
+from .speaker_id import (
+    RollingSpeakerBuffer,
+    SampleRejection,
+    SpeakerChangeGate,
+    SpeakerResolver,
+)
 from .transcriber import Transcriber
-from .types import AudioChunk, Channel, TranscriptSegment
+from .types import AttributionSource, AudioChunk, Channel, ProfileState, TranscriptSegment
 from .vad import SileroVad
 
 log = logging.getLogger(__name__)
 
 Sink = Callable[[TranscriptSegment, float, "np.ndarray | None"], None]
-TrackingSink = Callable[[int, Channel, str, float | None], None]
+TrackingSink = Callable[[int, Channel, AttributionSource, float | None], None]
+
+LearningPhase = Literal["collecting", "saved", "skipped"]
+SkipReason = Literal[
+    "busy",
+    "cancelled",
+    "timeout",
+    "ambiguous_source",
+    "meeting_ended",
+    "embedding_error",
+    SampleRejection,
+]
 
 
 @dataclass(frozen=True)
 class ProfileLearningUpdate:
-    phase: str
+    phase: LearningPhase
     speaker_index: int
     source: Channel | None
     speech_seconds: float
     target_seconds: float
-    reason: str | None = None
-    profile_state: str | None = None
+    reason: SkipReason | None = None
+    profile_state: ProfileState | None = None
     enrollment_seconds: float | None = None
 
     def to_dict(self) -> dict:
@@ -58,6 +75,7 @@ class ProfileLearningUpdate:
 
 
 ProfileLearningSink = Callable[[ProfileLearningUpdate], None]
+PROGRESS_STEP_SECONDS = 0.25
 
 
 @dataclass(frozen=True)
@@ -255,16 +273,7 @@ class Pipeline:
                 _BeginProfileLearning(speaker_index, selected_at)
             )
         except queue.Full:
-            self._emit_profile_learning(
-                ProfileLearningUpdate(
-                    "skipped",
-                    speaker_index,
-                    None,
-                    0.0,
-                    self._config.manual_enrollment_seconds,
-                    reason="busy",
-                )
-            )
+            self._emit_profile_learning(self._skipped(speaker_index, "busy"))
 
     def cancel_profile_learning(self) -> bool:
         """Cancel the in-flight manual sample capture, if any, right now.
@@ -277,27 +286,68 @@ class Pipeline:
         return self._post(_CancelProfileLearning(), "cancel profile learning")
 
     def _cancel_profile_learning(self) -> None:
-        update = None
-        resume = None
         with self._learning_lock:
             candidate = self._profile_candidate
             if candidate is None:
                 return
-            self._profile_candidate = None
-            if candidate.source is not None:
-                self._learning_blocked_channels.discard(candidate.source)
-                resume = (candidate.source, candidate.speaker_index)
-            update = ProfileLearningUpdate(
-                "skipped",
-                candidate.speaker_index,
-                candidate.source,
-                candidate.speech_seconds,
-                self._config.manual_enrollment_seconds,
-                reason="cancelled",
-            )
+            update, resume = self._drop_candidate(candidate, "cancelled")
         self._emit_profile_learning(update)
         if resume is not None:
             self._reset_tracking(*resume)
+
+    def _skipped(
+        self,
+        speaker_index: int,
+        reason: SkipReason,
+        source: Channel | None = None,
+        speech_seconds: float = 0.0,
+    ) -> ProfileLearningUpdate:
+        return ProfileLearningUpdate(
+            "skipped",
+            speaker_index,
+            source,
+            speech_seconds,
+            self._config.manual_enrollment_seconds,
+            reason=reason,
+        )
+
+    def _collecting(
+        self, speaker_index: int, source: Channel | None, speech_seconds: float = 0.0
+    ) -> ProfileLearningUpdate:
+        return ProfileLearningUpdate(
+            "collecting",
+            speaker_index,
+            source,
+            speech_seconds,
+            self._config.manual_enrollment_seconds,
+        )
+
+    def _drop_candidate(
+        self, candidate: _ProfileCandidate, reason: SkipReason
+    ) -> tuple[ProfileLearningUpdate, tuple[Channel, int] | None]:
+        """Caller holds ``_learning_lock``. Returns the update to emit and
+        the (channel, speaker) whose live tracking should resume."""
+        self._profile_candidate = None
+        resume = None
+        if candidate.source is not None:
+            self._learning_blocked_channels.discard(candidate.source)
+            resume = (candidate.source, candidate.speaker_index)
+        update = self._skipped(
+            candidate.speaker_index, reason, candidate.source, candidate.speech_seconds
+        )
+        return update, resume
+
+    def _abandon_job(self, job: _ProfileJob, reason: SkipReason) -> None:
+        with self._learning_lock:
+            if job.generation != self._learning_generation:
+                return
+            self._learning_blocked_channels.discard(job.chunk.channel)
+        self._reset_tracking(job.chunk.channel, job.speaker_index)
+        self._emit_profile_learning(
+            self._skipped(
+                job.speaker_index, reason, job.chunk.channel, job.chunk.speech_seconds or 0.0
+            )
+        )
 
     def reset_speaker_tracking(self, speaker_index: int | None = None) -> None:
         """Drop live tracking state on every channel.
@@ -343,26 +393,13 @@ class Pipeline:
             active = self._recent_active_channels(command.selected_at)
             if len(active) > 1:
                 self._profile_candidate = None
-                update = ProfileLearningUpdate(
-                    "skipped",
-                    command.speaker_index,
-                    None,
-                    0.0,
-                    self._config.manual_enrollment_seconds,
-                    reason="ambiguous_source",
-                )
+                update = self._skipped(command.speaker_index, "ambiguous_source")
             else:
                 if active:
                     candidate.source = active[0]
                     self._learning_blocked_channels.add(active[0])
                 self._profile_candidate = candidate
-                update = ProfileLearningUpdate(
-                    "collecting",
-                    command.speaker_index,
-                    candidate.source,
-                    0.0,
-                    self._config.manual_enrollment_seconds,
-                )
+                update = self._collecting(command.speaker_index, candidate.source)
         self._emit_profile_learning(update)
 
     def _handle_vad_window(
@@ -393,88 +430,19 @@ class Pipeline:
             candidate = self._profile_candidate
             if candidate is None:
                 return
-            if (
+            timed_out = (
                 timestamp - candidate.started_at
                 >= self._config.manual_enrollment_timeout_seconds
-            ):
-                self._profile_candidate = None
-                if candidate.source is not None:
-                    self._learning_blocked_channels.discard(candidate.source)
-                    resume = (candidate.source, candidate.speaker_index)
-                update = ProfileLearningUpdate(
-                    "skipped",
-                    candidate.speaker_index,
-                    candidate.source,
-                    candidate.speech_seconds,
-                    self._config.manual_enrollment_seconds,
-                    reason="timeout",
-                )
+            )
+            if timed_out:
+                update, resume = self._drop_candidate(candidate, "timeout")
             elif not is_speech:
                 return
             else:
-                if candidate.source is None:
-                    active = self._recent_active_channels(timestamp)
-                    if len(active) > 1:
-                        self._profile_candidate = None
-                        update = ProfileLearningUpdate(
-                            "skipped",
-                            candidate.speaker_index,
-                            None,
-                            0.0,
-                            self._config.manual_enrollment_seconds,
-                            reason="ambiguous_source",
-                        )
-                    else:
-                        candidate.source = channel
-                        self._learning_blocked_channels.add(channel)
-                        update = ProfileLearningUpdate(
-                            "collecting",
-                            candidate.speaker_index,
-                            channel,
-                            0.0,
-                            self._config.manual_enrollment_seconds,
-                        )
+                update = self._pin_source(candidate, channel, timestamp)
                 if self._profile_candidate is candidate and candidate.source == channel:
-                    window = np.array(samples, dtype=np.float32, copy=True)
-                    candidate.samples.append(window)
-                    candidate.speech_seconds += window.size / self._config.sample_rate
-                    step = int(candidate.speech_seconds / 0.25)
-                    if step > candidate.last_reported_step:
-                        candidate.last_reported_step = step
-                        update = ProfileLearningUpdate(
-                            "collecting",
-                            candidate.speaker_index,
-                            channel,
-                            min(
-                                candidate.speech_seconds,
-                                self._config.manual_enrollment_seconds,
-                            ),
-                            self._config.manual_enrollment_seconds,
-                        )
-                    if (
-                        candidate.speech_seconds
-                        >= self._config.manual_enrollment_seconds
-                    ):
-                        target_samples = int(
-                            self._config.manual_enrollment_seconds
-                            * self._config.sample_rate
-                        )
-                        waveform = np.concatenate(candidate.samples)[:target_samples]
-                        actual_seconds = waveform.size / self._config.sample_rate
-                        chunk = AudioChunk(
-                            waveform,
-                            channel,
-                            candidate.started_at,
-                            candidate.started_at + actual_seconds,
-                            manual_speaker_index=candidate.speaker_index,
-                            speech_seconds=actual_seconds,
-                        )
-                        job = _ProfileJob(
-                            candidate.generation,
-                            candidate.speaker_index,
-                            chunk,
-                        )
-                        self._profile_candidate = None
+                    progress, job = self._collect_window(candidate, channel, samples)
+                    update = progress or update
         if update is not None:
             self._emit_profile_learning(update)
         if resume is not None:
@@ -483,20 +451,52 @@ class Pipeline:
             try:
                 self._profile_queue.put_nowait(job)
             except queue.Full:
-                with self._learning_lock:
-                    if job.generation == self._learning_generation:
-                        self._learning_blocked_channels.discard(job.chunk.channel)
-                self._reset_tracking(job.chunk.channel, job.speaker_index)
-                self._emit_profile_learning(
-                    ProfileLearningUpdate(
-                        "skipped",
-                        job.speaker_index,
-                        job.chunk.channel,
-                        job.chunk.speech_seconds or 0.0,
-                        self._config.manual_enrollment_seconds,
-                        reason="busy",
-                    )
-                )
+                self._abandon_job(job, "busy")
+
+    def _pin_source(
+        self, candidate: _ProfileCandidate, channel: Channel, timestamp: float
+    ) -> ProfileLearningUpdate | None:
+        """The first speech decides which channel the sample comes from;
+        two channels talking at once means nobody can be enrolled."""
+        if candidate.source is not None:
+            return None
+        if len(self._recent_active_channels(timestamp)) > 1:
+            self._profile_candidate = None
+            return self._skipped(candidate.speaker_index, "ambiguous_source")
+        candidate.source = channel
+        self._learning_blocked_channels.add(channel)
+        return self._collecting(candidate.speaker_index, channel)
+
+    def _collect_window(
+        self, candidate: _ProfileCandidate, channel: Channel, samples: np.ndarray
+    ) -> tuple[ProfileLearningUpdate | None, _ProfileJob | None]:
+        """Accumulate one speech window; hand back a progress update every
+        quarter second and the finished job once the target is reached."""
+        target = self._config.manual_enrollment_seconds
+        window = np.array(samples, dtype=np.float32, copy=True)
+        candidate.samples.append(window)
+        candidate.speech_seconds += window.size / self._config.sample_rate
+        update = None
+        step = int(candidate.speech_seconds / PROGRESS_STEP_SECONDS)
+        if step > candidate.last_reported_step:
+            candidate.last_reported_step = step
+            update = self._collecting(
+                candidate.speaker_index, channel, min(candidate.speech_seconds, target)
+            )
+        if candidate.speech_seconds < target:
+            return update, None
+        waveform = np.concatenate(candidate.samples)[: int(target * self._config.sample_rate)]
+        actual_seconds = waveform.size / self._config.sample_rate
+        chunk = AudioChunk(
+            waveform,
+            channel,
+            candidate.started_at,
+            candidate.started_at + actual_seconds,
+            manual_speaker_index=candidate.speaker_index,
+            speech_seconds=actual_seconds,
+        )
+        self._profile_candidate = None
+        return update, _ProfileJob(candidate.generation, candidate.speaker_index, chunk)
 
     def _tracking_paused(self, channel: Channel) -> bool:
         with self._learning_lock:
@@ -559,13 +559,11 @@ class Pipeline:
                     self._learning_blocked_channels.clear()
                 if candidate is not None:
                     self._emit_profile_learning(
-                        ProfileLearningUpdate(
-                            "skipped",
+                        self._skipped(
                             candidate.speaker_index,
+                            "meeting_ended",
                             candidate.source,
                             candidate.speech_seconds,
-                            self._config.manual_enrollment_seconds,
-                            reason="meeting_ended",
                         )
                     )
                 for chunker in self._chunkers.values():
@@ -651,21 +649,7 @@ class Pipeline:
                 embedding = resolver.embed_for_tracking(job.chunk)
             except Exception as error:
                 log.error("speaker profile learning failed: %s", error_kind(error))
-                with self._learning_lock:
-                    if job.generation != self._learning_generation:
-                        continue
-                    self._learning_blocked_channels.discard(job.chunk.channel)
-                self._reset_tracking(job.chunk.channel, job.speaker_index)
-                self._emit_profile_learning(
-                    ProfileLearningUpdate(
-                        "skipped",
-                        job.speaker_index,
-                        job.chunk.channel,
-                        job.chunk.speech_seconds or 0.0,
-                        self._config.manual_enrollment_seconds,
-                        reason="embedding_error",
-                    )
-                )
+                self._abandon_job(job, "embedding_error")
                 continue
 
             with self._learning_lock:

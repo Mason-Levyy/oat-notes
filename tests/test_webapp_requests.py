@@ -10,6 +10,7 @@ from oat_notes.webapp.requests import (
     parse_members,
     parse_object,
     parse_optional_id,
+    parse_optional_int,
     parse_renames,
     parse_roster,
     parse_text,
@@ -41,8 +42,8 @@ def test_ints_reject_bools_and_strings():
     rejects(lambda: parse_int({"index": "3"}, "index"), "index must be an integer")
     rejects(lambda: parse_int({"index": True}, "index"), "index must be an integer")
     rejects(lambda: parse_int({}, "index"), "index must be an integer")
-    assert parse_int({}, "index", optional=True) is None
-    rejects(lambda: parse_int({"index": 1.5}, "index", optional=True), "or null")
+    assert parse_optional_int({}, "index") is None
+    rejects(lambda: parse_optional_int({"index": 1.5}, "index"), "or null")
 
 
 def test_flags_and_direction():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -112,7 +113,7 @@ class AppSettings:
     overlay_enabled: bool = True
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> AppSettings:
+    def from_dict(cls, payload: Mapping[str, Any]) -> AppSettings:
         if not isinstance(payload, dict):
             raise ValueError("settings must be an object")
         defaults = cls()
@@ -186,7 +187,7 @@ class AppSettings:
                     f" {modifier_label(modifiers)} — choose different modifiers"
                 )
 
-    def merged(self, payload: dict[str, Any]) -> AppSettings:
+    def merged(self, payload: Mapping[str, Any]) -> AppSettings:
         """Apply a partial update. The settings page saves one card at a time,
         so a request that omits a field must leave it alone rather than reset
         it to the default."""

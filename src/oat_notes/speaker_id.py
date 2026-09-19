@@ -9,17 +9,20 @@ from collections import deque
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
 from .attribution import Speaker
+from .embeddings import cosine, cosine_scores, normalize
 from .speaker_store import (
     DEFAULT_MODEL_KEY,
     MIN_SAMPLE_SPEECH_SECONDS,
     SpeakerProfile,
     SpeakerStore,
+    profile_state,
 )
-from .types import AudioChunk, Channel
+from .types import AttributionSource, AudioChunk, Channel, ProfileState
 
 MODEL_FILENAME = "3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx"
 MIN_ENROLLMENT_SECONDS = MIN_SAMPLE_SPEECH_SECONDS
@@ -31,6 +34,15 @@ GLOBAL_THRESHOLD = 0.65
 MATCH_MARGIN = 0.05
 NEAREST_THRESHOLD = 0.45
 NEAREST_MARGIN = 0.02
+
+SampleRejection = Literal[
+    "speaker_missing",
+    "too_short",
+    "clipped",
+    "invalid_embedding",
+    "inconsistent",
+    "ambiguous_profile",
+]
 
 
 def chunk_speech_seconds(chunk: AudioChunk) -> float:
@@ -91,11 +103,7 @@ class SherpaOnnxEmbeddingEngine(SpeakerEmbeddingEngine):
         stream.input_finished()
         if not self._extractor.is_ready(stream):
             raise ValueError("not enough speech for a speaker embedding")
-        vector = np.asarray(self._extractor.compute(stream), dtype=np.float32)
-        norm = float(np.linalg.norm(vector))
-        if not np.isfinite(norm) or norm <= 0:
-            raise ValueError("speaker embedding was empty")
-        return np.ascontiguousarray(vector / norm, dtype=np.float32)
+        return normalize(self._extractor.compute(stream))
 
 
 @dataclass(frozen=True)
@@ -103,7 +111,7 @@ class AttributionDecision:
     name: str
     speaker_index: int | None
     speaker_id: str | None
-    source: str
+    source: AttributionSource
     confidence: float | None = None
     profile: SpeakerProfile | None = None
 
@@ -111,14 +119,14 @@ class AttributionDecision:
 @dataclass(frozen=True)
 class ManualSampleResult:
     accepted: bool
-    reason: str | None = None
+    reason: SampleRejection | None = None
     profile: SpeakerProfile | None = None
 
 
 @dataclass(frozen=True)
 class _TemporarySample:
     embedding: np.ndarray
-    source: str
+    source: Channel
     speech_seconds: float
     quality: float
 
@@ -186,70 +194,54 @@ class SpeakerResolver:
         members = self._members()
         manual = chunk.manual_speaker_index
         if manual is not None and manual in members:
-            speaker = self._roster[manual]
-            return AttributionDecision(
-                speaker.name,
-                manual,
-                speaker.speaker_id,
-                "manual",
-                1.0,
-            )
-
+            return self._decision(manual, "manual", 1.0)
         if len(members) == 1:
-            index = members[0]
-            speaker = self._roster[index]
-            return AttributionDecision(
-                speaker.name, index, speaker.speaker_id, "single", 1.0
-            )
-
+            return self._decision(members[0], "single", 1.0)
         if embedding is not None:
-            ids = [
-                self._roster[index].speaker_id
-                for index in members
-                if self._roster[index].speaker_id
-            ]
-            vectors = self._store.match_vectors(ids, chunk.channel.value)
-            scores = sorted(
-                (
-                    (float(np.dot(embedding, vector.embedding)), vector)
-                    for vector in vectors
-                    if vector.embedding.shape == embedding.shape
-                ),
-                key=lambda item: item[0],
-                reverse=True,
-            )
-            if scores:
-                best_score, best = scores[0]
-                threshold = SOURCE_THRESHOLD if best.source_specific else GLOBAL_THRESHOLD
-                margin = best_score - scores[1][0] if len(scores) > 1 else 1.0
-                index = next(
-                    (
-                        item
-                        for item in members
-                        if self._roster[item].speaker_id == best.speaker_id
-                    ),
-                    None,
-                )
-                if index is not None:
-                    speaker = self._roster[index]
-                    if best_score >= threshold and margin >= MATCH_MARGIN:
-                        return AttributionDecision(
-                            speaker.name,
-                            index,
-                            speaker.speaker_id,
-                            "auto",
-                            best_score,
-                        )
-                    if best_score >= NEAREST_THRESHOLD and margin >= NEAREST_MARGIN:
-                        return AttributionDecision(
-                            speaker.name,
-                            index,
-                            speaker.speaker_id,
-                            "nearest",
-                            best_score,
-                        )
-
+            match = self._match(embedding, members, chunk.channel)
+            if match is not None:
+                return match
         return AttributionDecision("Unknown", None, None, "unknown", None)
+
+    def _decision(
+        self, index: int, source: AttributionSource, confidence: float
+    ) -> AttributionDecision:
+        speaker = self._roster[index]
+        return AttributionDecision(speaker.name, index, speaker.speaker_id, source, confidence)
+
+    def _match(
+        self, embedding: np.ndarray, members: list[int], channel: Channel
+    ) -> AttributionDecision | None:
+        """The best-scoring enrolled member: a confident ``auto`` match, or a
+        ``nearest`` guess when nobody clears the bar but one person is
+        clearly closest. None when it is a toss-up or nobody is close."""
+        ids = [
+            speaker_id
+            for index in members
+            if (speaker_id := self._roster[index].speaker_id) is not None
+        ]
+        vectors = self._store.match_vectors(ids, channel)
+        scored = ((cosine(embedding, vector.embedding), vector) for vector in vectors)
+        scores = sorted(
+            ((score, vector) for score, vector in scored if score is not None),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        if not scores:
+            return None
+        best_score, best = scores[0]
+        threshold = SOURCE_THRESHOLD if best.source_specific else GLOBAL_THRESHOLD
+        margin = best_score - scores[1][0] if len(scores) > 1 else 1.0
+        index = next(
+            (item for item in members if self._roster[item].speaker_id == best.speaker_id), None
+        )
+        if index is None:
+            return None
+        if best_score >= threshold and margin >= MATCH_MARGIN:
+            return self._decision(index, "auto", best_score)
+        if best_score >= NEAREST_THRESHOLD and margin >= NEAREST_MARGIN:
+            return self._decision(index, "nearest", best_score)
+        return None
 
     def add_manual_sample(
         self,
@@ -267,22 +259,21 @@ class SpeakerResolver:
         if quality < 1.0 - MAX_CLIPPED_RATIO:
             return ManualSampleResult(False, "clipped")
 
-        vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
-        norm = float(np.linalg.norm(vector))
-        if not np.isfinite(norm) or norm <= 0:
+        try:
+            vector = normalize(embedding)
+        except ValueError:
             return ManualSampleResult(False, "invalid_embedding")
-        vector = np.ascontiguousarray(vector / norm, dtype=np.float32)
 
         speaker = self._roster[speaker_index]
         if speaker.speaker_id:
             profile = self._store.profile(speaker.speaker_id)
             if profile.state == "ready":
-                own = self._store.profile_vector(
-                    speaker.speaker_id, chunk.channel.value
-                )
-                if own is None or own.embedding.shape != vector.shape:
+                own = self._store.profile_vector(speaker.speaker_id, chunk.channel)
+                if own is None:
                     return ManualSampleResult(False, "inconsistent")
-                own_score = float(np.dot(vector, own.embedding))
+                own_score = cosine(vector, own.embedding)
+                if own_score is None:
+                    return ManualSampleResult(False, "inconsistent")
                 threshold = SOURCE_THRESHOLD if own.source_specific else GLOBAL_THRESHOLD
                 if own_score < threshold:
                     return ManualSampleResult(False, "inconsistent")
@@ -291,31 +282,20 @@ class SpeakerResolver:
                     for index, item in enumerate(self._roster)
                     if index != speaker_index and item.speaker_id
                 ]
-                competitors = self._store.match_vectors(
-                    competitor_ids, chunk.channel.value
+                competitors = self._store.match_vectors(competitor_ids, chunk.channel)
+                competitor_scores = cosine_scores(
+                    vector, (item.embedding for item in competitors)
                 )
-                competitor_scores = [
-                    float(np.dot(vector, item.embedding))
-                    for item in competitors
-                    if item.embedding.shape == vector.shape
-                ]
                 if competitor_scores and own_score - max(competitor_scores) < MATCH_MARGIN:
                     return ManualSampleResult(False, "ambiguous_profile")
             profile = self._store.add_sample(
-                speaker.speaker_id,
-                vector,
-                chunk.channel.value,
-                seconds,
-                quality,
+                speaker.speaker_id, vector, chunk.channel, seconds, quality
             )
             return ManualSampleResult(True, profile=profile)
 
         self._temporary.setdefault(speaker_index, []).append(
             _TemporarySample(
-                np.array(vector, dtype=np.float32, copy=True),
-                chunk.channel.value,
-                seconds,
-                quality,
+                np.array(vector, dtype=np.float32, copy=True), chunk.channel, seconds, quality
             )
         )
         return ManualSampleResult(True)
@@ -335,14 +315,13 @@ class SpeakerResolver:
         if speaker.speaker_id:
             self._store.reset_profile(speaker.speaker_id)
 
-    def profile_status(self, index: int) -> tuple[str, float]:
+    def profile_status(self, index: int) -> tuple[ProfileState, float]:
         speaker = self._roster[index]
         if speaker.speaker_id:
             profile = self._store.profile(speaker.speaker_id)
             return profile.state, profile.enrollment_seconds
         seconds = sum(sample.speech_seconds for sample in self._temporary.get(index, ()))
-        state = "untrained" if seconds <= 0 else "ready" if seconds >= 5.0 else "learning"
-        return state, seconds
+        return profile_state(seconds), seconds
 
     def persist_guest(self, guest_index: int, speaker_id: str) -> SpeakerProfile:
         samples = self._temporary.pop(guest_index, [])

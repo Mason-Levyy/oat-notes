@@ -204,8 +204,8 @@ def test_embedding_and_transcription_run_in_parallel(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     saved = store.create_speaker("Alice")
     other = store.create_speaker("Bob")
-    store.add_sample(saved.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(other.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(saved.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(other.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     roster = [
         Speaker("Alice", speaker_id=saved.speaker_id),
         Speaker("Bob", speaker_id=other.speaker_id),
@@ -250,8 +250,8 @@ def test_rolling_speaker_tracking_first_identification_splits(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Alice", speaker_id=alice.speaker_id),
@@ -325,8 +325,8 @@ def test_rolling_speaker_tracking_confirmed_switch_splits_transcript(tmp_path):
     store = SpeakerStore(tmp_path / "speakers.db")
     alice = store.create_speaker("Alice")
     bob = store.create_speaker("Bob")
-    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), "mic", 5.0, 1.0)
-    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), "mic", 5.0, 1.0)
+    store.add_sample(alice.speaker_id, np.array([1.0, 0.0]), Channel.MIC, 5.0, 1.0)
+    store.add_sample(bob.speaker_id, np.array([0.0, 1.0]), Channel.MIC, 5.0, 1.0)
     resolver = SpeakerResolver(
         [
             Speaker("Alice", speaker_id=alice.speaker_id),
@@ -458,8 +458,8 @@ def test_manual_profile_learning_saves_one_three_second_source_sample(tmp_path):
     pipeline.finish()
 
     assert store.profile(alice.speaker_id).enrollment_seconds == 3.0
-    assert store.profile_vector(alice.speaker_id, "mic").source_specific is True
-    assert store.profile_vector(alice.speaker_id, "loopback").source_specific is False
+    assert store.profile_vector(alice.speaker_id, Channel.MIC).source_specific is True
+    assert store.profile_vector(alice.speaker_id, Channel.LOOPBACK).source_specific is False
     assert [event.phase for event in updates][-1] == "saved"
     assert [event.phase for event in updates].count("saved") == 1
 

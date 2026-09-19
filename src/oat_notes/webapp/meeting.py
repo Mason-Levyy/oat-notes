@@ -18,6 +18,7 @@ from .requests import (
     parse_int,
     parse_object,
     parse_optional_id,
+    parse_optional_int,
     parse_renames,
     parse_roster,
     parse_text,
@@ -206,7 +207,7 @@ def assign_line(state: AppState, body: Body) -> dict:
             state.sync_roster(session)
             state.publish_status()
         else:
-            index = parse_int(body, "index", optional=True)
+            index = parse_optional_int(body, "index")
             error = session.assign_line(line_id, index)
             if error:
                 raise conflict(error)
