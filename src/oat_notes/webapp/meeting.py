@@ -65,6 +65,7 @@ def _rescan_audio_devices(state: AppState) -> None:
 
 
 def start_session(state: AppState, body: Body) -> dict:
+    _rescan_audio_devices(state)
     with state.lock:
         if state.session is not None:
             raise conflict("already recording")
@@ -77,7 +78,6 @@ def start_session(state: AppState, body: Body) -> dict:
         state.lines.reset()
         state.last_saved = None
         state.awaiting_backfill = None
-        _rescan_audio_devices(state)
         options = SessionOptions(
             speakers=state.roster,
             meeting_name=state.meeting_name,
