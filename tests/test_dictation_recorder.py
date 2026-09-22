@@ -230,3 +230,23 @@ def test_long_speech_force_splits_so_work_starts_early():
     feed(recorder, [speech(windows_per_chunk * 3)])
     recorder.stop()
     assert transcriber.calls >= 3
+
+
+def test_reopening_the_audio_host_terminates_then_opens_a_fresh_one(monkeypatch):
+    import pyaudiowpatch
+
+    events = []
+
+    class FakeHost:
+        def __init__(self):
+            self.number = len(events)
+            events.append(f"open {self.number}")
+
+        def terminate(self):
+            events.append(f"terminate {self.number}")
+
+    monkeypatch.setattr(pyaudiowpatch, "PyAudio", FakeHost)
+    recorder = make_recorder()
+    recorder.prepare()
+    recorder.reopen_audio_host()
+    assert events == ["open 0", "terminate 0", "open 2"]

@@ -19,7 +19,11 @@ class FakeRecorder:
         self.speech_seconds = 5.0
         self.started = 0
         self.cancelled = 0
+        self.reopened = 0
         self.running = False
+
+    def reopen_audio_host(self):
+        self.reopened += 1
 
     def start(self):
         self.started += 1
@@ -463,3 +467,46 @@ def test_the_kept_text_can_then_be_replayed(injected, monkeypatch):
     assert injected == [("Hello world", {
         "hwnd": 999, "restore_clipboard": True
     })]
+
+
+def test_rescan_while_idle_reopens_the_audio_handle():
+    recorder = FakeRecorder()
+    controller, _ = make_controller(recorder)
+    assert controller.rescan_audio_devices() is True
+    assert recorder.reopened == 1
+
+
+def test_rescan_while_recording_leaves_the_microphone_alone(injected):
+    recorder = FakeRecorder()
+    controller, _ = make_controller(recorder)
+    arm(controller)
+    assert controller.rescan_audio_devices() is False
+    assert recorder.reopened == 0
+    assert recorder.running
+
+
+def test_rescan_before_the_model_loads_has_nothing_to_reopen():
+    controller, _ = make_controller()
+    controller._recorder = None
+    assert controller.rescan_audio_devices() is True
+
+
+def test_rescan_runs_on_the_worker_thread():
+    recorder = FakeRecorder()
+    controller, _ = make_controller(recorder)
+    controller.start()
+    try:
+        assert controller.rescan_audio_devices() is True
+    finally:
+        controller.stop()
+    assert recorder.reopened == 1
+
+
+def test_a_failed_rescan_reports_the_error_and_returns_false():
+    class BrokenHost(FakeRecorder):
+        def reopen_audio_host(self):
+            raise OSError("no audio host")
+
+    controller, phases = make_controller(BrokenHost())
+    assert controller.rescan_audio_devices() is False
+    assert names(phases) == ["error"]
