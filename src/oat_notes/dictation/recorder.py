@@ -78,6 +78,15 @@ class UtteranceRecorder:
 
             self._vad = SileroVad()
 
+    def reopen_audio_host(self) -> None:
+        """PortAudio enumerates devices only when its first handle opens, so a
+        handle held since launch pins every later one to the launch-time
+        device list. Closing and reopening it while idle rescans."""
+        if self._pa is not None:
+            self._pa.terminate()
+            self._pa = None
+        self.prepare()
+
     def close(self) -> None:
         self.cancel()
         if self._pa is not None:
