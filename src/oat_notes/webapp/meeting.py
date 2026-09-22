@@ -3,6 +3,7 @@ transcript lines and notes."""
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from ..attribution import Speaker
@@ -27,6 +28,8 @@ from .state import AppState, guests_with_lines
 
 if TYPE_CHECKING:
     from ..speaker_store import SpeakerStore
+
+log = logging.getLogger(__name__)
 
 
 def _library_name(store: SpeakerStore | None, speaker_id: str | None) -> str | None:
@@ -53,6 +56,14 @@ def _roster_from(state: AppState, body: Body) -> tuple[Speaker, ...]:
     return tuple(roster)
 
 
+def _rescan_audio_devices(state: AppState) -> None:
+    """The meeting's default speakers and microphone are whatever is plugged
+    in now, not whatever was plugged in when the app launched."""
+    if state.dictation is None or state.dictation.rescan_audio_devices():
+        return
+    log.warning("audio devices not rescanned: dictation is busy; using the list from launch")
+
+
 def start_session(state: AppState, body: Body) -> dict:
     with state.lock:
         if state.session is not None:
@@ -66,6 +77,7 @@ def start_session(state: AppState, body: Body) -> dict:
         state.lines.reset()
         state.last_saved = None
         state.awaiting_backfill = None
+        _rescan_audio_devices(state)
         options = SessionOptions(
             speakers=state.roster,
             meeting_name=state.meeting_name,
