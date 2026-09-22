@@ -44,8 +44,11 @@ _ARM: Final = "arm"
 _CANCEL: Final = "cancel"
 _RELEASE: Final = "release"
 _REPLAY: Final = "replay"
+_RESCAN: Final = "rescan"
 _SHUTDOWN: Final = "shutdown"
-_CommandKind = Literal["arm", "cancel", "release", "replay", "shutdown"]
+_CommandKind = Literal["arm", "cancel", "release", "replay", "rescan", "shutdown"]
+
+_RESCAN_WAIT_SECONDS = 1.0
 
 _LATCH_SPEECH_CEILING = 0.35
 HISTORY_LIMIT = 20
@@ -71,6 +74,8 @@ class _Command:
     hwnd: int = 0
     held_seconds: float = 0.0
     force_email: bool = False
+    done: threading.Event | None = None
+    rescanned: bool = False
 
 
 class DictationController:
@@ -209,6 +214,21 @@ class DictationController:
             self.unbind(self._listener)
             self.bind(self._listener)
 
+    def rescan_audio_devices(self) -> bool:
+        """Reopen dictation's audio handle so the next one opened anywhere in
+        the process sees devices connected since launch. False when that
+        could not happen: dictation was recording, or the worker was busy."""
+        command = _Command(_RESCAN, done=threading.Event())
+        if self._worker is None:
+            self._dispatch(command)
+            return command.rescanned
+        try:
+            self._commands.put_nowait(command)
+        except queue.Full:
+            log.warning("audio device rescan dropped: worker queue is full")
+            return False
+        return command.done.wait(_RESCAN_WAIT_SECONDS) and command.rescanned
+
     def _cancel_if_active(self) -> None:
         if self._recording:
             self._post(_CANCEL)
@@ -257,6 +277,19 @@ class DictationController:
             self._on_release(command)
         elif command.kind == _REPLAY:
             self._on_replay(command)
+        elif command.kind == _RESCAN:
+            self._on_rescan(command)
+
+    def _on_rescan(self, command: _Command) -> None:
+        try:
+            if self._recorder is None:
+                command.rescanned = True
+            elif not self._recording:
+                self._recorder.reopen_audio_host()
+                command.rescanned = True
+        finally:
+            if command.done is not None:
+                command.done.set()
 
     def _on_replay(self, command: _Command) -> None:
         """Re-insert the last dictation wherever the cursor is now, which is
