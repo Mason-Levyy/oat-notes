@@ -433,10 +433,16 @@ class FakeDictation:
         self.phase = "idle"
         self.last_error = None
         self.rebinds = []
+        self.rescans = 0
+        self.rescan_succeeds = True
 
     def rebind(self, options):
         self.options = options
         self.rebinds.append(options)
+
+    def rescan_audio_devices(self):
+        self.rescans += 1
+        return self.rescan_succeeds
 
 
 def dictation_state(**kwargs):
@@ -465,6 +471,36 @@ def test_partial_update_keeps_the_other_card_intact():
     settings_api.update_settings(state, {"dictation_spoken_punctuation": True})
     assert state.settings.hotkey_modifiers == ("alt", "shift")
     assert state.settings.dictation_spoken_punctuation is True
+
+
+def start_meeting_with_fake_session(state, monkeypatch):
+    rescans_seen_by_session = []
+
+    class StartingSession(FakeSession):
+        def __init__(self, config, options, transcriber, events):
+            super().__init__()
+            rescans_seen_by_session.append(state.dictation.rescans)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(meeting, "Session", StartingSession)
+    state.transcriber = object()
+    meeting.start_session(state, {})
+    return rescans_seen_by_session
+
+
+def test_starting_a_meeting_rescans_audio_devices_first(monkeypatch):
+    state = dictation_state()
+    assert start_meeting_with_fake_session(state, monkeypatch) == [1]
+
+
+def test_a_busy_dictation_does_not_block_the_meeting(monkeypatch, caplog):
+    state = dictation_state()
+    state.dictation.rescan_succeeds = False
+    assert start_meeting_with_fake_session(state, monkeypatch) == [1]
+    assert state.session is not None
+    assert "not rescanned" in caplog.text
 
 
 def test_dictation_settings_may_change_during_a_meeting():

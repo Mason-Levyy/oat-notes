@@ -1,7 +1,11 @@
-# oat-notes
+<h1 align="center">
+  <img src="assets/wordmark.svg" alt="oat-notes" width="640">
+</h1>
 
-[![ci](https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml/badge.svg)](https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml"><img src="https://github.com/Mason-Levyy/oat-notes/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="license: MIT"></a>
+</p>
 
 Live meeting transcription and system-wide dictation for Windows, entirely on-device. Captures audio via WASAPI, chunks it with Silero VAD at natural pauses, and transcribes with faster-whisper — all local, no cloud.
 
