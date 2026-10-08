@@ -43,6 +43,30 @@ def test_release_modifiers_sends_nothing_when_already_clear(monkeypatch):
 
 
 @windows_only
+@pytest.mark.parametrize("windows_key", [inject.VK_LWIN, inject.VK_RWIN])
+def test_forced_windows_release_is_masked_in_the_same_batch(monkeypatch, windows_key):
+    batches = []
+    monkeypatch.setattr(inject, "held_modifiers", lambda: [inject.VK_CONTROL, windows_key])
+    monkeypatch.setattr(inject, "_send", batches.append)
+    inject.release_modifiers(timeout=0)
+    assert len(batches) == 1
+    assert [(event.ki.wVk, bool(event.ki.dwFlags & 2)) for event in batches[0]] == [
+        (inject.VK_NONAME, False), (inject.VK_NONAME, True),
+        (inject.VK_CONTROL, True), (windows_key, True),
+    ]
+
+
+@windows_only
+def test_masked_windows_release_is_tagged_for_one_hotkey_callback(monkeypatch):
+    sent = []
+    monkeypatch.setattr(inject, "_send", sent.extend)
+    inject.release_windows_key(inject.VK_LWIN)
+    assert [event.ki.dwExtraInfo for event in sent] == [
+        inject.INPUT_TAG, inject.INPUT_TAG, inject.WINDOWS_RELEASE_TAG
+    ]
+
+
+@windows_only
 def test_paste_releases_modifiers_before_sending_ctrl_v(monkeypatch):
     order = []
     monkeypatch.setattr(inject, "read_clipboard_text", lambda: None)
@@ -110,6 +134,7 @@ def test_non_text_clipboard_is_not_clobbered_back(monkeypatch):
 @windows_only
 def test_inject_restores_focus_first(monkeypatch):
     order = []
+    monkeypatch.setattr(inject, "release_modifiers", lambda: order.append("release"))
 
     def restore(hwnd):
         order.append(("focus", hwnd))
@@ -118,13 +143,14 @@ def test_inject_restores_focus_first(monkeypatch):
     monkeypatch.setattr(inject, "restore_foreground", restore)
     monkeypatch.setattr(inject, "paste_text", lambda text, **k: order.append("paste"))
     inject.inject("hello", hwnd=1234)
-    assert order == [("focus", 1234), "paste"]
+    assert order == ["release", ("focus", 1234), "paste"]
 
 
 @windows_only
 def test_inject_refuses_when_focus_cannot_be_restored(monkeypatch):
     """Better to insert nothing than to type a dictation into Windows Search."""
     monkeypatch.setattr(inject, "restore_foreground", lambda hwnd: False)
+    monkeypatch.setattr(inject, "release_modifiers", lambda: None)
     monkeypatch.setattr(inject, "paste_text", _fail)
     with pytest.raises(inject.InjectionError, match="took focus"):
         inject.inject("hello", hwnd=1234)
