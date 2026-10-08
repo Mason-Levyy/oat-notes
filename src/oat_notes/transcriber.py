@@ -122,7 +122,7 @@ class OpenVinoTranscriber(Transcriber):
     ) -> TranscriptSegment:
         with self._lock:
             result = self._pipeline.generate(
-                chunk.samples, **_openvino_hint_kwargs(hints)
+                chunk.samples, **_openvino_hint_kwargs(hints, self.device)
             )
         text = collapse_repeated_runs(
             " ".join(piece.strip() for piece in result.texts).strip()
@@ -132,8 +132,18 @@ class OpenVinoTranscriber(Transcriber):
         )
 
 
-def _openvino_hint_kwargs(hints: TranscriptionHints) -> dict[str, str]:
-    """WhisperPipeline rejects ``None`` for these, so only pass what is set."""
+def _openvino_hint_kwargs(
+    hints: TranscriptionHints, device: str = "CPU"
+) -> dict[str, str]:
+    """Pass only set hints on devices that support them.
+
+    OpenVINO's static NPU Whisper pipeline rejects both initial_prompt and
+    hotwords. Dictation adds a prompt after its first chunk, so passing it
+    there loses every subsequent chunk. CPU/GPU (including a load-time CPU
+    fallback) can still use hints; vocabulary replacements also run later.
+    """
+    if device.upper().split(".", maxsplit=1)[0] == "NPU":
+        return {}
     kwargs = {}
     if hints.prompt:
         kwargs["initial_prompt"] = hints.prompt

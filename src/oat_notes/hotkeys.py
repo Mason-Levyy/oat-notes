@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import inject
 from .inject import VK_NONAME
 from .log import error_kind
 from .settings import MODIFIER_ORDER as MODIFIERS
@@ -31,6 +32,15 @@ _NUMPAD_ONE_VK = 97
 _NUMPAD_NINE_VK = 105
 _VK_OEM_4_LEFT_BRACKET = 219
 _VK_OEM_6_RIGHT_BRACKET = 221
+_PRESS_MESSAGES = (0x0100, 0x0104)
+_RELEASE_MESSAGES = (0x0101, 0x0105)
+_WINDOWS_KEYS = (inject.VK_LWIN, inject.VK_RWIN)
+_MODIFIER_VKS = {
+    0x10: "shift", 0xA0: "shift", 0xA1: "shift",
+    0x11: "ctrl", 0xA2: "ctrl", 0xA3: "ctrl",
+    0x12: "alt", 0xA4: "alt", 0xA5: "alt",
+    inject.VK_LWIN: "win", inject.VK_RWIN: "win",
+}
 
 
 @dataclass(frozen=True)
@@ -78,6 +88,8 @@ class HotkeyListener:
     ) -> None:
         self._listener = None
         self._held: set[str] = set()
+        self._physical_modifiers: set[int] = set()
+        self._consumed_windows_keys: set[int] = set()
         self._bindings: dict[str, _Binding] = {}
         self._lock = threading.Lock()
         if on_switch is not None:
@@ -93,7 +105,8 @@ class HotkeyListener:
         from pynput import keyboard
 
         self._listener = keyboard.Listener(
-            on_press=self._handle_press, on_release=self._handle_release
+            on_press=self._handle_press, on_release=self._handle_release,
+            win32_event_filter=self._filter_windows_event,
         )
         self._listener.daemon = True
         self._listener.start()
@@ -103,6 +116,8 @@ class HotkeyListener:
             self._listener.stop()
             self._listener = None
         self._held.clear()
+        self._physical_modifiers.clear()
+        self._consumed_windows_keys.clear()
 
     def bind(
         self,
@@ -141,6 +156,51 @@ class HotkeyListener:
         dispatching, so dispatch iterates a copy."""
         with self._lock:
             return tuple(self._bindings.values())
+
+    def _filter_windows_event(self, message, data) -> bool:
+        """Mask a dictation's Win keyup before Windows can open Start.
+
+        Raw modifier state is tracked here because pynput posts the ordinary
+        callbacks after the hook returns. Even a quick tap must be recognised
+        before its release reaches Windows. Our other injected input passes
+        to Windows without arming or cancelling physical hotkey chords.
+        """
+        if data.dwExtraInfo == inject.INPUT_TAG:
+            return False
+        if data.dwExtraInfo == inject.WINDOWS_RELEASE_TAG:
+            return True
+        vk = data.vkCode
+        if message in _PRESS_MESSAGES:
+            if vk == VK_NONAME:
+                return True
+            if vk not in _MODIFIER_VKS:
+                self._consumed_windows_keys.clear()
+                return True
+            self._physical_modifiers.add(vk)
+            held = {_MODIFIER_VKS[key] for key in self._physical_modifiers}
+            if any(
+                binding.chord.is_modifier_only
+                and "win" in binding.chord.modifiers
+                and held == binding.chord.modifiers
+                for binding in self._snapshot()
+            ):
+                self._consumed_windows_keys.update(
+                    self._physical_modifiers.intersection(_WINDOWS_KEYS)
+                )
+        elif message in _RELEASE_MESSAGES:
+            self._physical_modifiers.discard(vk)
+            if vk in self._consumed_windows_keys:
+                self._consumed_windows_keys.discard(vk)
+                listener = self._listener
+                if listener is None:
+                    return True
+                try:
+                    inject.release_windows_key(vk)
+                except Exception as error:
+                    log.warning("could not mask the Windows key release: %s", error_kind(error))
+                    return True
+                listener.suppress_event()
+        return True
 
     def _handle_press(self, key) -> None:
         if getattr(key, "vk", None) == VK_NONAME:
@@ -181,30 +241,7 @@ class HotkeyListener:
                 continue
             binding.armed_at = time.perf_counter()
             binding.cancelled = False
-            if "win" in binding.chord.modifiers:
-                self._defuse_start_menu()
             self._safely(binding.on_press)
-
-    def _defuse_start_menu(self) -> None:
-        """Hand the keystroke to a worker rather than sending it here.
-
-        SendInput called from inside a low-level keyboard hook is unreliable:
-        the hook runs under a system timeout and injected events can be
-        dropped or delivered re-entrantly, so the Start menu was only being
-        defused about half the time.
-        """
-        threading.Thread(
-            target=self._send_defuse, name="start-menu-defuse", daemon=True
-        ).start()
-
-    @staticmethod
-    def _send_defuse() -> None:
-        try:
-            from .inject import defuse_start_menu
-
-            defuse_start_menu()
-        except Exception as error:
-            log.warning("could not defuse the Start menu: %s", error_kind(error))
 
     def _cancel_armed(self) -> None:
         for binding in self._snapshot():
