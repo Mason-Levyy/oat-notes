@@ -26,6 +26,8 @@ VK_LWIN = 0x5B
 VK_RWIN = 0x5C
 VK_V = 0x56
 VK_NONAME = 0xFC
+INPUT_TAG = 0x4F41544E
+WINDOWS_RELEASE_TAG = 0x4F415452
 
 _CHORD_MODIFIER_KEYS = (VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN)
 
@@ -65,7 +67,7 @@ class _KeyboardInput(ctypes.Structure):
         ("wScan", wintypes.WORD),
         ("dwFlags", wintypes.DWORD),
         ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ctypes.c_size_t),
     ]
 
 
@@ -185,10 +187,10 @@ def restore_foreground(hwnd: int) -> bool:
     return foreground_window() == hwnd
 
 
-def _key_input(vk: int, up: bool = False) -> INPUT:
+def _key_input(vk: int, up: bool = False, tag: int = INPUT_TAG) -> INPUT:
     event = INPUT(type=_INPUT_KEYBOARD)
     event.ki = _KeyboardInput(
-        wVk=vk, wScan=0, dwFlags=_KEYEVENTF_KEYUP if up else 0, time=0, dwExtraInfo=None
+        wVk=vk, wScan=0, dwFlags=_KEYEVENTF_KEYUP if up else 0, time=0, dwExtraInfo=tag
     )
     return event
 
@@ -223,22 +225,27 @@ def release_modifiers(timeout: float = _MODIFIER_WAIT_SECONDS) -> None:
         time.sleep(_MODIFIER_POLL_SECONDS)
     stuck = held_modifiers()
     if stuck:
-        _send([_key_input(vk, up=True) for vk in stuck])
+        events = [_key_input(vk, up=True) for vk in stuck]
+        if VK_LWIN in stuck or VK_RWIN in stuck:
+            events = _menu_mask_inputs() + events
+        _send(events)
 
 
-def defuse_start_menu() -> None:
-    """Stop a held Windows key from opening Start when it is released.
+def _menu_mask_inputs() -> list[INPUT]:
+    return [_key_input(VK_NONAME), _key_input(VK_NONAME, up=True)]
 
-    Windows arms "open Start on keyup" when the Windows key goes down on its
-    own, and a modifier pressed afterwards does not disarm it — so Win-then-
-    Ctrl opens Start while Ctrl-then-Win does not. Pressing any key during
-    the hold does disarm it, so one unassigned virtual key is enough.
 
-    Suppressing the keyup instead would leave Windows believing the key is
-    still down, turning every later keystroke into a Win chord.
+def release_windows_key(vk: int) -> None:
+    """Replace a consumed Win release with a mask and keyup in one batch.
+
+    SendInput preserves the order of this batch. The hook suppresses the
+    original release only after the replacement was successfully queued;
+    the tagged replacement still reaches its ordinary release callback.
     """
     _require_windows()
-    _send([_key_input(VK_NONAME), _key_input(VK_NONAME, up=True)])
+    if vk not in (VK_LWIN, VK_RWIN):
+        raise ValueError("expected a Windows virtual key")
+    _send([*_menu_mask_inputs(), _key_input(vk, up=True, tag=WINDOWS_RELEASE_TAG)])
 
 
 def _open_clipboard() -> None:
@@ -375,6 +382,7 @@ def inject(
     _require_windows()
     if not text:
         return
+    release_modifiers()
     if hwnd and not restore_foreground(hwnd):
         raise InjectionError(
             "another window took focus — text kept, use the replay shortcut"

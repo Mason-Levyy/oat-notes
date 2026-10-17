@@ -1,9 +1,12 @@
+import threading
+import types
+
 import numpy as np
 import pytest
 
 from oat_notes.config import Config
 from oat_notes.dictation.recorder import UtteranceRecorder
-from oat_notes.transcriber import NO_HINTS, Transcriber
+from oat_notes.transcriber import NO_HINTS, OpenVinoTranscriber, Transcriber
 from oat_notes.types import Channel, TranscriptSegment
 
 WINDOW = 512
@@ -84,6 +87,48 @@ def test_utterance_joins_chunks_in_order():
     recorder.start_worker()
     feed(recorder, [speech(6), silence(6), speech(6), silence(6)])
     assert recorder.stop() == "hello there second part"
+
+
+@pytest.mark.parametrize("split_on_silence", [False, True])
+@pytest.mark.parametrize("hotwords", [None, "Oat Notes"])
+def test_npu_dictation_keeps_every_chunk_and_tail(split_on_silence, hotwords):
+    class NpuPipeline:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, samples, **options):
+            if "initial_prompt" in options or "hotwords" in options:
+                raise RuntimeError("transcription hints are not supported on NPU device")
+            texts = [
+                "First sentence has the background.",
+                "Second sentence adds the request.",
+                "Final sentence gives the deadline.",
+            ]
+            text = texts[self.calls]
+            self.calls += 1
+            return types.SimpleNamespace(texts=[text])
+
+    transcriber = OpenVinoTranscriber.__new__(OpenVinoTranscriber)
+    transcriber._lock = threading.Lock()
+    transcriber.device = "NPU"
+    transcriber._pipeline = NpuPipeline()
+    recorder = make_recorder(transcriber, hotwords=hotwords)
+    recorder.start_worker()
+    if split_on_silence:
+        blocks = [speech(6), silence(45), speech(6), silence(45), speech(6)]
+        expected = (
+            "First sentence has the background. Second sentence adds the request. "
+            "Final sentence gives the deadline."
+        )
+    else:
+        blocks = [speech(40)]
+        expected = (
+            "First sentence has the background second sentence adds the request "
+            "final sentence gives the deadline."
+        )
+    feed(recorder, blocks)
+    assert recorder.stop() == expected
+    assert transcriber._pipeline.calls == 3
 
 
 def test_a_breath_between_chunks_does_not_end_the_sentence():
