@@ -1,7 +1,9 @@
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from oat_notes import inject
 from oat_notes.hotkeys import DIGIT, Chord, HotkeyListener
 
 
@@ -284,46 +286,8 @@ def test_chord_rejects_empty():
         Chord.of(())
 
 
-def make_defused_listener(modifiers=("ctrl", "win")):
-    defused = []
-    listener, events = make_dictation_listener(modifiers)
-    listener._defuse_start_menu = lambda: defused.append(True)
-    return listener, events, defused
-
-
-def test_win_chord_defuses_the_start_menu_on_arm():
-    listener, _events, defused = make_defused_listener()
-    listener._handle_press(CTRL)
-    listener._handle_press(WIN)
-    assert defused == [True]
-
-
-def test_the_wrong_press_order_still_defuses():
-    listener, events, defused = make_defused_listener()
-    listener._handle_press(WIN)
-    assert defused == []
-    listener._handle_press(CTRL)
-    assert defused == [True]
-    listener._handle_release(WIN)
-    assert phases(events) == ["press", "release"]
-
-
-def test_a_chord_without_win_does_not_defuse():
-    listener, _events, defused = make_defused_listener(("ctrl", "alt"))
-    listener._handle_press(CTRL)
-    listener._handle_press(ALT)
-    assert defused == []
-
-
-def test_the_windows_key_alone_is_left_alone():
-    listener, _events, defused = make_defused_listener()
-    listener._handle_press(WIN)
-    listener._handle_release(WIN)
-    assert defused == []
-
-
 def test_the_injected_key_does_not_cancel_the_chord():
-    listener, events, _defused = make_defused_listener()
+    listener, events = make_dictation_listener()
     listener._handle_press(CTRL)
     listener._handle_press(WIN)
     listener._handle_press(FakeKey(vk=0xFC))
@@ -332,11 +296,146 @@ def test_the_injected_key_does_not_cancel_the_chord():
 
 
 def test_a_real_key_still_cancels_the_chord():
-    listener, events, _defused = make_defused_listener()
+    listener, events = make_dictation_listener()
     listener._handle_press(CTRL)
     listener._handle_press(WIN)
     listener._handle_press(FakeKey(char="d"))
     assert phases(events) == ["press", "cancel"]
+
+
+class SuppressedEvent(Exception):
+    pass
+
+
+class WindowsHookHarness:
+    """Keep hook filtering separate from pynput's delayed key callbacks."""
+
+    def __init__(self, monkeypatch, modifiers=("ctrl", "win")):
+        self.listener, self.events = make_dictation_listener(modifiers)
+        self.listener._listener = SimpleNamespace(suppress_event=self.suppress_event)
+        self.callbacks = []
+        self.queued = []
+        self.delivered = []
+        monkeypatch.setattr(inject, "_send", self.queued.extend)
+
+    @staticmethod
+    def suppress_event():
+        raise SuppressedEvent
+
+    def event(self, vk, up=False, tag=0):
+        data = SimpleNamespace(vkCode=vk, dwExtraInfo=tag)
+        try:
+            notify = self.listener._filter_windows_event(0x0101 if up else 0x0100, data)
+        except SuppressedEvent:
+            return False
+        self.delivered.append((vk, up))
+        if notify:
+            self.callbacks.append((vk, up))
+        return True
+
+    def drain(self):
+        for event in self.queued:
+            self.event(event.ki.wVk, bool(event.ki.dwFlags & 2), event.ki.dwExtraInfo)
+        self.queued.clear()
+        names = {0xA2: "ctrl_l", 0xA0: "shift_l", 0xA4: "alt_l",
+                 inject.VK_LWIN: "cmd_l", inject.VK_RWIN: "cmd_r"}
+        for vk, up in self.callbacks:
+            key = FakeKey(vk=vk, name=names.get(vk, ""))
+            callback = self.listener._handle_release if up else self.listener._handle_press
+            callback(key)
+        self.callbacks.clear()
+
+
+@pytest.mark.parametrize("windows_key", [inject.VK_LWIN, inject.VK_RWIN])
+@pytest.mark.parametrize("windows_first", [False, True])
+@pytest.mark.parametrize("release_windows_first", [False, True])
+def test_win_dictation_masks_release_in_every_order(
+    monkeypatch, windows_key, windows_first, release_windows_first
+):
+    harness = WindowsHookHarness(monkeypatch)
+    pressed = [windows_key, 0xA2] if windows_first else [0xA2, windows_key]
+    released = [windows_key, 0xA2] if release_windows_first else [0xA2, windows_key]
+    for vk in pressed:
+        assert harness.event(vk)
+    for vk in released:
+        assert harness.event(vk, up=True) is (vk != windows_key)
+    harness.drain()
+    assert harness.delivered[-3:] == [
+        (inject.VK_NONAME, False), (inject.VK_NONAME, True), (windows_key, True)
+    ]
+    assert phases(harness.events) == ["press", "release"]
+    assert harness.listener._held == set()
+
+
+def test_bare_windows_key_and_native_shortcuts_are_delivered(monkeypatch):
+    harness = WindowsHookHarness(monkeypatch)
+    assert harness.event(inject.VK_LWIN)
+    assert harness.event(inject.VK_LWIN, up=True)
+    harness.drain()
+    assert harness.events == []
+    assert harness.queued == []
+    harness.event(0xA2)
+    harness.event(inject.VK_LWIN)
+    harness.event(ord("D"))
+    assert harness.event(inject.VK_LWIN, up=True)
+    harness.event(0xA2, up=True)
+    harness.drain()
+    assert phases(harness.events) == ["press", "cancel"]
+    assert not any(vk == inject.VK_NONAME for vk, _ in harness.delivered)
+
+
+def test_our_paste_events_do_not_cancel_or_arm_dictation(monkeypatch):
+    harness = WindowsHookHarness(monkeypatch)
+    harness.event(0xA2)
+    harness.event(inject.VK_LWIN)
+    harness.drain()
+    harness.event(inject.VK_CONTROL, tag=inject.INPUT_TAG)
+    harness.event(inject.VK_V, tag=inject.INPUT_TAG)
+    harness.event(inject.VK_CONTROL, up=True, tag=inject.INPUT_TAG)
+    harness.drain()
+    assert phases(harness.events) == ["press"]
+    assert harness.listener._physical_modifiers == {0xA2, inject.VK_LWIN}
+
+
+def test_mask_failure_allows_physical_release_to_avoid_a_stuck_windows_key(monkeypatch):
+    harness = WindowsHookHarness(monkeypatch)
+    harness.event(0xA2)
+    harness.event(inject.VK_LWIN)
+
+    def fail(_vk):
+        raise inject.InjectionError("input rejected")
+
+    monkeypatch.setattr(inject, "release_windows_key", fail)
+    assert harness.event(inject.VK_LWIN, up=True)
+    harness.event(0xA2, up=True)
+    harness.drain()
+    assert phases(harness.events) == ["press", "release"]
+    assert harness.listener._physical_modifiers == set()
+
+
+def test_email_chord_masks_release_and_resets_between_cycles(monkeypatch):
+    harness = WindowsHookHarness(monkeypatch, modifiers=("ctrl", "shift", "win"))
+    for _ in range(2):
+        for vk in (inject.VK_RWIN, 0xA0, 0xA2):
+            harness.event(vk)
+        harness.drain()
+        for vk in (0xA2, 0xA0):
+            harness.event(vk, up=True)
+        assert not harness.event(inject.VK_RWIN, up=True)
+        harness.drain()
+    assert phases(harness.events) == ["press", "release", "press", "release"]
+    assert harness.listener._consumed_windows_keys == set()
+
+
+def test_non_windows_chord_passes_without_masking(monkeypatch):
+    harness = WindowsHookHarness(monkeypatch, modifiers=("ctrl", "alt"))
+    for vk in (0xA2, 0xA4):
+        assert harness.event(vk)
+    for vk in (0xA4, 0xA2):
+        assert harness.event(vk, up=True)
+    harness.drain()
+    assert phases(harness.events) == ["press", "release"]
+    assert not any(vk == inject.VK_NONAME for vk, _ in harness.delivered)
 
 
 def make_letter_listener(modifiers=("ctrl", "alt"), letter="z"):
